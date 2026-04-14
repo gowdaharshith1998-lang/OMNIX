@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.db
+src/web/graph_data.json
+.DS_Store
+node_modules/
