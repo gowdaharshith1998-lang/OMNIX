@@ -179,12 +179,24 @@ Respond with JSON only. No markdown backticks."""
             str(result.get("provider", "unknown")),
         )
 
+        trace_edges = connections.get("trace", []) if isinstance(connections, dict) else []
+        result["trace"] = {
+            "nodes_examined": list(files_read),
+            "edges_followed": [
+                {"from": e["from"], "to": e["to"], "type": e["type"]}
+                for e in trace_edges[:30]
+            ],
+            "directory": dir_path,
+        }
+
         return result
 
     def security_scan(self, dir_path: str | None = None) -> dict[str, object]:
         """Run security agent on a directory or full codebase."""
         target = dir_path or "."
         diagnostics = self.tools.get_diagnostics(target)
+        trace_root = self._trace_root_for_directory(target)
+        connections = self.tools.trace_connections(trace_root, depth=1)
 
         graph_results = self.tools.search_graph(target, limit=20)
         file_contents: list[str] = []
@@ -257,6 +269,16 @@ Find ALL security vulnerabilities. Be thorough. Respond with JSON only."""
                 "raw": True,
             }
 
+        trace_edges = connections.get("trace", []) if isinstance(connections, dict) else []
+        result["trace"] = {
+            "nodes_examined": list(files_read),
+            "edges_followed": [
+                {"from": e["from"], "to": e["to"], "type": e["type"]}
+                for e in trace_edges[:30]
+            ],
+            "directory": target,
+        }
+
         return result
 
     def explain_architecture(self) -> dict[str, object]:
@@ -317,6 +339,8 @@ Provide a clear, actionable architectural overview. Respond with JSON only."""
     ) -> dict[str, object]:
         """Free-form question about the codebase."""
         context = ""
+        connections: dict[str, object] = {"trace": []}
+        effective_dir = dir_path or ""
         if dir_path:
             diagnostics = self.tools.get_diagnostics(dir_path)
             trace_root = self._trace_root_for_directory(dir_path)
@@ -343,7 +367,16 @@ If you're unsure, say so. If you need more context, say what you'd need."""
         if "error" in response:
             return {"error": response["error"]}
 
+        trace_edges = connections.get("trace", []) if isinstance(connections, dict) else []
         return {
             "answer": response.get("content", ""),
             "provider": response.get("provider", "unknown"),
+            "trace": {
+                "nodes_examined": [],
+                "edges_followed": [
+                    {"from": e["from"], "to": e["to"], "type": e["type"]}
+                    for e in trace_edges[:30]
+                ],
+                "directory": effective_dir,
+            },
         }
