@@ -33,6 +33,8 @@ def main() -> None:
 
     from src.parser.python_parser import parse_python_files
     from src.parser.typescript_parser import parse_typescript_files
+    from src.parser.dark_matter_parser import parse_dark_matter
+    from src.parser.entanglement_parser import parse_entanglements
     from src.graph.store import GraphStore
     from src.graph.exporter import export_json
 
@@ -49,7 +51,12 @@ def main() -> None:
     py_count = parse_python_files(target, store)
     ts_count = parse_typescript_files(target, store)
 
+    dm_count = parse_dark_matter(target, store)
+    ent_count = parse_entanglements(target, store)
+
     print(f"📊 Parsed {py_count} Python + {ts_count} TypeScript files")
+    print(f"🌀 {dm_count} dark matter nodes detected")
+    print(f"⚡ {ent_count} entangled pairs detected")
     print(f"🧬 {store.node_count()} nodes, {store.edge_count()} edges")
 
     export_json(store, graph_json)

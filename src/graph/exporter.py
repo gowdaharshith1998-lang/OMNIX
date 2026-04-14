@@ -13,6 +13,7 @@ _TYPE_COLORS: dict[str, str] = {
     "class": "#a855f7",
     "method": "#22d3ee",
     "import": "#f97316",
+    "dark_matter": "#8b5cf6",
 }
 
 
@@ -49,6 +50,8 @@ def export_json(store: GraphStore, out_path: str) -> dict[str, Any]:
         "classes": 0,
         "methods": 0,
         "imports": 0,
+        "dark_matter": 0,
+        "entangled": 0,
         "edges": len(links_out),
     }
     for n in nodes_out:
@@ -63,6 +66,11 @@ def export_json(store: GraphStore, out_path: str) -> dict[str, Any]:
             counts["methods"] += 1
         elif t == "import":
             counts["imports"] += 1
+        elif t == "dark_matter":
+            counts["dark_matter"] += 1
+    for e in links_out:
+        if e.get("type") == "ENTANGLED":
+            counts["entangled"] += 1
 
     payload = {"nodes": nodes_out, "links": links_out, "stats": counts}
     with open(out_path, "w", encoding="utf-8") as f:

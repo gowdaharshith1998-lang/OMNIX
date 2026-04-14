@@ -98,18 +98,19 @@ class GraphStore:
         target_id: str,
         relationship: str,
         metadata: dict[str, Any] | None = None,
-    ) -> None:
-        meta_json = json.dumps(metadata) if metadata else None
+    ) -> bool:
+        meta_json = json.dumps(metadata, sort_keys=True) if metadata else None
         cur = self._conn.execute(
             """
             SELECT 1 FROM edges
             WHERE source_id = ? AND target_id = ? AND relationship = ?
+              AND IFNULL(metadata, '') = IFNULL(?, '')
             LIMIT 1
             """,
-            (source_id, target_id, relationship),
+            (source_id, target_id, relationship, meta_json),
         )
         if cur.fetchone():
-            return
+            return False
         self._conn.execute(
             """
             INSERT INTO edges (source_id, target_id, relationship, metadata)
@@ -117,6 +118,7 @@ class GraphStore:
             """,
             (source_id, target_id, relationship, meta_json),
         )
+        return True
 
     def get_all_nodes(self) -> list[NodeRow]:
         rows = self._conn.execute("SELECT * FROM nodes").fetchall()

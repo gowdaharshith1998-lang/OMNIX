@@ -336,6 +336,8 @@
       <div class="stat-row"><span>Functions</span><span class="stat-val" id="stat-functions">0</span></div>
       <div class="stat-row"><span>Classes</span><span class="stat-val" id="stat-classes">0</span></div>
       <div class="stat-row"><span>Edges</span><span class="stat-val" id="stat-edges">0</span></div>
+      <div class="stat-row"><span>Dark Matter</span><span class="stat-val" id="stat-dark" style="color:#8b5cf6">0</span></div>
+      <div class="stat-row"><span>Entangled</span><span class="stat-val" id="stat-entangled" style="color:#f59e0b">0</span></div>
     </div>
 
     <div class="hud glass" id="breadcrumb">
@@ -352,6 +354,7 @@
     <div class="hud glass" id="bottom-bar">
       <span id="omnix-version">OMNIX V0.1</span>
       <button type="button" id="btn-fullscreen">Fullscreen</button>
+      <button type="button" id="btn-dark-matter" style="opacity:0.5;border-color:rgba(99,102,241,0.2)">🌀 Dark Matter</button>
       <button type="button" id="btn-export">Export JSON</button>
       <span id="fps-counter">— FPS</span>
     </div>
@@ -396,6 +399,9 @@
   const MAX_PLANET_SYMBOLS = 30;
   const MAX_POOL_NODES = 200;
   const MAX_POOL_EDGES = 500;
+  const MAX_DARK_MATTER_DRAW = 50;
+  const MAX_DARK_FORCE_DRAW = 120;
+  const MAX_ENTANGLED_DRAW = 100;
   const GALAXY_LABEL_POOL_SIZE = 30;
   const ZOOM_MIN = 0.3;
   const ZOOM_MAX = 3.0;
@@ -775,6 +781,9 @@
   let bgGraphics = null;
   let starGraphics = null;
   let gridGraphics = null;
+  let darkMatterGfx = null;
+  let entanglementGfx = null;
+  let darkMatterVisible = false;
 
   let model = null;
   let viewLevel = 'galaxy';
@@ -1191,6 +1200,116 @@
       labelTop20Set = null;
     }
     return labelTop20Set;
+  }
+
+  function graphIdToFilePath(gid) {
+    if (!gid || typeof gid !== 'string') return '';
+    if (gid.startsWith('dark:')) return '';
+    const ix = gid.indexOf('::');
+    return ix >= 0 ? gid.slice(0, ix) : gid;
+  }
+
+  function findSimDirForGraphNode(gid) {
+    const fp = graphIdToFilePath(gid);
+    if (!fp) return null;
+    const d = dirname(fp);
+    if (d === undefined || d === null || d === '') return null;
+    return simNodes.find(sn => sn.kind === 'directory' && sn.dirId === d) || null;
+  }
+
+  function drawDarkMatterOverlay() {
+    if (!app || !model || !darkMatterGfx) return;
+    darkMatterGfx.clear();
+    if (!darkMatterVisible || viewLevel !== 'galaxy' || !simNodes.length) return;
+
+    const raw = model.raw;
+    const darkNodes = raw.nodes.filter(n => n.type === 'dark_matter').slice(0, MAX_DARK_MATTER_DRAW);
+    const darkEdges = raw.links.filter(l => l.type === 'DARK_FORCE').slice(0, MAX_DARK_FORCE_DRAW);
+    const nebulaColor = 0x8b5cf6;
+    const darkPos = new Map();
+
+    for (const dn of darkNodes) {
+      const connectedDirs = darkEdges
+        .filter(e => e.source === dn.id || e.target === dn.id)
+        .map(e => (e.source === dn.id ? e.target : e.source));
+      let cx = 0;
+      let cy = 0;
+      let cnt = 0;
+      for (const fileId of connectedDirs) {
+        const sn = findSimDirForGraphNode(fileId);
+        if (sn && sn.x != null && sn.y != null) {
+          cx += sn.x;
+          cy += sn.y;
+          cnt += 1;
+        }
+      }
+      if (cnt === 0) continue;
+      cx /= cnt;
+      cy /= cnt;
+      darkPos.set(dn.id, { x: cx, y: cy, cnt });
+
+      const nebulaRadius = 40 + cnt * 15;
+      darkMatterGfx.beginFill(nebulaColor, 0.03);
+      darkMatterGfx.drawCircle(cx, cy, nebulaRadius * 2);
+      darkMatterGfx.endFill();
+      darkMatterGfx.beginFill(nebulaColor, 0.05);
+      darkMatterGfx.drawCircle(cx, cy, nebulaRadius * 1.3);
+      darkMatterGfx.endFill();
+      darkMatterGfx.beginFill(nebulaColor, 0.08);
+      darkMatterGfx.drawCircle(cx, cy, nebulaRadius * 0.7);
+      darkMatterGfx.endFill();
+    }
+
+    for (const edge of darkEdges) {
+      const p0 = darkPos.get(edge.source);
+      const dirSn = findSimDirForGraphNode(edge.target);
+      if (!p0 || !dirSn || dirSn.x == null) continue;
+      const sx = p0.x;
+      const sy = p0.y;
+      const tx = dirSn.x;
+      const ty = dirSn.y;
+      const midX = (sx + tx) / 2;
+      const midY = (sy + ty) / 2 - 24;
+      darkMatterGfx.lineStyle(1, nebulaColor, 0.1);
+      darkMatterGfx.moveTo(sx, sy);
+      darkMatterGfx.quadraticCurveTo(midX, midY, tx, ty);
+    }
+    darkMatterGfx.lineStyle(0);
+  }
+
+  function drawEntanglementOverlay() {
+    if (!app || !model || !entanglementGfx) return;
+    entanglementGfx.clear();
+    if (viewLevel !== 'galaxy' || !simNodes.length) return;
+
+    const entangledEdges = model.raw.links.filter(l => l.type === 'ENTANGLED').slice(0, MAX_ENTANGLED_DRAW);
+    if (!entangledEdges.length) return;
+
+    const time = performance.now() / 1000;
+    const pulse = 0.3 + 0.3 * Math.sin(time * 3);
+    const entangleColor = 0xf59e0b;
+
+    for (const edge of entangledEdges) {
+      const sourceDir = findSimDirForGraphNode(edge.source);
+      const targetDir = findSimDirForGraphNode(edge.target);
+      if (!sourceDir || !targetDir) continue;
+      if (sourceDir === targetDir) continue;
+      const sx = sourceDir.x;
+      const sy = sourceDir.y;
+      const tx = targetDir.x;
+      const ty = targetDir.y;
+      const midX = (sx + tx) / 2;
+      const midY = (sy + ty) / 2 - 30;
+      entanglementGfx.lineStyle(2, entangleColor, pulse * 0.4);
+      entanglementGfx.moveTo(sx, sy);
+      entanglementGfx.quadraticCurveTo(midX, midY, tx, ty);
+      entanglementGfx.lineStyle(0);
+      const dotRadius = 3 + pulse * 3;
+      entanglementGfx.beginFill(entangleColor, pulse * 0.6);
+      entanglementGfx.drawCircle(sx, sy, dotRadius);
+      entanglementGfx.drawCircle(tx, ty, dotRadius);
+      entanglementGfx.endFill();
+    }
   }
 
   function syncPixiFromSim() {
@@ -1654,11 +1773,17 @@
     starGraphics = new PIXI.Graphics();
     gridGraphics = new PIXI.Graphics();
     world = new PIXI.Container();
+    darkMatterGfx = new PIXI.Graphics();
+    darkMatterGfx.eventMode = 'none';
     layerEdges = new PIXI.Container();
+    entanglementGfx = new PIXI.Graphics();
+    entanglementGfx.eventMode = 'none';
     layerNodes = new PIXI.Container();
     childrenGfx = new PIXI.Graphics();
     childrenGfx.eventMode = 'none';
+    world.addChild(darkMatterGfx);
     world.addChild(layerEdges);
+    world.addChild(entanglementGfx);
     world.addChild(childrenGfx);
     world.addChild(layerNodes);
     layerEdges.eventMode = 'none';
@@ -1727,6 +1852,8 @@
         syncPixiFromSim();
       }
       updateGalaxyGravitationalHover();
+      drawEntanglementOverlay();
+      drawDarkMatterOverlay();
     });
   }
 
@@ -1942,6 +2069,8 @@
     document.getElementById('stat-functions').textContent = (stats.functions ?? 0) + (stats.methods ?? 0);
     document.getElementById('stat-classes').textContent = stats.classes ?? 0;
     document.getElementById('stat-edges').textContent = stats.edges ?? 0;
+    document.getElementById('stat-dark').textContent = stats.dark_matter ?? 0;
+    document.getElementById('stat-entangled').textContent = stats.entangled ?? 0;
   }
 
   /** --- Boot --- */
@@ -1949,6 +2078,12 @@
   document.getElementById('btn-fullscreen').addEventListener('click', () => {
     if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
     else document.exitFullscreen?.();
+  });
+  document.getElementById('btn-dark-matter').addEventListener('click', () => {
+    darkMatterVisible = !darkMatterVisible;
+    const b = document.getElementById('btn-dark-matter');
+    b.style.opacity = darkMatterVisible ? '1' : '0.5';
+    b.style.borderColor = darkMatterVisible ? '#8b5cf6' : 'rgba(99,102,241,0.2)';
   });
   document.getElementById('btn-export').addEventListener('click', async () => {
     if (!GRAPH_API_URL) {
@@ -2023,6 +2158,8 @@
       data = sanitizePayload(data);
       model = buildGraphModel(data);
       updateStatsPanel(data.stats || {});
+      document.getElementById('stat-dark').textContent = data.nodes.filter(n => n.type === 'dark_matter').length;
+      document.getElementById('stat-entangled').textContent = data.links.filter(l => l.type === 'ENTANGLED').length;
 
       initPixi();
       loadLevelGalaxy();
