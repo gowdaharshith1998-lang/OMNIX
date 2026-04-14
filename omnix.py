@@ -73,6 +73,17 @@ def main() -> None:
     export_json(store, graph_json)
     store.close()
 
+    from src.agents.orchestrator import AgentOrchestrator
+
+    orchestrator = AgentOrchestrator(target, db_path)
+
+    if orchestrator.available:
+        print(f"🧠 AI Agent ready: {orchestrator.provider_info}")
+    else:
+        print(
+            "🧠 AI Agent: no provider detected (set OMNIX_AI_KEY or install Ollama)"
+        )
+
     if args.no_open:
         print(f"💾 Graph written to {graph_json}")
         return
@@ -82,6 +93,15 @@ def main() -> None:
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
     class OmnixHandler(BaseHTTPRequestHandler):
+        def _send_json(self, data: object) -> None:
+            response = json.dumps(data).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(response)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(response)
+
         def do_GET(self) -> None:
             from urllib.parse import urlparse
 
@@ -99,6 +119,17 @@ def main() -> None:
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 self.wfile.write(data)
+                return
+
+            if path == "/api/ai/status":
+                data = {
+                    "available": orchestrator.available,
+                    "provider": orchestrator.provider_info,
+                    "memory_stats": orchestrator.memory.get_stats(
+                        orchestrator.codebase_id
+                    ),
+                }
+                self._send_json(data)
                 return
 
             if path == "/api/timeline":
@@ -136,6 +167,83 @@ def main() -> None:
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def do_POST(self) -> None:
+            from urllib.parse import urlparse
+
+            path = urlparse(self.path).path
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length) if content_length else b""
+
+            try:
+                data = json.loads(body.decode("utf-8")) if body else {}
+            except json.JSONDecodeError:
+                data = {}
+
+            if not isinstance(data, dict):
+                data = {}
+
+            if path == "/api/ai/diagnose":
+                dir_path = str(data.get("directory", ""))
+                issue = data.get("issue")
+                result = (
+                    orchestrator.diagnose(dir_path, str(issue) if issue else None)
+                    if orchestrator.available
+                    else {"error": "AI not available"}
+                )
+                self._send_json(result)
+                return
+
+            if path == "/api/ai/security":
+                dir_path = data.get("directory")
+                result = (
+                    orchestrator.security_scan(
+                        str(dir_path) if dir_path is not None else None
+                    )
+                    if orchestrator.available
+                    else {"error": "AI not available"}
+                )
+                self._send_json(result)
+                return
+
+            if path == "/api/ai/architecture":
+                result = (
+                    orchestrator.explain_architecture()
+                    if orchestrator.available
+                    else {"error": "AI not available"}
+                )
+                self._send_json(result)
+                return
+
+            if path == "/api/ai/ask":
+                question = str(data.get("question", ""))
+                dir_path = data.get("directory")
+                result = (
+                    orchestrator.ask(
+                        question,
+                        str(dir_path) if dir_path is not None else None,
+                    )
+                    if orchestrator.available
+                    else {"error": "AI not available"}
+                )
+                self._send_json(result)
+                return
+
+            if path == "/api/ai/feedback":
+                diagnosis_id = str(data.get("id", ""))
+                correct = bool(data.get("correct", True))
+                orchestrator.memory.mark_correct(diagnosis_id, correct)
+                self._send_json({"ok": True})
+                return
+
+            self.send_error(404)
+
+        def do_OPTIONS(self) -> None:
+            self.send_response(200)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.end_headers()
 
         def log_message(self, format: str, *args) -> None:
             return

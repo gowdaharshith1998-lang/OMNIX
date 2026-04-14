@@ -21,6 +21,11 @@
       color: #e2e8f0;
     }
 
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
+    }
+
     #graph-container {
       position: fixed;
       inset: 0;
@@ -322,6 +327,17 @@
       border: none;
       box-shadow: 0 0 10px rgba(168, 85, 247, 0.5);
     }
+
+    #xray-panel::-webkit-scrollbar { width: 4px; }
+    #xray-panel::-webkit-scrollbar-track { background: transparent; }
+    #xray-panel::-webkit-scrollbar-thumb {
+      background: rgba(99, 102, 241, 0.3);
+      border-radius: 2px;
+    }
+    #xray-panel {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(99, 102, 241, 0.3) transparent;
+    }
   </style>
 </head>
 <body>
@@ -416,6 +432,36 @@
     </div>
   </div>
 
+  <div id="xray-panel" style="
+    position: fixed;
+    top: 0;
+    right: -400px;
+    width: 380px;
+    height: 100vh;
+    background: rgba(2, 6, 21, 0.95);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-left: 1px solid rgba(99, 102, 241, 0.3);
+    z-index: 200;
+    overflow-y: auto;
+    padding: 24px 20px;
+    font-family: 'Outfit', sans-serif;
+    color: #e2e8f0;
+    transition: none;
+    box-sizing: border-box;
+  ">
+    <div id="xray-close" style="
+      position: absolute;
+      top: 12px;
+      right: 16px;
+      cursor: pointer;
+      font-size: 20px;
+      color: #64748b;
+      z-index: 201;
+    " title="Close">✕</div>
+    <div id="xray-content"></div>
+  </div>
+
   <script>
 (function () {
   'use strict';
@@ -460,7 +506,23 @@
   const MAX_ENTANGLED_DRAW = 100;
   const GALAXY_LABEL_POOL_SIZE = 30;
   const ZOOM_MIN = 0.3;
-  const ZOOM_MAX = 3.0;
+  const ZOOM_MAX = 5.0;
+  /** Galaxy gravitational hover: min screen px radius from hex center; orbit area extends to orbit + pad */
+  const GALAXY_WARP_RADIUS = 150;
+  const GALAXY_ORBIT_HOVER_PAD_SCREEN = 30;
+  const GALAXY_MAX_WARP_SCALE = 2.5;
+
+  /** Screen-space pick radius: hex-center circle (150px) ∪ circle through full orbit (world orbit × scale + pad). */
+  function galaxyDirectoryHoverScreenRadius(dirNode, worldScale) {
+    if (!dirNode || dirNode.kind !== 'directory') return GALAXY_WARP_RADIUS;
+    const wScale = dirNode._warpScale || 1;
+    const baseR = dirNode.radius || 18;
+    const orbitWorld = wScale * baseR * 3;
+    const orbitScreen = orbitWorld * worldScale;
+    return Math.max(GALAXY_WARP_RADIUS, orbitScreen + GALAXY_ORBIT_HOVER_PAD_SCREEN);
+  }
+  /** Keep directory file orbit visible briefly after pointer leaves hex + file hit zones */
+  const STICKY_DELAY = 600;
   const SEARCH_DEBOUNCE_MS = 150;
 
   const GRAPH_API_URL = (function () {
@@ -474,6 +536,30 @@
     if (proto === 'file:' || !window.location.origin || window.location.origin === 'null') return null;
     return new URL('/api/timeline', window.location.origin).href;
   })();
+
+  let aiAvailable = false;
+  let aiProvider = '';
+  let aiStatusPromise = null;
+
+  function ensureAiStatus() {
+    if (!aiStatusPromise) {
+      const url = new URL('/api/ai/status', window.location.origin).href;
+      aiStatusPromise = fetch(url, { cache: 'no-store' })
+        .then(r => (r.ok ? r.json() : null))
+        .then(data => {
+          if (data && data.available) {
+            aiAvailable = true;
+            aiProvider = data.provider || '';
+          } else {
+            aiAvailable = false;
+            aiProvider = '';
+          }
+          return data;
+        })
+        .catch(() => ({}));
+    }
+    return aiStatusPromise;
+  }
 
   function escapeHtml(s) {
     const d = document.createElement('div');
@@ -821,10 +907,21 @@
       dirFilesMap[dir].sort((a, b) => b.symbolCount - a.symbolCount);
     });
 
+    const maxEdgeWeight = galaxyLinks.length ? Math.max(...galaxyLinks.map(e => e.weight || 1)) : 1;
+    for (const node of galaxyNodes) {
+      const nid = node.id;
+      node.totalEdgeWeight = galaxyLinks
+        .filter(e => e.source === nid || e.target === nid)
+        .reduce((sum, e) => sum + (e.weight || 1), 0);
+    }
+    const maxNodeWeight = galaxyNodes.length ? Math.max(...galaxyNodes.map(n => n.totalEdgeWeight || 0), 1) : 1;
+
     return {
       raw,
       nodeById,
       galaxy: { nodes: galaxyNodes, links: galaxyLinks },
+      maxEdgeWeight,
+      maxNodeWeight,
       buildStar,
       buildPlanet,
       dirsSorted,
@@ -838,7 +935,16 @@
   let layerEdges = null;
   let layerNodes = null;
   let childrenGfx = null;
+  let signalFlowGfx = null;
+  let rippleGfx = null;
+  const SIGNAL_PARTICLES = [];
+  let signalParticleCap = 40;
   let galaxyLabelPool = [];
+  /** Rebuilt each frame in galaxy gravitational hover (world-space hit targets for file orbit dots). */
+  let visibleChildFiles = [];
+  /** Sticky directory: keep orbit files visible while moving toward dots or during short grace period */
+  let stickyDir = null;
+  let stickyTimeout = null;
   let _gravScreenPt = null;
   let bgGraphics = null;
   let starGraphics = null;
@@ -851,9 +957,18 @@
   let timelineVisible = false;
 
   let model = null;
+  let rawGraphData = null;
+  let xrayOpen = false;
+  let xrayDirId = null;
   let viewLevel = 'galaxy';
   let selectedDir = null;
+  /** @type {null | { name: string, dirId?: string, filePath?: string, symbolCount?: number, id?: string }} */
   let selectedFile = null;
+  let starNodes = [];
+  let planetNodes = [];
+  let starViewTitle = null;
+  let planetViewTitle = null;
+  let symbolPopupEl = null;
   let currentNodes = [];
   let currentLinks = [];
   let simulation = null;
@@ -881,6 +996,44 @@
   function killTweens() {
     activeTweens.forEach(t => t.kill());
     activeTweens = [];
+  }
+
+  function resetGalaxyDrillState() {}
+
+  function resolveDirFilePath(dirId, fileName) {
+    const nodes = (rawGraphData && rawGraphData.nodes) || [];
+    const hit = nodes.find(
+      n => n.type === 'file' && n.file && dirname(n.file) === dirId && basename(n.file) === fileName
+    );
+    if (hit && hit.file) return hit.file;
+    return dirId ? dirId + '/' + fileName : fileName;
+  }
+
+  function getSymbolsForFile(filePath, dirId) {
+    const fileName = basename(filePath || '');
+    const fullPath = filePath && filePath.includes('/')
+      ? filePath
+      : dirId
+        ? dirId + '/' + fileName
+        : fileName;
+    const nodes = (rawGraphData && rawGraphData.nodes) || [];
+    return nodes
+      .filter(
+        n =>
+          ['function', 'class', 'method'].includes(n.type) &&
+          n.file &&
+          (n.file === fullPath ||
+            n.file.endsWith('/' + fileName) ||
+            (basename(n.file) === fileName && dirname(n.file) === dirId))
+      )
+      .map(n => ({
+        id: n.id,
+        name: n.name,
+        type: n.type,
+        line: n.line,
+        complexity: n.val || 0,
+      }))
+      .sort((a, b) => (b.complexity || 0) - (a.complexity || 0));
   }
 
   function edgeColor(linkType) {
@@ -956,6 +1109,7 @@
       c.visible = false;
       c.on('pointerover', onNodeOver);
       c.on('pointerout', onNodeOut);
+      c.on('pointerdown', onNodeRightDown);
       c.on('pointertap', onNodeClick);
       nodePool.push({ container: c, glow, shape, label, simNode: null });
       layerNodes.addChild(c);
@@ -1022,7 +1176,12 @@
   function redrawNodeGlow(entry, sn, isHover) {
     const g = entry.glow;
     g.clear();
-    const a = isHover ? 0.4 : 0.15;
+    let a = isHover ? 0.4 : 0.15;
+    if (!isHover && viewLevel === 'galaxy' && sn.kind === 'directory' && model) {
+      const nodeWeight = sn.totalEdgeWeight || 0;
+      const maxNodeWeight = model.maxNodeWeight || 100;
+      a = 0.1 + Math.min(nodeWeight / maxNodeWeight, 1) * 0.25;
+    }
     g.beginFill(sn.color, a);
     g.drawCircle(0, 0, (sn.radius || 12) * 2.5);
     g.endFill();
@@ -1064,21 +1223,43 @@
     });
   }
 
-  function onNodeClick(e) {
+  function pointerEventButton(e) {
+    const oe = e.data && e.data.originalEvent;
+    if (oe && typeof oe.button === 'number') return oe.button;
+    if (typeof e.button === 'number') return e.button;
+    return 0;
+  }
+
+  function onNodeRightDown(e) {
+    if (pointerEventButton(e) !== 2) return;
     e.stopPropagation();
+    const oe = e.data && e.data.originalEvent;
+    if (oe && oe.preventDefault) oe.preventDefault();
     const entry = nodePool.find(p => p.container === e.currentTarget);
     if (!entry || !entry.simNode) return;
     const sn = entry.simNode;
-    nodePool.forEach(p => {
-      if (!p.container.visible) return;
-      gsap.to(p.container, { alpha: p === entry ? 1 : 0.2, duration: 0.35 });
-    });
-    const skipClickScale = viewLevel === 'galaxy' && sn.kind === 'directory';
-    if (!skipClickScale) {
-      gsap.to(entry.container.scale, { x: 2, y: 2, duration: 0.35, ease: 'power2.out' });
+    if (viewLevel !== 'galaxy' || sn.kind !== 'directory') return;
+    let did = sn.dirId;
+    if (did === undefined || did === null) did = sn.raw && sn.raw.id;
+    if (did === undefined || did === null) return;
+    if (xrayOpen && xrayDirId === did) closeXray();
+    else void openXray(sn);
+  }
+
+  function onNodeClick(e) {
+    e.stopPropagation();
+    if (pointerEventButton(e) === 2) return;
+    const entry = nodePool.find(p => p.container === e.currentTarget);
+    if (!entry || !entry.simNode) return;
+    const sn = entry.simNode;
+    if (viewLevel === 'galaxy' && sn.kind === 'directory') {
+      let did = sn.dirId;
+      if (did === undefined || did === null) did = sn.raw && sn.raw.id;
+      if (did === undefined || did === null) return;
+      if (xrayOpen) closeXray();
+      hideSymbolPopup();
+      transitionToStar(did, sn);
     }
-    if (sn.kind === 'directory') zoomToDirectory(sn.dirId);
-    else if (sn.kind === 'file') zoomToFile(sn.file);
   }
 
   function showTooltip(sn, gx, gy) {
@@ -1109,9 +1290,9 @@
   }
 
   function fitWorldToNodes(animate) {
-    if (!simNodes.length || !app) return;
+    if (viewLevel !== 'galaxy' || !simNodes.length || !app) return;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    const labelPadWorld = (viewLevel === 'star' || viewLevel === 'planet') ? 28 : 0;
+    const labelPadWorld = 0;
     simNodes.forEach(n => {
       const r = n.radius || 12;
       minX = Math.min(minX, n.x - r);
@@ -1127,13 +1308,6 @@
     const sx = (app.screen.width * pad) / bw;
     const sy = (app.screen.height * pad) / bh;
     let s = Math.min(sx, sy);
-    if (viewLevel === 'star' && simNodes.length) {
-      const minNodeR = Math.min(...simNodes.map(n => n.radius || 12));
-      s = Math.max(s, 12 / Math.max(minNodeR, 1e-6));
-    } else if (viewLevel === 'planet' && simNodes.length) {
-      const minNodeR = Math.min(...simNodes.map(n => n.radius || 10));
-      s = Math.max(s, 10 / Math.max(minNodeR, 1e-6));
-    }
     s = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, s));
     targetWorldScale = s;
     targetWorldTx = app.screen.width / 2 - cx * s;
@@ -1173,6 +1347,789 @@
     activeTweens.push(tw);
   }
 
+  const SUBVIEW_SIGNAL_MAX = 30;
+
+  /** Edges between files in a directory for star-view force + rendering (deduped). */
+  function buildStarEdgeList(dirId, starNodes) {
+    const edges = [];
+    if (!rawGraphData || !rawGraphData.links || !starNodes.length) return edges;
+
+    const fileNames = starNodes.map(sn => (sn.fileData && sn.fileData.name) || '');
+    const filePaths = starNodes.map((sn, i) => {
+      const fd = sn.fileData;
+      if (!fd) return fileNames[i] || '';
+      return fd.filePath || fd.id || fd.name || fileNames[i] || '';
+    });
+    const seen = new Set();
+
+    for (const link of rawGraphData.links) {
+      const lt = link.type || '';
+      if (lt === 'DEFINES' || lt === 'CONTAINS') continue;
+
+      const srcRaw = link.source;
+      const tgtRaw = link.target;
+      const src =
+        typeof srcRaw === 'string'
+          ? srcRaw
+          : srcRaw && typeof srcRaw.id === 'string'
+            ? srcRaw.id
+            : '';
+      const tgt =
+        typeof tgtRaw === 'string'
+          ? tgtRaw
+          : tgtRaw && typeof tgtRaw.id === 'string'
+            ? tgtRaw.id
+            : '';
+
+      let srcIdx = -1;
+      let tgtIdx = -1;
+
+      for (let i = 0; i < filePaths.length; i++) {
+        const fp = filePaths[i];
+        const fn = fileNames[i];
+        if (!fp && !fn) continue;
+        const srcBase = src.split('::')[0] || src;
+        if (
+          (fp && (src.includes(fp) || src.includes(fn))) ||
+          (fn && src.includes(fn)) ||
+          (fp && srcBase && fp.includes(srcBase))
+        ) {
+          srcIdx = i;
+        }
+        const tgtBase = tgt.split('::')[0] || tgt;
+        if (
+          (fp && (tgt.includes(fp) || tgt.includes(fn))) ||
+          (fn && tgt.includes(fn)) ||
+          (fp && tgtBase && fp.includes(tgtBase))
+        ) {
+          tgtIdx = i;
+        }
+      }
+
+      if (srcIdx < 0 && dirId && src && src.startsWith(dirId)) {
+        const srcFile = src.split('/').pop().split('::')[0];
+        srcIdx = fileNames.indexOf(srcFile);
+        if (srcIdx < 0) {
+          for (let i = 0; i < fileNames.length; i++) {
+            const nm = fileNames[i];
+            const stem = nm.replace(/\.[^.]+$/, '');
+            if (
+              srcFile === nm ||
+              nm.includes(srcFile) ||
+              srcFile.includes(stem)
+            ) {
+              srcIdx = i;
+              break;
+            }
+          }
+        }
+      }
+      if (tgtIdx < 0 && dirId && tgt && tgt.startsWith(dirId)) {
+        const tgtFile = tgt.split('/').pop().split('::')[0];
+        tgtIdx = fileNames.indexOf(tgtFile);
+        if (tgtIdx < 0) {
+          for (let i = 0; i < fileNames.length; i++) {
+            const nm = fileNames[i];
+            const stem = nm.replace(/\.[^.]+$/, '');
+            if (
+              tgtFile === nm ||
+              nm.includes(tgtFile) ||
+              tgtFile.includes(stem)
+            ) {
+              tgtIdx = i;
+              break;
+            }
+          }
+        }
+      }
+
+      if (model && model.nodeById) {
+        const sid = typeof link.source === 'object' && link.source ? link.source.id : link.source;
+        const tid = typeof link.target === 'object' && link.target ? link.target.id : link.target;
+        const sn = sid ? model.nodeById.get(sid) : null;
+        const tn = tid ? model.nodeById.get(tid) : null;
+        if (sn && sn.file && dirname(sn.file) === dirId && sn.type === 'file') {
+          const bf = basename(sn.file);
+          const ix = fileNames.indexOf(bf);
+          if (ix >= 0) srcIdx = ix;
+        }
+        if (tn && tn.file && dirname(tn.file) === dirId && tn.type === 'file') {
+          const bf = basename(tn.file);
+          const ix = fileNames.indexOf(bf);
+          if (ix >= 0) tgtIdx = ix;
+        }
+      }
+
+      if (srcIdx >= 0 && tgtIdx >= 0 && srcIdx !== tgtIdx) {
+        const s = starNodes[srcIdx];
+        const t = starNodes[tgtIdx];
+        if (!s || !t) continue;
+
+        const key = Math.min(srcIdx, tgtIdx) + ':' + Math.max(srcIdx, tgtIdx);
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const edgeColor =
+          lt === 'ENTANGLED'
+            ? 0xf59e0b
+            : lt === 'DARK_FORCE'
+              ? 0x8b5cf6
+              : lt === 'CALLS'
+                ? 0x4ade80
+                : LINK_HEX[lt] || 0x3b82f6;
+
+        edges.push({
+          source: s,
+          target: t,
+          type: lt,
+          color: edgeColor,
+          _curveOffset: (Math.random() - 0.5) * 40,
+        });
+      }
+    }
+
+    return edges;
+  }
+
+  /** CALLS edges within one file for planet-view force + rendering (deduped). */
+  function buildPlanetEdgeList(filePath, symbols, planetNodes) {
+    const edges = [];
+    if (!rawGraphData || !rawGraphData.links || !planetNodes.length) return edges;
+
+    const symNames = symbols.map(s => s.name || '');
+    const idSet = new Set(symbols.map(s => s.id).filter(Boolean));
+    const seen = new Set();
+    const links = rawGraphData.links || [];
+
+    for (const link of links) {
+      if (link.type !== 'CALLS') continue;
+
+      const sid =
+        typeof link.source === 'object' && link.source ? link.source.id : link.source;
+      const tid =
+        typeof link.target === 'object' && link.target ? link.target.id : link.target;
+      let srcIdx = -1;
+      let tgtIdx = -1;
+
+      const srcStr =
+        typeof link.source === 'string'
+          ? link.source
+          : link.source && link.source.id
+            ? link.source.id
+            : String(sid || '');
+      const tgtStr =
+        typeof link.target === 'string'
+          ? link.target
+          : link.target && link.target.id
+            ? link.target.id
+            : String(tid || '');
+
+      for (let i = 0; i < symNames.length; i++) {
+        const nm = symNames[i];
+        if (srcStr.endsWith('::' + nm) || (nm && srcStr.includes(nm))) srcIdx = i;
+        if (tgtStr.endsWith('::' + nm) || (nm && tgtStr.includes(nm))) tgtIdx = i;
+      }
+
+      if (srcIdx < 0 && sid && idSet.has(sid) && model && model.nodeById) {
+        const sNode = model.nodeById.get(sid);
+        if (sNode && sNode.file === filePath) {
+          const ix = symbols.findIndex(s => s.id === sid);
+          if (ix >= 0) srcIdx = ix;
+        }
+      }
+      if (tgtIdx < 0 && tid && idSet.has(tid) && model && model.nodeById) {
+        const tNode = model.nodeById.get(tid);
+        if (tNode && tNode.file === filePath) {
+          const ix = symbols.findIndex(s => s.id === tid);
+          if (ix >= 0) tgtIdx = ix;
+        }
+      }
+
+      if (srcIdx >= 0 && tgtIdx >= 0 && srcIdx !== tgtIdx) {
+        const s = planetNodes[srcIdx];
+        const t = planetNodes[tgtIdx];
+        if (!s || !t) continue;
+
+        const key = Math.min(srcIdx, tgtIdx) + ':' + Math.max(srcIdx, tgtIdx);
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        edges.push({
+          source: s,
+          target: t,
+          type: 'CALLS',
+          color: 0x4ade80,
+          _curveOffset: (Math.random() - 0.5) * 36,
+        });
+      }
+    }
+
+    return edges;
+  }
+
+  function cleanupStarView() {
+    starViewTitle = null;
+    const toRemove = [];
+    for (let i = 0; i < world.children.length; i++) {
+      const ch = world.children[i];
+      if (ch._omnixType === 'star') toRemove.push(ch);
+    }
+    for (let j = 0; j < toRemove.length; j++) {
+      const ch = toRemove[j];
+      if (ch._sim) {
+        ch._sim.stop();
+        ch._sim = null;
+      }
+      world.removeChild(ch);
+      ch.destroy({ children: true });
+    }
+    starNodes = [];
+  }
+
+  function cleanupPlanetView() {
+    planetViewTitle = null;
+    const toRemove = [];
+    for (let i = 0; i < world.children.length; i++) {
+      const ch = world.children[i];
+      if (ch._omnixType === 'planet') toRemove.push(ch);
+    }
+    for (let j = 0; j < toRemove.length; j++) {
+      const ch = toRemove[j];
+      if (ch._sim) {
+        ch._sim.stop();
+        ch._sim = null;
+      }
+      world.removeChild(ch);
+      ch.destroy({ children: true });
+    }
+    planetNodes = [];
+  }
+
+  function restoreGalaxyView() {
+    killTweens();
+    gsap.killTweensOf(layerEdges);
+    layerEdges.alpha = 1;
+    nodePool.forEach(p => {
+      if (!p || !p.container) return;
+      gsap.killTweensOf(p.container);
+      gsap.killTweensOf(p.container.scale);
+      p.container.alpha = searchQuery && p.simNode && !nodeMatchesSearch(p.simNode) ? 0.25 : 1;
+      p.container.scale.set(1);
+    });
+    fitWorldToNodes(false);
+    syncPixiFromSim();
+    updateBreadcrumb();
+  }
+
+  function restoreStarView() {
+    hideSymbolPopup();
+    for (let i = 0; i < starNodes.length; i++) {
+      const sn = starNodes[i];
+      if (!sn || !sn.container) continue;
+      gsap.killTweensOf(sn.container);
+      gsap.killTweensOf(sn.container.scale);
+      sn._hover = false;
+      sn.container.position.set(sn.x, sn.y);
+      gsap.to(sn.container, {
+        alpha: 1,
+        duration: 0.35,
+        ease: 'power2.out',
+      });
+      gsap.to(sn.container.scale, { x: 1, y: 1, duration: 0.25 });
+    }
+    selectedFile = null;
+    const sc = world && world.children && world.children.find(c => c._omnixType === 'star');
+    if (sc && sc._sim) sc._sim.alpha(0.45).restart();
+    updateBreadcrumb();
+  }
+
+  function createStarView(dirId, files) {
+    viewLevel = 'star';
+    selectedDir = dirId;
+    updateBreadcrumb();
+    cleanupStarView();
+    if (!world || !app) return;
+    const starContainer = new PIXI.Container();
+    starContainer.eventMode = 'none';
+    starContainer._omnixType = 'star';
+    world.addChild(starContainer);
+
+    gsap.to(world, { x: 0, y: 0, duration: 0.3, ease: 'power2.inOut' });
+    gsap.to(world.scale, { x: 1, y: 1, duration: 0.3, ease: 'power2.inOut' });
+    worldScale = 1;
+    worldTx = 0;
+    worldTy = 0;
+    targetWorldScale = 1;
+    targetWorldTx = 0;
+    targetWorldTy = 0;
+
+    const centerX = app.screen.width / 2;
+    const centerY = app.screen.height / 2;
+    const maxFiles = Math.min(files.length, 40);
+    const fileSlice = files.slice(0, maxFiles);
+
+    const starEdgeGfx = new PIXI.Graphics();
+    starEdgeGfx.eventMode = 'none';
+    starContainer.addChild(starEdgeGfx);
+
+    const starSignalGfx = new PIXI.Graphics();
+    starSignalGfx.eventMode = 'none';
+    starContainer.addChild(starSignalGfx);
+
+    starNodes = [];
+
+    for (let i = 0; i < maxFiles; i++) {
+      const file = fileSlice[i];
+      const radius = 12 + Math.min((file.symbolCount || 0) / 3, 25);
+      const nm = file.name || '';
+      const color =
+        nm.endsWith('.py')
+          ? 0x3b82f6
+          : nm.endsWith('.ts') || nm.endsWith('.tsx')
+            ? 0x06b6d4
+            : nm.endsWith('.js') || nm.endsWith('.jsx')
+              ? 0x22d3ee
+              : extLang(nm) === 'py'
+                ? 0x3b82f6
+                : extLang(nm) === 'ts'
+                  ? 0x06b6d4
+                  : 0x4ade80;
+
+      const fileData = Object.assign({}, file, {
+        dirId,
+        filePath: resolveDirFilePath(dirId, file.name),
+      });
+
+      const ix = centerX + (Math.random() - 0.5) * 160;
+      const iy = centerY + (Math.random() - 0.5) * 160;
+
+      const fileContainer = new PIXI.Container();
+      fileContainer.position.set(ix, iy);
+      fileContainer.alpha = 0;
+      fileContainer.eventMode = 'static';
+      fileContainer.cursor = 'pointer';
+
+      const glow = new PIXI.Graphics();
+      glow.beginFill(color, 0.12);
+      glow.drawCircle(0, 0, radius * 2.5);
+      glow.endFill();
+      glow.alpha = 0.55;
+      fileContainer.addChild(glow);
+
+      const circle = new PIXI.Graphics();
+      circle.beginFill(color, 0.85);
+      circle.drawCircle(0, 0, radius);
+      circle.endFill();
+      circle.lineStyle(1, 0xffffff, 0.25);
+      circle.drawCircle(0, 0, radius);
+      fileContainer.addChild(circle);
+
+      const fn = nm.length > 18 ? nm.slice(0, 16) + '…' : nm;
+      const label = new PIXI.Text(fn + '\n(' + (file.symbolCount || 0) + ')', {
+        fontFamily: 'JetBrains Mono, monospace',
+        fontSize: 10,
+        fill: 0xe2e8f0,
+        align: 'center',
+      });
+      label.anchor.set(0.5, 0);
+      label.position.set(0, radius + 6);
+      label.eventMode = 'none';
+      fileContainer.addChild(label);
+
+      const hitR = Math.max(radius * 2.5, radius + 48);
+      fileContainer.hitArea = new PIXI.Circle(0, 0, hitR);
+
+      starContainer.addChild(fileContainer);
+
+      gsap.to(fileContainer, {
+        alpha: 1,
+        duration: 0.4,
+        delay: i * 0.02,
+        ease: 'power2.out',
+      });
+
+      const snRef = {
+        container: fileContainer,
+        fileData,
+        x: ix,
+        y: iy,
+        vx: 0,
+        vy: 0,
+        radius,
+        color,
+        glow,
+        index: i,
+        _hover: false,
+      };
+
+      fileContainer.on('pointerdown', e => {
+        const btn = pointerEventButton(e);
+        if (btn === 2) {
+          e.stopPropagation();
+          const oe = e.data && e.data.originalEvent;
+          if (oe && oe.preventDefault) oe.preventDefault();
+          openXrayForDir(dirId);
+          return;
+        }
+        if (btn !== 0) return;
+        e.stopPropagation();
+        hideSymbolPopup();
+        transitionToPlanet(fileData);
+      });
+      fileContainer.on('pointerover', () => {
+        snRef._hover = true;
+        gsap.to(fileContainer.scale, { x: 1.25, y: 1.25, duration: 0.2 });
+      });
+      fileContainer.on('pointerout', () => {
+        snRef._hover = false;
+        gsap.to(fileContainer.scale, { x: 1, y: 1, duration: 0.2 });
+      });
+
+      starNodes.push(snRef);
+    }
+
+    const starEdges = buildStarEdgeList(dirId, starNodes);
+
+    const starSim = d3
+      .forceSimulation(starNodes)
+      .force('center', d3.forceCenter(centerX, centerY))
+      .force('charge', d3.forceManyBody().strength(-80))
+      .force('collision', d3.forceCollide().radius(d => d.radius * 2 + 10))
+      .force('link', d3.forceLink(starEdges).distance(120).strength(0.3))
+      .force('x', d3.forceX(centerX).strength(0.05))
+      .force('y', d3.forceY(centerY).strength(0.05))
+      .alphaDecay(0.02)
+      .on('tick', () => {
+        for (const sn of starNodes) {
+          sn.container.position.set(sn.x, sn.y);
+        }
+      });
+
+    const starSignalParticles = [];
+    const nStarPart = Math.min(starEdges.length, SUBVIEW_SIGNAL_MAX);
+    for (let pi = 0; pi < nStarPart; pi++) {
+      const ed = starEdges[pi];
+      starSignalParticles.push({
+        edge: ed,
+        progress: Math.random(),
+        speed: 0.003 + Math.random() * 0.004,
+        color: ed.color || 0x4ade80,
+      });
+    }
+
+    starContainer._sim = starSim;
+    starContainer._edges = starEdges;
+    starContainer._edgeGfx = starEdgeGfx;
+    starContainer._signalGfx = starSignalGfx;
+    starContainer._signalParticles = starSignalParticles;
+    starContainer._nodes = starNodes;
+
+    const titleText = new PIXI.Text((dirId && dirId.split('/').pop()) || dirId || '', {
+      fontFamily: 'Syne, sans-serif',
+      fontSize: 16,
+      fill: 0x6366f1,
+      align: 'center',
+    });
+    titleText.alpha = 0.3;
+    titleText.anchor.set(0.5);
+    titleText.position.set(centerX, centerY);
+    titleText.eventMode = 'none';
+    starContainer.addChild(titleText);
+    starViewTitle = titleText;
+  }
+
+  function createPlanetView(fileData, symbols) {
+    cleanupPlanetView();
+    if (!world || !app) return;
+    const planetContainer = new PIXI.Container();
+    planetContainer.eventMode = 'none';
+    planetContainer._omnixType = 'planet';
+    world.addChild(planetContainer);
+
+    const centerX = app.screen.width / 2;
+    const centerY = app.screen.height / 2;
+    const maxSymbols = Math.min(symbols.length, 30);
+    const fp = fileData.filePath || resolveDirFilePath(selectedDir, fileData.name);
+
+    const planetEdgeGfx = new PIXI.Graphics();
+    planetEdgeGfx.eventMode = 'none';
+    planetContainer.addChild(planetEdgeGfx);
+
+    const planetSignalGfx = new PIXI.Graphics();
+    planetSignalGfx.eventMode = 'none';
+    planetContainer.addChild(planetSignalGfx);
+
+    planetNodes = [];
+    const symSlice = symbols.slice(0, maxSymbols);
+
+    for (let j = 0; j < maxSymbols; j++) {
+      const sym = symSlice[j];
+      const radius = 8 + Math.min((sym.complexity || 1) / 5, 15);
+      const color =
+        sym.type === 'class' ? 0xa855f7 : sym.type === 'method' ? 0x22d3ee : 0x4ade80;
+
+      const jx = centerX + (Math.random() - 0.5) * 140;
+      const jy = centerY + (Math.random() - 0.5) * 140;
+
+      const symContainer = new PIXI.Container();
+      symContainer.position.set(jx, jy);
+      symContainer.alpha = 0;
+      symContainer.eventMode = 'static';
+      symContainer.cursor = 'pointer';
+
+      const glow = new PIXI.Graphics();
+      glow.beginFill(color, 0.12);
+      glow.drawCircle(0, 0, radius * 2.5);
+      glow.endFill();
+      glow.alpha = 0.55;
+      symContainer.addChild(glow);
+
+      const shape = new PIXI.Graphics();
+      if (sym.type === 'class') {
+        shape.beginFill(color, 0.85);
+        shape.drawRoundedRect(-radius, -radius, radius * 2, radius * 2, 3);
+        shape.endFill();
+      } else {
+        shape.beginFill(color, 0.85);
+        shape.moveTo(0, -radius);
+        shape.lineTo(radius, 0);
+        shape.lineTo(0, radius);
+        shape.lineTo(-radius, 0);
+        shape.closePath();
+        shape.endFill();
+      }
+      symContainer.addChild(shape);
+
+      const nm = sym.name.length > 18 ? sym.name.slice(0, 16) + '…' : sym.name;
+      const label = new PIXI.Text(nm, {
+        fontFamily: 'JetBrains Mono, monospace',
+        fontSize: 9,
+        fill: 0xe2e8f0,
+        align: 'center',
+      });
+      label.anchor.set(0.5, 0);
+      label.position.set(0, radius + 4);
+      label.eventMode = 'none';
+      symContainer.addChild(label);
+
+      const symHitR = Math.max(radius * 2.8, radius + 36);
+      symContainer.hitArea = new PIXI.Circle(0, 0, symHitR);
+
+      planetContainer.addChild(symContainer);
+
+      gsap.to(symContainer, {
+        alpha: 1,
+        duration: 0.4,
+        delay: j * 0.02,
+        ease: 'power2.out',
+      });
+
+      const pnRef = {
+        container: symContainer,
+        symbol: sym,
+        x: jx,
+        y: jy,
+        vx: 0,
+        vy: 0,
+        radius,
+        color,
+        glow,
+        index: j,
+        _hover: false,
+      };
+
+      symContainer.on('pointerdown', e => {
+        const btn = pointerEventButton(e);
+        if (btn === 2) {
+          e.stopPropagation();
+          const oe = e.data && e.data.originalEvent;
+          if (oe && oe.preventDefault) oe.preventDefault();
+          if (selectedDir) openXrayForDir(selectedDir);
+          return;
+        }
+        if (btn !== 0) return;
+        e.stopPropagation();
+        showSymbolDetailPopup(sym, fileData);
+      });
+      symContainer.on('pointerover', () => {
+        pnRef._hover = true;
+        gsap.to(symContainer.scale, { x: 1.2, y: 1.2, duration: 0.2 });
+      });
+      symContainer.on('pointerout', () => {
+        pnRef._hover = false;
+        gsap.to(symContainer.scale, { x: 1, y: 1, duration: 0.2 });
+      });
+
+      planetNodes.push(pnRef);
+    }
+
+    const planetEdges = buildPlanetEdgeList(fp, symSlice, planetNodes);
+
+    const planetSim = d3
+      .forceSimulation(planetNodes)
+      .force('center', d3.forceCenter(centerX, centerY))
+      .force('charge', d3.forceManyBody().strength(-60))
+      .force('collision', d3.forceCollide().radius(d => d.radius * 2 + 8))
+      .force('link', d3.forceLink(planetEdges).distance(90).strength(0.4))
+      .force('x', d3.forceX(centerX).strength(0.06))
+      .force('y', d3.forceY(centerY).strength(0.06))
+      .alphaDecay(0.02)
+      .on('tick', () => {
+        for (const pn of planetNodes) {
+          pn.container.position.set(pn.x, pn.y);
+        }
+      });
+
+    const planetSignalParticles = [];
+    const nPlanetPart = Math.min(planetEdges.length, SUBVIEW_SIGNAL_MAX);
+    for (let qi = 0; qi < nPlanetPart; qi++) {
+      const ed = planetEdges[qi];
+      planetSignalParticles.push({
+        edge: ed,
+        progress: Math.random(),
+        speed: 0.003 + Math.random() * 0.004,
+        color: ed.color || 0x4ade80,
+      });
+    }
+
+    planetContainer._sim = planetSim;
+    planetContainer._edges = planetEdges;
+    planetContainer._edgeGfx = planetEdgeGfx;
+    planetContainer._signalGfx = planetSignalGfx;
+    planetContainer._signalParticles = planetSignalParticles;
+    planetContainer._nodes = planetNodes;
+
+    const titleText = new PIXI.Text(fileData.name || '', {
+      fontFamily: 'JetBrains Mono, monospace',
+      fontSize: 14,
+      fill: 0x06b6d4,
+      align: 'center',
+    });
+    titleText.alpha = 0.35;
+    titleText.anchor.set(0.5);
+    titleText.position.set(centerX, centerY);
+    titleText.eventMode = 'none';
+    planetContainer.addChild(titleText);
+    planetViewTitle = titleText;
+  }
+
+  function transitionToStar(dirId, clickedSimNode) {
+    if (!model || !world || !app) return;
+    if (viewLevel !== 'galaxy') return;
+    hideSymbolPopup();
+    killTweens();
+    selectedDir = dirId;
+    updateBreadcrumb();
+
+    let starClicked = clickedSimNode;
+    if (!starClicked) {
+      starClicked = simNodes.find(sn => sn.kind === 'directory' && sn.dirId === dirId) || null;
+    }
+    if (!starClicked) {
+      gsap.set(layerEdges, { alpha: 0 });
+      nodePool.forEach(p => {
+        if (p.container) gsap.set(p.container, { alpha: 0.08 });
+      });
+      createStarView(dirId, model.dirFilesMap[dirId] || []);
+      return;
+    }
+
+    const centerLocal = world.toLocal(new PIXI.Point(app.screen.width / 2, app.screen.height / 2));
+
+    for (let i = 0; i < simNodes.length; i++) {
+      const simNode = simNodes[i];
+      const pool = nodePool[i];
+      if (!pool || !pool.container) continue;
+      const isClicked = simNode === starClicked;
+      gsap.killTweensOf(pool.container);
+      gsap.killTweensOf(pool.container.scale);
+      if (isClicked) {
+        gsap.to(pool.container, {
+          x: centerLocal.x,
+          y: centerLocal.y,
+          duration: 0.5,
+          ease: 'power2.inOut',
+          onComplete: () => {
+            gsap.to(pool.container, { alpha: 0, duration: 0.3, ease: 'power2.out' });
+          },
+        });
+      } else {
+        gsap.to(pool.container, { alpha: 0.1, duration: 0.4, ease: 'power2.out' });
+      }
+    }
+
+    gsap.to(layerEdges, { alpha: 0, duration: 0.3 });
+
+    const files = model.dirFilesMap[dirId] || [];
+    gsap.delayedCall(0.85, () => {
+      if (viewLevel !== 'galaxy' || selectedDir !== dirId) return;
+      createStarView(dirId, files);
+    });
+  }
+
+  function transitionToPlanet(fileData) {
+    console.log('transitionToPlanet', fileData && fileData.name);
+    if (!model || !world || !app || viewLevel !== 'star') return;
+    hideSymbolPopup();
+    killTweens();
+    for (let ci = 0; ci < world.children.length; ci++) {
+      const ch = world.children[ci];
+      if (ch._omnixType === 'star') {
+        if (ch._sim) ch._sim.stop();
+        if (ch._edgeGfx) ch._edgeGfx.clear();
+        if (ch._signalGfx) ch._signalGfx.clear();
+      }
+    }
+    const symbols = getSymbolsForFile(fileData.filePath || fileData.name, selectedDir);
+    console.log('symbols found:', symbols.length);
+    selectedFile = fileData;
+    viewLevel = 'planet';
+    updateBreadcrumb();
+
+    for (let i = 0; i < starNodes.length; i++) {
+      const sn = starNodes[i];
+      if (!sn || !sn.container) continue;
+      const isSel = sn.fileData === fileData;
+      gsap.killTweensOf(sn.container);
+      gsap.killTweensOf(sn.container.scale);
+      if (isSel) {
+        const cx = app.screen.width / 2;
+        const cy = app.screen.height / 2;
+        gsap.to(sn.container, {
+          x: cx,
+          y: cy,
+          duration: 0.5,
+          ease: 'power2.inOut',
+          onComplete: () => {
+            gsap.to(sn.container, { alpha: 0, duration: 0.3 });
+          },
+        });
+      } else {
+        gsap.to(sn.container, { alpha: 0.05, duration: 0.4 });
+      }
+    }
+
+    gsap.delayedCall(0.85, () => {
+      if (viewLevel !== 'planet' || !selectedFile || selectedFile !== fileData) return;
+      createPlanetView(fileData, symbols);
+    });
+  }
+
+  function goBack() {
+    hideSymbolPopup();
+    if (viewLevel === 'planet') {
+      cleanupPlanetView();
+      viewLevel = 'star';
+      restoreStarView();
+    } else if (viewLevel === 'star') {
+      cleanupStarView();
+      viewLevel = 'galaxy';
+      selectedDir = null;
+      selectedFile = null;
+      restoreGalaxyView();
+    }
+  }
+
   function stopSimulation() {
     if (simulation) {
       simulation.stop();
@@ -1194,25 +2151,42 @@
       type: l.type,
       weight: l.weight,
     }));
+    simLinks.forEach(l => {
+      if (l._curveOffset == null) {
+        l._curveOffset = (Math.random() - 0.5) * 30;
+        l._curveOffset2 = (Math.random() - 0.5) * 15;
+      }
+    });
 
     const d3f = typeof d3 !== 'undefined' ? d3 : window.d3;
     if (!d3f || !d3f.forceSimulation) {
       console.error('d3-force not available');
+      SIGNAL_PARTICLES.length = 0;
       return;
     }
 
     if (!simNodes.length) {
+      SIGNAL_PARTICLES.length = 0;
       syncPixiFromSim();
       return;
     }
 
-    const isGalaxyView = viewLevel === 'galaxy';
-    const chargeStrength = isGalaxyView ? -120 : -420;
+    const isGalaxyView = simNodes.length > 0 && simNodes[0].kind === 'directory';
+    const chargeStrength = isGalaxyView ? -150 : -420;
     const collidePad = isGalaxyView ? 6 : 16;
     simulation = d3f.forceSimulation(simNodes)
       .force('charge', d3f.forceManyBody().strength(chargeStrength))
       .force('center', d3f.forceCenter(0, 0))
-      .force('collide', d3f.forceCollide().radius(d => (d.radius || 14) + collidePad))
+      .force(
+        'collide',
+        d3f.forceCollide().radius(d => {
+          if (isGalaxyView) {
+            const mass = d.childCount || 10;
+            return 8 + Math.sqrt(mass) * 1.5;
+          }
+          return (d.radius || 14) + collidePad;
+        })
+      )
       .alphaDecay(0.022)
       .velocityDecay(0.6);
     if (simLinks.length) {
@@ -1234,6 +2208,14 @@
 
     simulation.alpha(1);
     for (let i = 0; i < 120; i++) simulation.tick();
+
+    for (let hi = 0; hi < simNodes.length; hi++) {
+      const sn = simNodes[hi];
+      sn._heartbeatPhase = Math.random() * Math.PI * 2;
+      sn._heartbeatSpeed = 0.8 + Math.random() * 0.4;
+    }
+    initSignalParticles();
+
     syncPixiFromSim();
   }
 
@@ -1282,10 +2264,758 @@
     return simNodes.find(sn => sn.kind === 'directory' && sn.dirId === d) || null;
   }
 
+  function xrayEndpoint(gid, nodeById) {
+    const id = typeof gid === 'object' && gid && gid.id ? gid.id : gid;
+    if (!id || typeof id !== 'string') return { dir: null, label: '?', file: '' };
+    const n = nodeById.get(id);
+    const fp = graphIdToFilePath(id);
+    if (fp) {
+      return {
+        dir: dirname(fp),
+        label: basename(fp).split('::')[0] || fp,
+        file: fp,
+      };
+    }
+    if (n && n.type === 'dark_matter') {
+      return {
+        dir: null,
+        label: n.name || id.replace(/^dark:/, '') || 'dark',
+        file: '',
+        isDark: true,
+      };
+    }
+    return { dir: null, label: String(id).split('::')[0].split('/').pop() || id, file: '' };
+  }
+
+  function buildHealthBar(label, percent, color) {
+    const p = Math.max(0, Math.min(100, percent));
+    return (
+      '<div style="margin-bottom: 8px;">' +
+      '<div style="display: flex; justify-content: space-between; margin-bottom: 3px;">' +
+      '<span style="font-size: 11px; color: #94a3b8;">' + escapeHtml(label) + '</span>' +
+      '<span style="font-size: 11px; color: ' + color + ';">' + p + '%</span>' +
+      '</div>' +
+      '<div style="height: 4px; background: rgba(99,102,241,0.1); border-radius: 2px; overflow: hidden;">' +
+      '<div style="height: 100%; width: ' + p + '%; background: ' + color + '; border-radius: 2px;"></div>' +
+      '</div></div>'
+    );
+  }
+
+  function detectIssues(dirId, files, incoming, outgoing, entangledCount, darkForceCount, rawLinks) {
+    const issues = [];
+
+    const totalFunctions = files.reduce((sum, f) => sum + (f.symbolCount || 0), 0);
+
+    const circularImports = rawLinks.filter(
+      l =>
+        l.type === 'ENTANGLED' &&
+        l.metadata &&
+        (typeof l.metadata === 'string' ? l.metadata.includes('circular') : false) &&
+        ((typeof l.source === 'string' && l.source.startsWith(dirId)) ||
+          (typeof l.target === 'string' && l.target.startsWith(dirId)))
+    );
+    if (circularImports.length > 0) {
+      const names = circularImports.slice(0, 3).map(l => {
+        const other =
+          typeof l.source === 'string' && l.source.startsWith(dirId) ? l.target : l.source;
+        return typeof other === 'string' ? other.split('/').pop().split('::')[0] : '?';
+      });
+      issues.push({
+        severity: 'high',
+        icon: '🔴',
+        title: `Circular import${circularImports.length > 1 ? 's' : ''} detected`,
+        detail: `${names.join(', ')} — mutual dependency creates fragile coupling`,
+        fix: 'Extract shared types into a separate module',
+      });
+    }
+
+    if (entangledCount > 8) {
+      issues.push({
+        severity: 'high',
+        icon: '🔴',
+        title: `${entangledCount} entangled pairs — extreme coupling`,
+        detail: 'Changing this module risks breaking many dependents',
+        fix: 'Introduce API contracts/interfaces to decouple',
+      });
+    } else if (entangledCount > 4) {
+      issues.push({
+        severity: 'med',
+        icon: '🟡',
+        title: `${entangledCount} entangled pairs — moderate coupling`,
+        detail: 'Some tight coupling detected across module boundaries',
+        fix: 'Consider dependency inversion for the most entangled pairs',
+      });
+    }
+
+    if (darkForceCount > 3) {
+      issues.push({
+        severity: 'med',
+        icon: '🟡',
+        title: `${darkForceCount} dark matter dependencies`,
+        detail: 'Hidden env/config dependencies — missing var = silent failure',
+        fix: 'Add validation: check all required env vars at startup',
+      });
+    }
+
+    const godFiles = files.filter(f => (f.symbolCount || 0) > 100);
+    if (godFiles.length > 0) {
+      issues.push({
+        severity: 'high',
+        icon: '🔴',
+        title: `God file: ${godFiles[0].name} (${godFiles[0].symbolCount} symbols)`,
+        detail: 'Too many responsibilities in one file — hard to test and maintain',
+        fix: 'Split into focused modules by responsibility',
+      });
+    }
+
+    if (totalFunctions > 300) {
+      issues.push({
+        severity: 'med',
+        icon: '🟡',
+        title: `High complexity: ${totalFunctions} functions`,
+        detail: 'This module is very large — consider splitting',
+        fix: 'Extract sub-modules by domain/feature',
+      });
+    }
+
+    if (incoming > 20) {
+      issues.push({
+        severity: 'med',
+        icon: '🟡',
+        title: `High fan-in: ${incoming} incoming dependencies`,
+        detail: 'Many modules depend on this — changes have wide blast radius',
+        fix: 'Use versioned interfaces to prevent breaking changes',
+      });
+    }
+
+    if (outgoing > 15) {
+      issues.push({
+        severity: 'med',
+        icon: '🟡',
+        title: `High fan-out: ${outgoing} outgoing calls`,
+        detail: 'This module depends on many others — fragile to external changes',
+        fix: 'Introduce a facade or mediator pattern',
+      });
+    }
+
+    if (incoming === 0 && outgoing === 0 && files.length > 0) {
+      issues.push({
+        severity: 'low',
+        icon: '🟢',
+        title: 'Orphan module — no external connections',
+        detail: 'This module is isolated — possibly dead code or missing imports',
+        fix: 'Verify this module is actually used; remove if dead code',
+      });
+    }
+
+    const order = { high: 0, med: 1, low: 2 };
+    issues.sort((a, b) => order[a.severity] - order[b.severity]);
+
+    return issues;
+  }
+
+  function buildXrayHTML(simNode) {
+    const raw = rawGraphData || (model && model.raw);
+    const nodeById = model && model.nodeById;
+    if (!raw || !nodeById || !model) return '<p style="color:#64748b;font-size:12px;">No graph data.</p>';
+
+    const dirId = simNode.dirId != null ? simNode.dirId : (simNode.raw && simNode.raw.id) || '';
+    const dirName = dirId ? basename(dirId) || dirId : '(root)';
+    const rawLinks = raw.links || [];
+    const filesBase = (model.dirFilesMap[dirId] || []).map(f => ({ ...f }));
+
+    const connCountByFile = new Map();
+    for (const link of rawLinks) {
+      const sid = typeof link.source === 'object' ? link.source.id : link.source;
+      const tid = typeof link.target === 'object' ? link.target.id : link.target;
+      const sf = graphIdToFilePath(sid);
+      const tf = graphIdToFilePath(tid);
+      if (sf) {
+        const d = dirname(sf);
+        if (d === dirId) {
+          const k = basename(sf);
+          connCountByFile.set(k, (connCountByFile.get(k) || 0) + 1);
+        }
+      }
+      if (tf) {
+        const d = dirname(tf);
+        if (d === dirId) {
+          const k = basename(tf);
+          connCountByFile.set(k, (connCountByFile.get(k) || 0) + 1);
+        }
+      }
+    }
+    filesBase.sort((a, b) => {
+      const ca = connCountByFile.get(a.name) || 0;
+      const cb = connCountByFile.get(b.name) || 0;
+      if (cb !== ca) return cb - ca;
+      return (b.symbolCount || 0) - (a.symbolCount || 0);
+    });
+
+    const totalFunctions = filesBase.reduce((sum, f) => sum + (f.symbolCount || 0), 0);
+
+    let incoming = 0;
+    let outgoing = 0;
+    const connections = [];
+
+    for (const link of rawLinks) {
+      const sid = typeof link.source === 'object' ? link.source.id : link.source;
+      const tid = typeof link.target === 'object' ? link.target.id : link.target;
+      const sa = xrayEndpoint(sid, nodeById);
+      const tb = xrayEndpoint(tid, nodeById);
+      const sIn = sa.dir === dirId;
+      const tIn = tb.dir === dirId;
+      if (sIn && tIn) continue;
+      if (!sIn && !tIn) continue;
+
+      const lt = link.type || 'CALLS';
+
+      if (lt === 'DARK_FORCE') {
+        let darkE = null;
+        let fileE = null;
+        if (sa.isDark && tb.file) {
+          darkE = sa;
+          fileE = tb;
+        } else if (tb.isDark && sa.file) {
+          darkE = tb;
+          fileE = sa;
+        }
+        if (darkE && fileE && dirname(fileE.file) === dirId) {
+          incoming++;
+          connections.push({
+            direction: '⚡',
+            name: darkE.label || '?',
+            dir: '',
+            type: 'DARK',
+          });
+        }
+        continue;
+      }
+
+      if (sIn && !tIn) {
+        outgoing++;
+        connections.push({
+          direction: '→',
+          name: tb.label || '?',
+          dir: tb.dir != null ? tb.dir : '',
+          type: lt,
+        });
+      } else {
+        incoming++;
+        connections.push({
+          direction: '←',
+          name: sa.label || '?',
+          dir: sa.dir != null ? sa.dir : '',
+          type: lt,
+        });
+      }
+    }
+
+    const uniqueConnections = [];
+    const seen = new Set();
+    for (const c of connections) {
+      const key = c.direction + '\0' + c.name + '\0' + c.type + '\0' + c.dir;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueConnections.push(c);
+      }
+    }
+    const topConnections = uniqueConnections.slice(0, 15);
+
+    const maxComplexity = 500;
+    const complexity = Math.min(100, Math.round((totalFunctions / maxComplexity) * 100));
+    const connectivity = Math.min(100, Math.round(((incoming + outgoing) / 100) * 100));
+
+    const entangledCount = rawLinks.filter(l => {
+      if (l.type !== 'ENTANGLED') return false;
+      const sid = typeof l.source === 'object' ? l.source.id : l.source;
+      const tid = typeof l.target === 'object' ? l.target.id : l.target;
+      const sa = xrayEndpoint(sid, nodeById);
+      const tb = xrayEndpoint(tid, nodeById);
+      return sa.dir === dirId || tb.dir === dirId;
+    }).length;
+    const entanglementRisk = Math.min(100, entangledCount * 10);
+
+    const darkForceCount = rawLinks.filter(l => {
+      if (l.type !== 'DARK_FORCE') return false;
+      const tid = typeof l.target === 'object' ? l.target.id : l.target;
+      const tb = xrayEndpoint(tid, nodeById);
+      return tb.dir === dirId;
+    }).length;
+
+    const issues = detectIssues(dirId, filesBase, incoming, outgoing, entangledCount, darkForceCount, rawLinks);
+
+    const diagnosticsHTML =
+      issues.length > 0
+        ? `
+  <div style="margin-bottom: 20px;">
+    <div style="font-size: 12px; color: #ef4444; letter-spacing: 1px; margin-bottom: 10px; font-weight: 600;">
+      DIAGNOSTICS (${issues.length} issue${issues.length !== 1 ? 's' : ''})
+    </div>
+    ${issues
+      .map(
+        issue => `
+      <div style="
+        background: rgba(${issue.severity === 'high' ? '239,68,68' : issue.severity === 'med' ? '245,158,11' : '74,222,128'}, 0.06);
+        border-left: 3px solid ${issue.severity === 'high' ? '#ef4444' : issue.severity === 'med' ? '#f59e0b' : '#4ade80'};
+        border-radius: 0 6px 6px 0;
+        padding: 8px 10px;
+        margin-bottom: 6px;
+      ">
+        <div style="font-size: 12px; color: #e2e8f0; font-weight: 500;">
+          ${issue.icon} ${escapeHtml(issue.title)}
+        </div>
+        <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
+          ${escapeHtml(issue.detail)}
+        </div>
+        <div style="font-size: 10px; color: #6366f1; margin-top: 4px; font-style: italic;">
+          💡 ${escapeHtml(issue.fix)}
+        </div>
+      </div>
+    `
+      )
+      .join('')}
+  </div>
+`
+        : `
+  <div style="margin-bottom: 20px;">
+    <div style="font-size: 12px; color: #4ade80; letter-spacing: 1px; margin-bottom: 8px; font-weight: 600;">
+      DIAGNOSTICS
+    </div>
+    <div style="font-size: 12px; color: #4ade80; padding: 8px 10px; background: rgba(74,222,128,0.06); border-radius: 6px;">
+      ✅ No issues detected — this module looks healthy
+    </div>
+  </div>
+`;
+
+    const typeColors = {
+      CALLS: '#4ade80',
+      IMPORTS: '#f97316',
+      IMPORT: '#f97316',
+      DEFINES: '#3b82f6',
+      ENTANGLED: '#f59e0b',
+      DARK_FORCE: '#8b5cf6',
+      DARK: '#8b5cf6',
+    };
+
+    const filesHtml = filesBase.slice(0, 12).map(f => {
+      const ext = (f.name || '').toLowerCase();
+      const dotColor = ext.endsWith('.py') ? '#3b82f6' : ext.endsWith('.ts') || ext.endsWith('.tsx') || ext.endsWith('.js') ? '#06b6d4' : '#8b5cf6';
+      const nm = f.name || '';
+      const disp = nm.length > 28 ? nm.slice(0, 26) + '…' : nm;
+      return (
+        '<div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(99,102,241,0.08);">' +
+        '<span style="font-size: 12px; color: #e2e8f0; font-family: \'JetBrains Mono\', monospace;">' +
+        '<span style="color: ' + dotColor + ';">●</span> ' + escapeHtml(disp) +
+        '</span>' +
+        '<span style="font-size: 11px; color: #4ade80;">⚡' + (f.symbolCount || 0) + '</span>' +
+        '</div>'
+      );
+    }).join('');
+
+    const connRows = topConnections.map(c => {
+      const nm = c.name.length > 24 ? c.name.slice(0, 22) + '…' : c.name;
+      const tc = typeColors[c.type] || '#64748b';
+      return (
+        '<div style="display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid rgba(99,102,241,0.05);">' +
+        '<span style="font-size: 11px; color: #94a3b8;">' + escapeHtml(c.direction + ' ' + nm) + '</span>' +
+        '<span style="font-size: 10px; color: ' + tc + '; font-family: \'JetBrains Mono\', monospace;">' + escapeHtml(c.type) + '</span>' +
+        '</div>'
+      );
+    }).join('');
+
+    return (
+      '<div style="margin-bottom: 20px;">' +
+      '<div style="font-family: \'Syne\', sans-serif; font-size: 13px; color: #6366f1; letter-spacing: 2px; margin-bottom: 4px;">X-RAY</div>' +
+      '<div style="font-size: 18px; font-weight: 600; color: #fff;">' + escapeHtml(dirName) + '</div>' +
+      '<div style="font-size: 12px; color: #64748b; margin-top: 2px;">' + escapeHtml(dirId || '·') + '</div>' +
+      '</div>' +
+      '<div style="display: flex; gap: 16px; margin-bottom: 20px;">' +
+      '<div style="background: rgba(99,102,241,0.1); border-radius: 8px; padding: 10px 14px; flex:1;">' +
+      '<div style="font-size: 20px; font-weight: 700; color: #6366f1;">' + filesBase.length + '</div>' +
+      '<div style="font-size: 11px; color: #64748b;">files</div></div>' +
+      '<div style="background: rgba(74,222,128,0.1); border-radius: 8px; padding: 10px 14px; flex:1;">' +
+      '<div style="font-size: 20px; font-weight: 700; color: #4ade80;">' + totalFunctions + '</div>' +
+      '<div style="font-size: 11px; color: #64748b;">functions</div></div>' +
+      '<div style="background: rgba(245,158,11,0.1); border-radius: 8px; padding: 10px 14px; flex:1;">' +
+      '<div style="font-size: 20px; font-weight: 700; color: #f59e0b;">' + (incoming + outgoing) + '</div>' +
+      '<div style="font-size: 11px; color: #64748b;">connections</div></div>' +
+      '</div>' +
+      '<div style="margin-bottom: 20px;">' +
+      '<div style="font-size: 12px; color: #6366f1; letter-spacing: 1px; margin-bottom: 8px; font-weight: 600;">FILES (by connections)</div>' +
+      filesHtml +
+      (filesBase.length > 12 ? '<div style="font-size: 11px; color: #64748b; padding: 4px 0;">…' + (filesBase.length - 12) + ' more</div>' : '') +
+      '</div>' +
+      '<div style="margin-bottom: 20px;">' +
+      '<div style="font-size: 12px; color: #6366f1; letter-spacing: 1px; margin-bottom: 8px; font-weight: 600;">CONNECTIONS</div>' +
+      '<div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;">' +
+      '<span style="font-size: 11px; color: #4ade80;">→ ' + outgoing + ' outgoing</span>' +
+      '<span style="font-size: 11px; color: #f97316;">← ' + incoming + ' incoming</span>' +
+      (darkForceCount > 0 ? '<span style="font-size: 11px; color: #8b5cf6;">⚡ ' + darkForceCount + ' dark</span>' : '') +
+      '</div>' +
+      connRows +
+      '</div>' +
+      diagnosticsHTML +
+      '<div>' +
+      '<div style="font-size: 12px; color: #6366f1; letter-spacing: 1px; margin-bottom: 10px; font-weight: 600;">HEALTH</div>' +
+      buildHealthBar('Complexity', complexity, '#6366f1') +
+      buildHealthBar('Connectivity', connectivity, '#4ade80') +
+      buildHealthBar('Entanglement risk', entanglementRisk, '#f59e0b') +
+      '</div>' +
+      buildXrayAiSection(dirId)
+    );
+  }
+
+  function buildXrayAiSection(dirId) {
+    const djs = JSON.stringify(dirId == null ? '' : String(dirId));
+    if (aiAvailable) {
+      return (
+        '<div style="margin-top: 20px; border-top: 1px solid rgba(99,102,241,0.2); padding-top: 16px;">' +
+        '<div style="font-size: 12px; color: #a855f7; letter-spacing: 1px; margin-bottom: 10px; font-weight: 600;">' +
+        '🧠 AI AGENT <span style="font-size: 10px; color: #64748b; font-weight: 400;">(' +
+        escapeHtml(aiProvider) +
+        ')</span></div>' +
+        '<div style="display: flex; flex-direction: column; gap: 6px;">' +
+        '<button type="button" onclick="runAIDiagnose(' +
+        djs +
+        ')" style="' +
+        "background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.3);" +
+        "color: #a855f7; padding: 8px 12px; border-radius: 6px; cursor: pointer;" +
+        "font-family: 'Outfit', sans-serif; font-size: 12px; text-align: left;" +
+        '">🔍 Diagnose Issues</button>' +
+        '<button type="button" onclick="runAISecurity(' +
+        djs +
+        ')" style="' +
+        "background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3);" +
+        "color: #ef4444; padding: 8px 12px; border-radius: 6px; cursor: pointer;" +
+        "font-family: 'Outfit', sans-serif; font-size: 12px; text-align: left;" +
+        '">🛡️ Security Scan</button>' +
+        '<button type="button" onclick="runAIArchitecture()" style="' +
+        "background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3);" +
+        "color: #3b82f6; padding: 8px 12px; border-radius: 6px; cursor: pointer;" +
+        "font-family: 'Outfit', sans-serif; font-size: 12px; text-align: left;" +
+        '">🏗️ Explain Architecture</button>' +
+        '</div>' +
+        '<div style="margin-top: 10px;">' +
+        '<div style="display: flex; gap: 6px;">' +
+        '<input type="text" id="ai-question-input" placeholder="Ask about this module..." ' +
+        'style="flex:1; background: rgba(10,15,26,0.8); border: 1px solid rgba(99,102,241,0.2); ' +
+        'color: #e2e8f0; padding: 6px 10px; border-radius: 6px; font-size: 12px; ' +
+        'font-family: \'Outfit\', sans-serif; outline: none;" />' +
+        '<button type="button" onclick="runAIAsk(' +
+        djs +
+        ')" style="' +
+        "background: rgba(99,102,241,0.2); border: 1px solid rgba(99,102,241,0.3);" +
+        "color: #6366f1; padding: 6px 12px; border-radius: 6px; cursor: pointer;" +
+        'font-size: 12px;">Ask</button>' +
+        '</div></div>' +
+        '<div id="ai-response" style="margin-top: 10px;"></div>' +
+        '</div>'
+      );
+    }
+    return (
+      '<div style="margin-top: 20px; border-top: 1px solid rgba(99,102,241,0.1); padding-top: 12px;">' +
+      '<div style="font-size: 11px; color: #64748b;">' +
+      '🧠 AI Agent unavailable — set OMNIX_AI_KEY or install Ollama' +
+      '</div></div>'
+    );
+  }
+
+  function showAILoading(message) {
+    const el = document.getElementById('ai-response');
+    if (!el) return;
+    el.innerHTML =
+      '<div style="color: #a855f7; font-size: 12px; padding: 8px;">' +
+      '<span style="display: inline-block; animation: pulse 1s infinite;">⏳</span> ' +
+      escapeHtml(message) +
+      '</div>';
+  }
+
+  function renderAIResponse(data) {
+    const el = document.getElementById('ai-response');
+    if (!el) return;
+
+    if (data.error) {
+      el.innerHTML =
+        '<div style="color: #ef4444; font-size: 12px; padding: 8px;">❌ ' +
+        escapeHtml(String(data.error)) +
+        '</div>';
+      return;
+    }
+
+    if (data.diagnosis) {
+      const d = data.diagnosis;
+      const severityColor =
+        d.severity === 'high' ? '#ef4444' : d.severity === 'medium' ? '#f59e0b' : '#4ade80';
+      const steps = (data.reasoning_steps || [])
+        .map(s => '<div style="font-size: 10px; color: #64748b; padding: 2px 0;">→ ' + escapeHtml(String(s)) + '</div>')
+        .join('');
+      const fixes = (data.fixes || [])
+        .map(
+          (f, i) =>
+            '<div style="margin-top: 8px; background: rgba(74,222,128,0.05); border-left: 2px solid #4ade80; padding: 8px; border-radius: 0 4px 4px 0;">' +
+            '<div style="font-size: 12px; color: #4ade80; font-weight: 500;">Fix ' +
+            (i + 1) +
+            ': ' +
+            escapeHtml(String(f.title || '')) +
+            '</div>' +
+            '<div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">' +
+            escapeHtml(String(f.description || '')) +
+            '</div>' +
+            (f.code_changes
+              ? '<pre style="font-size: 10px; color: #e2e8f0; background: rgba(0,0,0,0.3); padding: 6px; border-radius: 4px; margin-top: 4px; overflow-x: auto; font-family: \'JetBrains Mono\', monospace;">' +
+                escapeHtml(String(f.code_changes)) +
+                '</pre>'
+              : '') +
+            '<div style="font-size: 10px; color: #64748b; margin-top: 2px;">Risk: ' +
+            escapeHtml(String(f.risk || '?')) +
+            ' · Effort: ' +
+            escapeHtml(String(f.effort || '?')) +
+            '</div></div>'
+        )
+        .join('');
+      el.innerHTML =
+        '<div style="background: rgba(168,85,247,0.05); border-radius: 8px; padding: 12px; margin-top: 8px;">' +
+        '<div style="font-size: 13px; color: #e2e8f0; font-weight: 600; margin-bottom: 6px;">' +
+        escapeHtml(String(d.summary || '')) +
+        '</div>' +
+        '<div style="font-size: 11px; color: #94a3b8; margin-bottom: 8px;">' +
+        escapeHtml(String(d.root_cause || '')) +
+        '</div>' +
+        '<div style="display: flex; gap: 8px; margin-bottom: 8px;">' +
+        '<span style="font-size: 10px; color: ' +
+        severityColor +
+        '; background: ' +
+        severityColor +
+        '22; padding: 2px 8px; border-radius: 4px;">' +
+        escapeHtml(String(d.severity || 'unknown')) +
+        '</span>' +
+        '<span style="font-size: 10px; color: #a855f7; background: rgba(168,85,247,0.1); padding: 2px 8px; border-radius: 4px;">Confidence: ' +
+        escapeHtml(String(d.confidence != null ? d.confidence : 0)) +
+        '%</span></div>' +
+        steps +
+        fixes +
+        '</div>' +
+        '<div style="font-size: 10px; color: #64748b; margin-top: 6px;">via ' +
+        escapeHtml(String(data.provider || 'unknown')) +
+        '</div>';
+      return;
+    }
+
+    if (data.answer) {
+      el.innerHTML =
+        '<div style="background: rgba(99,102,241,0.05); border-radius: 8px; padding: 12px; margin-top: 8px;">' +
+        '<div style="font-size: 12px; color: #e2e8f0; white-space: pre-wrap;">' +
+        escapeHtml(String(data.answer)) +
+        '</div>' +
+        '<div style="font-size: 10px; color: #64748b; margin-top: 6px;">via ' +
+        escapeHtml(String(data.provider || 'unknown')) +
+        '</div></div>';
+      return;
+    }
+
+    if (data.vulnerabilities) {
+      const vulns = (data.vulnerabilities || [])
+        .map(v => {
+          const border =
+            v.severity === 'critical'
+              ? '#ef4444'
+              : v.severity === 'high'
+                ? '#f59e0b'
+                : '#4ade80';
+          return (
+            '<div style="margin-top: 6px; padding: 6px; border-left: 2px solid ' +
+            border +
+            '; background: rgba(0,0,0,0.2); border-radius: 0 4px 4px 0;">' +
+            '<div style="font-size: 11px; color: #e2e8f0;">' +
+            escapeHtml(String(v.type || '')) +
+            ': ' +
+            escapeHtml(String(v.description || '')) +
+            '</div>' +
+            '<div style="font-size: 10px; color: #64748b;">' +
+            escapeHtml(String(v.file || '')) +
+            (v.line ? ':' + escapeHtml(String(v.line)) : '') +
+            ' · ' +
+            escapeHtml(String(v.cwe || '')) +
+            '</div>' +
+            '<div style="font-size: 10px; color: #4ade80; margin-top: 2px;">💡 ' +
+            escapeHtml(String(v.fix || '')) +
+            '</div></div>'
+          );
+        })
+        .join('');
+      el.innerHTML =
+        '<div style="background: rgba(239,68,68,0.05); border-radius: 8px; padding: 12px; margin-top: 8px;">' +
+        '<div style="font-size: 13px; color: #ef4444; font-weight: 600; margin-bottom: 6px;">🛡️ ' +
+        escapeHtml(String(data.scan_summary || 'Security Scan Complete')) +
+        '</div>' +
+        vulns +
+        '</div>';
+      return;
+    }
+
+    el.innerHTML =
+      '<div style="font-size: 12px; color: #e2e8f0; padding: 8px; white-space: pre-wrap;">' +
+      escapeHtml(JSON.stringify(data, null, 2)) +
+      '</div>';
+  }
+
+  async function runAIDiagnose(dirId) {
+    showAILoading('Diagnosing issues...');
+    try {
+      const resp = await fetch('/api/ai/diagnose', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ directory: dirId }),
+      });
+      const data = await resp.json();
+      renderAIResponse(data);
+    } catch (e) {
+      renderAIResponse({ error: e.message });
+    }
+  }
+
+  async function runAISecurity(dirId) {
+    showAILoading('Running security scan...');
+    try {
+      const resp = await fetch('/api/ai/security', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ directory: dirId }),
+      });
+      const data = await resp.json();
+      renderAIResponse(data);
+    } catch (e) {
+      renderAIResponse({ error: e.message });
+    }
+  }
+
+  async function runAIArchitecture() {
+    showAILoading('Analyzing architecture...');
+    try {
+      const resp = await fetch('/api/ai/architecture', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await resp.json();
+      renderAIResponse(data);
+    } catch (e) {
+      renderAIResponse({ error: e.message });
+    }
+  }
+
+  async function runAIAsk(dirId) {
+    const input = document.getElementById('ai-question-input');
+    const question = input ? input.value.trim() : '';
+    if (!question) return;
+    showAILoading('Thinking...');
+    try {
+      const resp = await fetch('/api/ai/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, directory: dirId }),
+      });
+      const data = await resp.json();
+      renderAIResponse(data);
+    } catch (e) {
+      renderAIResponse({ error: e.message });
+    }
+  }
+
+  window.runAIDiagnose = runAIDiagnose;
+  window.runAISecurity = runAISecurity;
+  window.runAIArchitecture = runAIArchitecture;
+  window.runAIAsk = runAIAsk;
+
+  async function openXray(simNode) {
+    const panel = document.getElementById('xray-panel');
+    const content = document.getElementById('xray-content');
+    if (!panel || !content) return;
+    let did = simNode.dirId;
+    if (did === undefined || did === null) did = simNode.raw && simNode.raw.id;
+    if (did === undefined || did === null) return;
+
+    xrayDirId = did;
+    await ensureAiStatus();
+    content.innerHTML = buildXrayHTML(simNode);
+    panel.scrollTop = 0;
+    gsap.to(panel, { right: 0, duration: 0.4, ease: 'power3.out' });
+    xrayOpen = true;
+  }
+
+  function closeXray() {
+    const panel = document.getElementById('xray-panel');
+    if (!panel) return;
+    gsap.to(panel, { right: -400, duration: 0.3, ease: 'power2.in' });
+    xrayOpen = false;
+    xrayDirId = null;
+  }
+
+  function openXrayForDir(dirId) {
+    if (dirId === undefined || dirId === null || dirId === '') return;
+    const pseudo = { dirId, raw: { id: dirId } };
+    if (xrayOpen && xrayDirId === dirId) closeXray();
+    else void openXray(pseudo);
+  }
+
+  function countSymbolConnections(symId, filePath) {
+    let c = 0;
+    const links = (rawGraphData && rawGraphData.links) || [];
+    for (let li = 0; li < links.length; li++) {
+      const l = links[li];
+      if (l.type !== 'CALLS') continue;
+      const sid = typeof l.source === 'object' ? l.source.id : l.source;
+      const tid = typeof l.target === 'object' ? l.target.id : l.target;
+      if (sid !== symId && tid !== symId) continue;
+      const other = sid === symId ? tid : sid;
+      const on = model && model.nodeById.get(other);
+      if (on && on.file === filePath) c += 1;
+    }
+    return c;
+  }
+
+  function hideSymbolPopup() {
+    if (symbolPopupEl) symbolPopupEl.style.display = 'none';
+  }
+
+  function showSymbolDetailPopup(sym, fileData) {
+    if (!symbolPopupEl) {
+      symbolPopupEl = document.createElement('div');
+      symbolPopupEl.id = 'omnix-symbol-popup';
+      symbolPopupEl.style.cssText =
+        'position:fixed;z-index:50;max-width:340px;padding:14px 16px;background:rgba(17,26,46,0.96);border:1px solid rgba(99,102,241,0.35);border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,0.5);font-family:JetBrains Mono,monospace;font-size:12px;color:#e2e8f0;display:none;';
+      document.body.appendChild(symbolPopupEl);
+    }
+    const fp = fileData.filePath || resolveDirFilePath(fileData.dirId, fileData.name);
+    const conn = sym.id ? countSymbolConnections(sym.id, fp) : 0;
+    symbolPopupEl.innerHTML =
+      '<div style="font-weight:600;color:#fff;margin-bottom:8px;">' +
+      escapeHtml(sym.name) +
+      '</div>' +
+      '<div style="color:#94a3b8;font-size:11px;">' +
+      escapeHtml(sym.type || '') +
+      ' · line ' +
+      (sym.line != null ? sym.line : '?') +
+      ' · complexity ' +
+      (sym.complexity != null ? sym.complexity : '—') +
+      '</div>' +
+      '<div style="margin-top:8px;color:#64748b;font-size:11px;">Connections: <span style="color:#4ade80">' +
+      conn +
+      '</span></div>' +
+      '<div style="margin-top:10px;text-align:right;"><button type="button" id="omnix-symbol-popup-close" style="font-size:11px;padding:4px 10px;cursor:pointer;border-radius:6px;border:1px solid #475569;background:#1e293b;color:#e2e8f0;">Close</button></div>';
+    symbolPopupEl.style.left = Math.min(window.innerWidth - 360, window.innerWidth / 2 - 170) + 'px';
+    symbolPopupEl.style.top = '100px';
+    symbolPopupEl.style.display = 'block';
+    const btn = document.getElementById('omnix-symbol-popup-close');
+    if (btn) btn.onclick = () => { symbolPopupEl.style.display = 'none'; };
+  }
+
   function drawDarkMatterOverlay() {
     if (!app || !model || !darkMatterGfx) return;
     darkMatterGfx.clear();
-    if (!darkMatterVisible || viewLevel !== 'galaxy' || !simNodes.length) return;
+    if (viewLevel !== 'galaxy') return;
+    if (!darkMatterVisible || !simNodes.length) return;
 
     const raw = model.raw;
     const darkNodes = raw.nodes.filter(n => n.type === 'dark_matter').slice(0, MAX_DARK_MATTER_DRAW);
@@ -1345,7 +3075,8 @@
   function drawEntanglementOverlay() {
     if (!app || !model || !entanglementGfx) return;
     entanglementGfx.clear();
-    if (viewLevel !== 'galaxy' || !simNodes.length) return;
+    if (viewLevel !== 'galaxy') return;
+    if (!simNodes.length) return;
 
     const entangledEdges = model.raw.links.filter(l => l.type === 'ENTANGLED').slice(0, MAX_ENTANGLED_DRAW);
     if (!entangledEdges.length) return;
@@ -1378,18 +3109,31 @@
   }
 
   function syncPixiFromSim() {
-    const labelIdSet =
-      viewLevel === 'star' || viewLevel === 'planet' ? top20LabelIds() : null;
+    if (viewLevel !== 'galaxy') {
+      for (let i = 0; i < nodePool.length; i++) {
+        const p = nodePool[i];
+        if (!p || !p.container) continue;
+        p.container.visible = false;
+        p.container.eventMode = 'none';
+        p.simNode = null;
+        if (p.label) p.label.visible = false;
+      }
+      for (let k = 0; k < edgePool.length; k++) {
+        if (edgePool[k]) edgePool[k].visible = false;
+      }
+      return;
+    }
 
     simNodes.forEach((sn, i) => {
       const p = acquireNodePool(i);
       p.simNode = sn;
       p.container.visible = true;
+      p.container.eventMode = 'static';
       p.container.x = sn.x;
       p.container.y = sn.y;
       p.container.alpha = searchQuery && !nodeMatchesSearch(sn) ? 0.25 : 1;
       const rVis = sn.radius || 12;
-      const hitMult = viewLevel === 'galaxy' ? 1.35 : 1.5;
+      const hitMult = 1.35;
       p.container.hitArea = new PIXI.Circle(0, 0, rVis * hitMult);
       const sh = p.shape;
       const kind = sn.kind;
@@ -1409,23 +3153,7 @@
 
       const lab = p.label;
       if (lab) {
-        if (viewLevel === 'star' && kind === 'file') {
-          const nm = sn.name || basename(sn.file || '');
-          const allow = !labelIdSet || labelIdSet.has(sn.id);
-          lab.visible = allow && !!nm;
-          lab.text = truncateGraphLabel(nm, 24);
-          lab.style.fontSize = 11;
-          lab.position.set(0, rVis + 6);
-        } else if (viewLevel === 'planet' && (kind === 'function' || kind === 'class')) {
-          const nm = sn.name || '';
-          const allow = !labelIdSet || labelIdSet.has(sn.id);
-          lab.visible = allow && !!nm;
-          lab.text = truncateGraphLabel(nm, 24);
-          lab.style.fontSize = 10;
-          lab.position.set(0, rVis + 5);
-        } else {
-          lab.visible = false;
-        }
+        lab.visible = false;
       }
     });
     for (let j = simNodes.length; j < nodePool.length; j++) {
@@ -1435,6 +3163,15 @@
     }
 
     const maxE = Math.min(simLinks.length, MAX_POOL_EDGES);
+    let maxWeightNorm = 1;
+    if (model && model.maxEdgeWeight > 0) {
+      maxWeightNorm = model.maxEdgeWeight;
+    } else {
+      for (let ei = 0; ei < maxE; ei++) {
+        const w = simLinks[ei].weight || 1;
+        if (w > maxWeightNorm) maxWeightNorm = w;
+      }
+    }
     for (let e = 0; e < maxE; e++) {
       const g = acquireEdgePool(e);
       const l = simLinks[e];
@@ -1451,10 +3188,21 @@
         continue;
       }
       g.visible = true;
-      const col = edgeColor(l.type);
-      const wGal = 0.5 + Math.log(1 + (l.weight || 1)) * 0.6;
-      const mx = (s.x + t.x) / 2;
-      const my = (s.y + t.y) / 2;
+      const weight = l.weight || 1;
+      const normalizedWeight = Math.min(weight / maxWeightNorm, 1);
+      const edgeWidth = 0.5 + normalizedWeight * 3;
+      const edgeAlphaGalaxy = 0.08 + normalizedWeight * 0.25;
+      const lt = l.type || 'CALLS';
+      const col =
+        lt === 'ENTANGLED'
+          ? 0xf59e0b
+          : lt === 'DARK_FORCE'
+            ? 0x8b5cf6
+            : normalizedWeight > 0.5
+              ? lerpColor(0x1a4a2e, 0x4ade80, normalizedWeight)
+              : lerpColor(0x1a1a2e, 0x3b4a6b, normalizedWeight);
+      const mx = (s.x + t.x) / 2 + (l._curveOffset || 0);
+      const my = (s.y + t.y) / 2 + (l._curveOffset2 || 0);
       const dx = t.x - s.x;
       const dy = t.y - s.y;
       const len = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -1463,23 +3211,48 @@
       const cx = mx + ox;
       const cy = my + oy;
       g.clear();
-      if (viewLevel === 'galaxy') {
-        g.lineStyle(wGal, col, 0.35);
-      } else {
-        const hid = hoveredSimNode && hoveredSimNode.id;
-        const connected = hid && (sid === hid || tid === hid);
-        g.lineStyle(1, col, connected ? 0.72 : 0.15);
-      }
+      g.lineStyle(edgeWidth, col, edgeAlphaGalaxy);
       g.moveTo(s.x, s.y);
       g.bezierCurveTo(cx, cy, cx, cy, t.x, t.y);
     }
     for (let k = maxE; k < edgePool.length; k++) edgePool[k].visible = false;
   }
 
+  /** True if pointer is within `screenThresholdPx` (screen space) of any file orbit dot for this directory. */
+  function isPointerNearGalaxyDirFileOrbits(dirNode, worldMouse, scale, screenThresholdPx) {
+    if (!dirNode || !model) return false;
+    const wScale = dirNode._warpScale || 1;
+    if (wScale <= 1.5) return false;
+    const files = model.dirFilesMap[dirNode.dirId] || [];
+    const topFiles = files.slice(0, 30);
+    if (!topFiles.length) return false;
+    const baseR2 = dirNode.radius || 18;
+    const orbitRadius = wScale * baseR2 * 3;
+    const cx = dirNode.x;
+    const cy = dirNode.y;
+    const n = topFiles.length;
+    for (let i = 0; i < n; i++) {
+      const angle = (i / n) * Math.PI * 2;
+      const fx = cx + Math.cos(angle) * orbitRadius;
+      const fy = cy + Math.sin(angle) * orbitRadius;
+      const dx = worldMouse.x - fx;
+      const dy = worldMouse.y - fy;
+      const screenDist = Math.sqrt(dx * dx + dy * dy) * scale;
+      if (screenDist < screenThresholdPx) return true;
+    }
+    return false;
+  }
+
   // Gravitational hover + batched child file orbit (galaxy only). Neighbor push deferred — TODO: WebGPU version.
   function updateGalaxyGravitationalHover() {
     if (!_gravScreenPt) _gravScreenPt = new PIXI.Point();
     const hideOrbitLabels = () => {
+      visibleChildFiles.length = 0;
+      if (stickyTimeout) {
+        clearTimeout(stickyTimeout);
+        stickyTimeout = null;
+      }
+      stickyDir = null;
       if (!childrenGfx) return;
       childrenGfx.clear();
       for (let i = 0; i < galaxyLabelPool.length; i++) {
@@ -1491,14 +3264,24 @@
       }
     };
 
-    if (!entranceDone || viewLevel !== 'galaxy' || !world || !childrenGfx || !app || !model) {
+    if (viewLevel !== 'galaxy') {
       hideOrbitLabels();
+      if (app && app.view) app.view.style.cursor = 'default';
+      return;
+    }
+
+    if (!entranceDone || !world || !childrenGfx || !app || !model) {
+      hideOrbitLabels();
+      if (app && app.view) app.view.style.cursor = 'default';
       return;
     }
     if (!simNodes.length) {
       hideOrbitLabels();
+      if (app && app.view) app.view.style.cursor = 'default';
       return;
     }
+
+    visibleChildFiles.length = 0;
 
     const pointer = app.renderer.events && app.renderer.events.pointer;
     const pg = pointer && pointer.global;
@@ -1514,8 +3297,8 @@
     const sh = app.screen.height;
     const margin = 280;
 
-    let closestNode = null;
-    let closestDist = Infinity;
+    let rawClosest = null;
+    let rawDist = Infinity;
 
     for (let si = 0; si < simNodes.length; si++) {
       const simNode = simNodes[si];
@@ -1529,15 +3312,53 @@
       const dy = worldMouse.y - simNode.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
       const screenDist = dist * scale;
-      if (screenDist < 250 && screenDist < closestDist) {
-        closestDist = screenDist;
-        closestNode = simNode;
+      const pickR = galaxyDirectoryHoverScreenRadius(simNode, scale);
+      if (screenDist < pickR && screenDist < rawDist) {
+        rawDist = screenDist;
+        rawClosest = simNode;
       }
     }
+
+    let closestNode = rawClosest;
+    let closestDist = rawDist;
+    let nearChildFile = false;
 
     if (!pg) {
       closestNode = null;
       closestDist = Infinity;
+      if (stickyTimeout) {
+        clearTimeout(stickyTimeout);
+        stickyTimeout = null;
+      }
+      stickyDir = null;
+    } else {
+      if (stickyDir) {
+        nearChildFile = isPointerNearGalaxyDirFileOrbits(stickyDir, worldMouse, scale, 40);
+      }
+
+      if (rawClosest && rawDist < galaxyDirectoryHoverScreenRadius(rawClosest, scale)) {
+        stickyDir = rawClosest;
+        if (stickyTimeout) {
+          clearTimeout(stickyTimeout);
+          stickyTimeout = null;
+        }
+      } else if (nearChildFile && stickyDir) {
+        closestNode = stickyDir;
+        closestDist = 100;
+        if (stickyTimeout) {
+          clearTimeout(stickyTimeout);
+          stickyTimeout = null;
+        }
+      } else if (stickyDir) {
+        if (!stickyTimeout) {
+          stickyTimeout = setTimeout(() => {
+            stickyDir = null;
+            stickyTimeout = null;
+          }, STICKY_DELAY);
+        }
+        closestNode = stickyDir;
+        closestDist = 140;
+      }
     }
 
     for (let si = 0; si < simNodes.length; si++) {
@@ -1545,9 +3366,13 @@
       if (sn.kind !== 'directory') continue;
       sn._warpScale = sn._warpScale || 1;
       if (sn === closestNode && closestNode) {
-        const proximity = 1 - closestDist / 250;
+        const hoverR = galaxyDirectoryHoverScreenRadius(closestNode, scale);
+        const proximity = 1 - closestDist / hoverR;
         const massScale = Math.min((closestNode.childCount || 10) / 50, 1.5);
-        const targetScale = 1 + proximity * proximity * 2.0 * massScale;
+        const targetScale = Math.min(
+          1 + proximity * proximity * 1.5 * massScale,
+          GALAXY_MAX_WARP_SCALE
+        );
         sn._warpScale += (targetScale - sn._warpScale) * 0.12;
       } else {
         sn._warpScale += (1.0 - sn._warpScale) * 0.12;
@@ -1583,7 +3408,7 @@
       childrenGfx.lineStyle(0);
     }
 
-    const showFiles = !!(cn && pg && wScale > 1.5 && closestDist <= 150);
+    const showFiles = !!(cn && pg && wScale > 1.5 && closestDist <= 140);
     let topFiles = [];
     let childAlpha = 0;
     let orbitRadius = 0;
@@ -1603,17 +3428,41 @@
           const angle = (i / n) * Math.PI * 2;
           const fx = cx + Math.cos(angle) * orbitRadius;
           const fy = cy + Math.sin(angle) * orbitRadius;
-          const fileRadius = 4 + Math.min(topFiles[i].symbolCount / 10, 8);
-          const isPython = topFiles[i].name.endsWith('.py');
-          const color = isPython ? COLORS.filePython : COLORS.fileTS;
-          childrenGfx.beginFill(color, 0.15 * childAlpha);
-          childrenGfx.drawCircle(fx, fy, fileRadius * 2.5);
+          const fileRadius = 8 + Math.min(topFiles[i].symbolCount / 5, 12);
+          const lang = extLang(topFiles[i].name);
+          const color =
+            lang === 'py' ? COLORS.filePython : lang === 'ts' ? COLORS.fileTS : COLORS.fileMixed;
+          const fp = resolveDirFilePath(cn.dirId, topFiles[i].name);
+          const dx = worldMouse.x - fx;
+          const dy = worldMouse.y - fy;
+          const distToFile = Math.sqrt(dx * dx + dy * dy) * scale;
+          const isHovered = distToFile < 30;
+          const drawRadius = isHovered ? fileRadius * 1.4 : fileRadius;
+          const drawAlpha = isHovered ? Math.min(1, childAlpha * 1.5) : childAlpha;
+          visibleChildFiles.push({
+            x: fx,
+            y: fy,
+            radius: fileRadius,
+            name: topFiles[i].name,
+            symbolCount: topFiles[i].symbolCount,
+            dirId: cn.dirId,
+            fileId: topFiles[i].id,
+            filePath: fp,
+          });
+          childrenGfx.beginFill(color, 0.2 * drawAlpha);
+          childrenGfx.drawCircle(fx, fy, drawRadius * (isHovered ? 3 : 2.5));
           childrenGfx.endFill();
-          childrenGfx.beginFill(color, 0.8 * childAlpha);
-          childrenGfx.drawCircle(fx, fy, fileRadius);
+          childrenGfx.beginFill(color, 0.85 * drawAlpha);
+          childrenGfx.drawCircle(fx, fy, drawRadius);
           childrenGfx.endFill();
-          childrenGfx.lineStyle(1, 0xffffff, 0.3 * childAlpha);
-          childrenGfx.drawCircle(fx, fy, fileRadius);
+          if (isHovered) {
+            childrenGfx.lineStyle(2, 0xffffff, 0.8 * drawAlpha);
+          } else if (topFiles[i].symbolCount >= 50) {
+            childrenGfx.lineStyle(2, 0xffffff, 0.5 * childAlpha);
+          } else {
+            childrenGfx.lineStyle(1, 0xffffff, 0.3 * childAlpha);
+          }
+          childrenGfx.drawCircle(fx, fy, drawRadius);
           childrenGfx.lineStyle(0);
         }
       }
@@ -1627,16 +3476,320 @@
         const angle = (i / n) * Math.PI * 2;
         const fx = cn.x + Math.cos(angle) * orbitRadius;
         const fy = cn.y + Math.sin(angle) * orbitRadius;
-        const fileRadius = 4 + Math.min(topFiles[i].symbolCount / 10, 8);
+        const fileRadius = 8 + Math.min(topFiles[i].symbolCount / 5, 12);
         const nm = topFiles[i].name;
-        lt.text = nm.length > 18 ? nm.slice(0, 16) + '…' : nm;
+        const sc = topFiles[i].symbolCount;
+        const ldx = worldMouse.x - fx;
+        const ldy = worldMouse.y - fy;
+        const labelDist = Math.sqrt(ldx * ldx + ldy * ldy) * scale;
+        const labelHovered = labelDist < 30;
+        lt.text =
+          (nm.length > 16 ? nm.slice(0, 14) + '…' : nm) + ' (' + sc + ')';
         lt.position.set(fx, fy + fileRadius + 4);
-        lt.alpha = childAlpha;
+        lt.alpha = labelHovered ? 1.0 : childAlpha;
         lt.visible = true;
+        lt.style.fontSize = 12;
       } else {
         lt.visible = false;
         lt.alpha = 0;
       }
+    }
+
+    if (app && app.view) {
+      app.view.style.cursor = pg && nearChildFile ? 'pointer' : 'default';
+    }
+  }
+
+  function initSignalParticles() {
+    SIGNAL_PARTICLES.length = 0;
+    if (!model || viewLevel !== 'galaxy' || !simNodes.length) return;
+    const idToIdx = new Map();
+    simNodes.forEach((n, i) => idToIdx.set(n.id, i));
+    const topEdges = [...currentLinks]
+      .sort((a, b) => (b.weight || 1) - (a.weight || 1))
+      .slice(0, signalParticleCap);
+    for (const edge of topEdges) {
+      const sid = typeof edge.source === 'object' && edge.source !== null ? edge.source.id : edge.source;
+      const tid = typeof edge.target === 'object' && edge.target !== null ? edge.target.id : edge.target;
+      const si = idToIdx.get(sid);
+      const ti = idToIdx.get(tid);
+      if (si === undefined || ti === undefined) continue;
+      SIGNAL_PARTICLES.push({
+        sourceIdx: si,
+        targetIdx: ti,
+        linkType: edge.type || 'CALLS',
+        progress: Math.random(),
+        speed: 0.002 + Math.random() * 0.003,
+      });
+    }
+  }
+
+  function signalEdgeControl(s, t) {
+    const mx = (s.x + t.x) / 2;
+    const my = (s.y + t.y) / 2;
+    const dx = t.x - s.x;
+    const dy = t.y - s.y;
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+    const ox = (-dy / len) * 24;
+    const oy = (dx / len) * 24;
+    return { cx: mx + ox, cy: my + oy };
+  }
+
+  function quadBezierPoint(sx, sy, cx, cy, tx, ty, u) {
+    const omu = 1 - u;
+    const x = omu * omu * sx + 2 * omu * u * cx + u * u * tx;
+    const y = omu * omu * sy + 2 * omu * u * cy + u * u * ty;
+    return { x, y };
+  }
+
+  function tickAndRenderStarView() {
+    if (viewLevel !== 'star' || !world) return;
+    const sc = world.children.find(c => c._omnixType === 'star');
+    if (!sc || !sc._edges || !sc._edgeGfx || !sc._nodes) return;
+    if (sc._sim && sc._sim.alpha() > 0.002) sc._sim.tick();
+
+    const time = performance.now() / 1000;
+    const nodes = sc._nodes;
+    const edges = sc._edges;
+    const edgeGfx = sc._edgeGfx;
+    const signalGfx = sc._signalGfx;
+    const particles = sc._signalParticles;
+
+    edgeGfx.clear();
+    for (const edge of edges) {
+      const s = edge.source;
+      const t = edge.target;
+      if (!s || !t || s.x == null || t.x == null) continue;
+      const pulse = 0.15 + 0.1 * Math.sin(time * 2 + (s.index || 0));
+      edgeGfx.lineStyle(1.5, edge.color, pulse);
+      const midX = (s.x + t.x) / 2 + edge._curveOffset;
+      const midY = (s.y + t.y) / 2 - 20;
+      edgeGfx.moveTo(s.x, s.y);
+      edgeGfx.quadraticCurveTo(midX, midY, t.x, t.y);
+    }
+    edgeGfx.lineStyle(0);
+
+    signalGfx.clear();
+    for (const p of particles) {
+      p.progress += p.speed;
+      if (p.progress > 1) p.progress = 0;
+      const edge = p.edge;
+      if (!edge) continue;
+      const s = edge.source;
+      const t = edge.target;
+      if (!s || !t) continue;
+      const midX = (s.x + t.x) / 2 + edge._curveOffset;
+      const midY = (s.y + t.y) / 2 - 20;
+      const pos = quadBezierPoint(s.x, s.y, midX, midY, t.x, t.y, p.progress);
+      signalGfx.beginFill(p.color, 0.7);
+      signalGfx.drawCircle(pos.x, pos.y, 2.5);
+      signalGfx.endFill();
+      const tp = Math.max(0, p.progress - 0.06);
+      const tpos = quadBezierPoint(s.x, s.y, midX, midY, t.x, t.y, tp);
+      signalGfx.beginFill(p.color, 0.25);
+      signalGfx.drawCircle(tpos.x, tpos.y, 1.5);
+      signalGfx.endFill();
+    }
+
+    for (const node of nodes) {
+      if (node._heartbeatPhase == null) node._heartbeatPhase = Math.random() * Math.PI * 2;
+      const beat = 1 + 0.04 * Math.sin(time * 1.5 + node._heartbeatPhase);
+      node.glow.scale.set(beat);
+      const baseA = 0.5 + 0.3 * Math.sin(time * 1.5 + node._heartbeatPhase);
+      node.glow.alpha = node._hover ? Math.min(1, baseA * 1.35) : baseA;
+    }
+  }
+
+  function tickAndRenderPlanetView() {
+    if (viewLevel !== 'planet' || !world) return;
+    const pc = world.children.find(c => c._omnixType === 'planet');
+    if (!pc || !pc._edges || !pc._edgeGfx || !pc._nodes) return;
+    if (pc._sim && pc._sim.alpha() > 0.002) pc._sim.tick();
+
+    const time = performance.now() / 1000;
+    const nodes = pc._nodes;
+    const edges = pc._edges;
+    const edgeGfx = pc._edgeGfx;
+    const signalGfx = pc._signalGfx;
+    const particles = pc._signalParticles;
+
+    edgeGfx.clear();
+    for (const edge of edges) {
+      const s = edge.source;
+      const t = edge.target;
+      if (!s || !t || s.x == null || t.x == null) continue;
+      const pulse = 0.15 + 0.1 * Math.sin(time * 2 + (s.index || 0));
+      edgeGfx.lineStyle(1.5, edge.color, pulse);
+      const midX = (s.x + t.x) / 2 + edge._curveOffset;
+      const midY = (s.y + t.y) / 2 - 15;
+      edgeGfx.moveTo(s.x, s.y);
+      edgeGfx.quadraticCurveTo(midX, midY, t.x, t.y);
+    }
+    edgeGfx.lineStyle(0);
+
+    signalGfx.clear();
+    for (const p of particles) {
+      p.progress += p.speed;
+      if (p.progress > 1) p.progress = 0;
+      const edge = p.edge;
+      if (!edge) continue;
+      const s = edge.source;
+      const t = edge.target;
+      if (!s || !t) continue;
+      const midX = (s.x + t.x) / 2 + edge._curveOffset;
+      const midY = (s.y + t.y) / 2 - 15;
+      const pos = quadBezierPoint(s.x, s.y, midX, midY, t.x, t.y, p.progress);
+      signalGfx.beginFill(p.color, 0.7);
+      signalGfx.drawCircle(pos.x, pos.y, 2.5);
+      signalGfx.endFill();
+      const tp = Math.max(0, p.progress - 0.06);
+      const tpos = quadBezierPoint(s.x, s.y, midX, midY, t.x, t.y, tp);
+      signalGfx.beginFill(p.color, 0.25);
+      signalGfx.drawCircle(tpos.x, tpos.y, 1.5);
+      signalGfx.endFill();
+    }
+
+    for (const node of nodes) {
+      if (node._heartbeatPhase == null) node._heartbeatPhase = Math.random() * Math.PI * 2;
+      const beat = 1 + 0.04 * Math.sin(time * 1.5 + node._heartbeatPhase);
+      node.glow.scale.set(beat);
+      const baseA = 0.5 + 0.3 * Math.sin(time * 1.5 + node._heartbeatPhase);
+      node.glow.alpha = node._hover ? Math.min(1, baseA * 1.35) : baseA;
+    }
+  }
+
+  function drawSignalFlow() {
+    if (!signalFlowGfx) return;
+    signalFlowGfx.clear();
+    if (viewLevel !== 'galaxy') return;
+    if (!entranceDone || !simNodes.length) return;
+
+    for (let pi = 0; pi < SIGNAL_PARTICLES.length; pi++) {
+      const p = SIGNAL_PARTICLES[pi];
+      const source = simNodes[p.sourceIdx];
+      const target = simNodes[p.targetIdx];
+      if (!source || !target || source.x == null || target.x == null) continue;
+
+      p.progress += p.speed;
+      if (p.progress > 1) p.progress = 0;
+
+      const { cx, cy } = signalEdgeControl(source, target);
+      const pos = quadBezierPoint(source.x, source.y, cx, cy, target.x, target.y, p.progress);
+      const col = edgeColor(p.linkType);
+      signalFlowGfx.beginFill(col, 0.6);
+      signalFlowGfx.drawCircle(pos.x, pos.y, 2);
+      signalFlowGfx.endFill();
+
+      const trailProgress = Math.max(0, p.progress - 0.05);
+      const tpos = quadBezierPoint(source.x, source.y, cx, cy, target.x, target.y, trailProgress);
+      signalFlowGfx.beginFill(col, 0.2);
+      signalFlowGfx.drawCircle(tpos.x, tpos.y, 1.5);
+      signalFlowGfx.endFill();
+    }
+  }
+
+  function findGalaxyGravClosestForRipple() {
+    if (!_gravScreenPt) _gravScreenPt = new PIXI.Point();
+    if (!entranceDone || viewLevel !== 'galaxy' || !world || !app || !simNodes.length) return null;
+
+    const pointer = app.renderer.events && app.renderer.events.pointer;
+    const pg = pointer && pointer.global;
+    if (!pg) return null;
+
+    const worldMouse = world.toLocal(pg);
+    const scale = world.scale.x;
+    const sw = app.screen.width;
+    const sh = app.screen.height;
+    const margin = 280;
+
+    let closestNode = null;
+    let closestDist = Infinity;
+
+    for (let si = 0; si < simNodes.length; si++) {
+      const simNode = simNodes[si];
+      if (simNode.kind !== 'directory' || simNode.dirId == null) continue;
+      world.toGlobal({ x: simNode.x, y: simNode.y }, _gravScreenPt);
+      const gx = _gravScreenPt.x;
+      const gy = _gravScreenPt.y;
+      if (gx < -margin || gx > sw + margin || gy < -margin || gy > sh + margin) continue;
+
+      const dx = worldMouse.x - simNode.x;
+      const dy = worldMouse.y - simNode.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const screenDist = dist * scale;
+      const pickR = galaxyDirectoryHoverScreenRadius(simNode, scale);
+      if (screenDist < pickR && screenDist < closestDist) {
+        closestDist = screenDist;
+        closestNode = simNode;
+      }
+    }
+    return closestNode;
+  }
+
+  function drawRippleImpact() {
+    if (!rippleGfx) return;
+    rippleGfx.clear();
+    if (viewLevel !== 'galaxy') return;
+    if (!entranceDone) return;
+
+    const cn = findGalaxyGravClosestForRipple();
+    if (!cn || (cn._warpScale || 1) < 1.3) return;
+
+    const time = performance.now() / 1000;
+    const cx = cn.x;
+    const cy = cn.y;
+    const nowMs = performance.now();
+
+    const nbrIds = new Set();
+    const cid = cn.id;
+    currentLinks.forEach(l => {
+      const s = typeof l.source === 'object' && l.source !== null ? l.source.id : l.source;
+      const t = typeof l.target === 'object' && l.target !== null ? l.target.id : l.target;
+      if (s === cid) nbrIds.add(t);
+      if (t === cid) nbrIds.add(s);
+    });
+
+    for (let ring = 0; ring < 3; ring++) {
+      const phase = (time * 0.8 + ring * 0.33) % 1;
+      const radius = 20 + phase * 200;
+      const alpha = (1 - phase) * 0.12;
+      rippleGfx.lineStyle(1.5, 0x6366f1, alpha);
+      rippleGfx.drawCircle(cx, cy, radius);
+
+      for (let ni = 0; ni < simNodes.length; ni++) {
+        const sn = simNodes[ni];
+        if (!nbrIds.has(sn.id) || sn === cn) continue;
+        const d = Math.hypot(sn.x - cx, sn.y - cy);
+        if (Math.abs(radius - d) < 14) {
+          sn._rippleFlashUntil = nowMs + 100;
+        }
+      }
+    }
+    rippleGfx.lineStyle(0);
+  }
+
+  function applyDirectoryHeartbeatAndGlow() {
+    if (viewLevel !== 'galaxy') return;
+    if (!entranceDone || !simNodes.length) return;
+    const time = performance.now() / 1000;
+    const nowMs = performance.now();
+
+    for (let i = 0; i < simNodes.length; i++) {
+      const sn = simNodes[i];
+      if (sn.kind !== 'directory') continue;
+      const pool = nodePool[i];
+      if (!pool || !pool.container.visible || pool.simNode !== sn) continue;
+
+      const warp = sn._warpScale || 1;
+      const timeMul =
+        timelineVisible && timelineData && sn._timelineScale !== undefined ? sn._timelineScale : 1;
+      const beat = 1 + 0.03 * Math.sin(time * sn._heartbeatSpeed * Math.PI * 2 + sn._heartbeatPhase);
+      pool.container.scale.set(warp * timeMul * beat);
+
+      const isHover = hoveredSimNode === sn;
+      const flash = sn._rippleFlashUntil && nowMs < sn._rippleFlashUntil ? 1.25 : 1;
+      const glowRhythm = 1 + 0.12 * Math.sin(time * sn._heartbeatSpeed * Math.PI * 2 + sn._heartbeatPhase);
+      pool.glow.alpha = (isHover ? 1.05 : 1) * (0.94 + 0.06 * glowRhythm) * flash;
     }
   }
 
@@ -1723,16 +3876,19 @@
   }
 
   function loadLevelGalaxy() {
-    killTweens();
+    hideSymbolPopup();
+    cleanupStarView();
+    cleanupPlanetView();
+    resetGalaxyDrillState();
     viewLevel = 'galaxy';
     selectedDir = null;
     selectedFile = null;
     currentNodes = model.galaxy.nodes;
     currentLinks = model.galaxy.links;
     world.alpha = 1;
-    updateBreadcrumb();
+    killTweens();
     startSimulation(currentNodes, currentLinks);
-    fitWorldToNodes();
+    restoreGalaxyView();
     gsap.fromTo(world, { alpha: 0.3 }, { alpha: 1, duration: 0.45, ease: 'power2.out' });
     if (timelineVisible && timelineData) {
       const s = document.getElementById('timeline-slider');
@@ -1740,52 +3896,32 @@
     }
   }
 
-  function loadLevelStar(dirId) {
-    killTweens();
-    viewLevel = 'star';
-    selectedDir = dirId;
-    selectedFile = null;
-    const { nodes, links } = model.buildStar(dirId);
-    currentNodes = nodes;
-    currentLinks = links;
-    updateBreadcrumb();
-    startSimulation(currentNodes, currentLinks);
-    fitWorldToNodes();
-    gsap.to(world, { alpha: 1, duration: 0.4 });
-  }
-
-  function loadLevelPlanet(filePath, focusSymId) {
-    killTweens();
-    viewLevel = 'planet';
-    selectedFile = filePath;
-    const { nodes, links } = model.buildPlanet(filePath, focusSymId ? [focusSymId] : []);
-    currentNodes = nodes;
-    currentLinks = links;
-    updateBreadcrumb();
-    startSimulation(currentNodes, currentLinks);
-    fitWorldToNodes();
-    gsap.to(world, { alpha: 1, duration: 0.4 });
-  }
-
-  function zoomToDirectory(dirId) {
-    killTweens();
-    nodePool.forEach(p => gsap.set(p.container, { alpha: 1, scale: 1 }));
-    loadLevelStar(dirId);
-  }
-
-  function zoomToFile(filePath, focusSymId) {
-    killTweens();
-    nodePool.forEach(p => gsap.set(p.container, { alpha: 1, scale: 1 }));
-    loadLevelPlanet(filePath, focusSymId);
-  }
-
   function zoomOutOne() {
-    killTweens();
-    nodePool.forEach(p => gsap.set(p.container, { alpha: 1, scale: 1 }));
-    if (viewLevel === 'planet') {
-      loadLevelStar(selectedDir);
-    } else if (viewLevel === 'star') {
-      loadLevelGalaxy();
+    goBack();
+  }
+
+  function relayoutOmnixViews() {
+    if (!app || !world || !model) return;
+    const cx = app.screen.width / 2;
+    const cy = app.screen.height / 2;
+    if (viewLevel === 'star' && selectedDir && starNodes.length) {
+      if (starViewTitle) starViewTitle.position.set(cx, cy);
+      const sc = world.children.find(c => c._omnixType === 'star');
+      if (sc && sc._sim) {
+        sc._sim.force('center', d3.forceCenter(cx, cy));
+        sc._sim.force('x', d3.forceX(cx).strength(0.05));
+        sc._sim.force('y', d3.forceY(cy).strength(0.05));
+        sc._sim.alpha(0.28).restart();
+      }
+    } else if (viewLevel === 'planet' && selectedFile && planetNodes.length && selectedDir) {
+      if (planetViewTitle) planetViewTitle.position.set(cx, cy);
+      const pc = world.children.find(c => c._omnixType === 'planet');
+      if (pc && pc._sim) {
+        pc._sim.force('center', d3.forceCenter(cx, cy));
+        pc._sim.force('x', d3.forceX(cx).strength(0.06));
+        pc._sim.force('y', d3.forceY(cy).strength(0.06));
+        pc._sim.alpha(0.28).restart();
+      }
     }
   }
 
@@ -1802,14 +3938,21 @@
           if (data === 'galaxy') {
             loadLevelGalaxy();
           } else if (data === 'star' && selectedDir) {
-            loadLevelStar(selectedDir);
+            if (viewLevel === 'planet') {
+              cleanupPlanetView();
+              viewLevel = 'star';
+              selectedFile = null;
+              restoreStarView();
+            }
           }
         });
       }
       bc.appendChild(span);
     };
+
     addCrumb('OMNIX', viewLevel === 'galaxy' ? 'current' : '', 'galaxy');
-    if (selectedDir) {
+
+    if ((viewLevel === 'star' || viewLevel === 'planet') && selectedDir) {
       const sep = document.createElement('span');
       sep.className = 'sep';
       sep.textContent = '›';
@@ -1818,13 +3961,17 @@
       const label = dirTitle.length > 40 ? dirTitle.slice(0, 37) + '…' : dirTitle;
       addCrumb(label, viewLevel === 'star' ? 'current' : '', 'star');
     }
-    if (selectedFile && viewLevel === 'planet') {
+
+    if (viewLevel === 'planet' && selectedFile) {
       const sep2 = document.createElement('span');
       sep2.className = 'sep';
       sep2.textContent = '›';
       bc.appendChild(sep2);
-      addCrumb(basename(selectedFile), 'current', 'file');
+      const fn = selectedFile.name || basename(selectedFile.filePath || '') || '?';
+      const flabel = fn.length > 40 ? fn.slice(0, 37) + '…' : fn;
+      addCrumb(flabel, 'current', 'file');
     }
+
     gsap.fromTo(bc, { opacity: 0.5 }, { opacity: 1, duration: 0.35 });
   }
 
@@ -1914,12 +4061,18 @@
     entanglementGfx = new PIXI.Graphics();
     entanglementGfx.eventMode = 'none';
     layerNodes = new PIXI.Container();
+    signalFlowGfx = new PIXI.Graphics();
+    signalFlowGfx.eventMode = 'none';
     childrenGfx = new PIXI.Graphics();
     childrenGfx.eventMode = 'none';
+    rippleGfx = new PIXI.Graphics();
+    rippleGfx.eventMode = 'none';
     world.addChild(darkMatterGfx);
     world.addChild(layerEdges);
+    world.addChild(signalFlowGfx);
     world.addChild(entanglementGfx);
     world.addChild(childrenGfx);
+    world.addChild(rippleGfx);
     world.addChild(layerNodes);
     layerEdges.eventMode = 'none';
 
@@ -1932,7 +4085,7 @@
     for (let i = 0; i < GALAXY_LABEL_POOL_SIZE; i++) {
       const t = new PIXI.Text('', {
         fontFamily: 'Outfit, sans-serif',
-        fontSize: 10,
+        fontSize: 12,
         fill: 0xe2e8f0,
         align: 'center',
       });
@@ -1951,6 +4104,7 @@
     app.stage.on('pointerup', onStageUp);
     app.stage.on('pointerupoutside', onStageUp);
     app.view.addEventListener('wheel', onWheel, { passive: false });
+    app.view.addEventListener('contextmenu', ev => ev.preventDefault());
     app.view.addEventListener('mousemove', ev => {
       if (!hoveredSimNode) return;
       const t = document.getElementById('tooltip');
@@ -1981,13 +4135,29 @@
         document.getElementById('fps-counter').textContent = fps + ' FPS';
         frames = 0;
         lastFps = now;
+        if (fps < 50 && signalParticleCap > 20) {
+          signalParticleCap = 20;
+          initSignalParticles();
+        } else if (fps >= 55 && signalParticleCap < 40) {
+          signalParticleCap = 40;
+          initSignalParticles();
+        }
       }
-      if (simulation && simulation.alpha() > 0.002) {
-        simulation.tick();
+      if (viewLevel === 'galaxy') {
+        if (simulation && simulation.alpha() > 0.002) {
+          simulation.tick();
+        }
         syncPixiFromSim();
+      } else if (viewLevel === 'star') {
+        tickAndRenderStarView();
+      } else if (viewLevel === 'planet') {
+        tickAndRenderPlanetView();
       }
       updateGalaxyGravitationalHover();
       applyTimelineToPixiContainers();
+      applyDirectoryHeartbeatAndGlow();
+      drawSignalFlow();
+      drawRippleImpact();
       drawEntanglementOverlay();
       drawDarkMatterOverlay();
     });
@@ -1997,8 +4167,26 @@
   let worldStart = null;
   let didDrag = false;
 
+  function isStageBackgroundTarget(t) {
+    return (
+      t === app.stage ||
+      t === world ||
+      t === layerEdges ||
+      t === layerNodes ||
+      t === gridGraphics ||
+      t === bgGraphics ||
+      t === starGraphics ||
+      t === darkMatterGfx ||
+      t === signalFlowGfx ||
+      t === entanglementGfx ||
+      t === childrenGfx ||
+      t === rippleGfx
+    );
+  }
+
   function onStageDown(e) {
-    if (e.target === app.stage || e.target === world || e.target === layerEdges || e.target === gridGraphics || e.target === bgGraphics || e.target === starGraphics) {
+    if (pointerEventButton(e) === 2) return;
+    if (isStageBackgroundTarget(e.target)) {
       dragStart = { x: e.global.x, y: e.global.y };
       worldStart = { x: world.position.x, y: world.position.y };
       didDrag = false;
@@ -2018,9 +4206,18 @@
   }
 
   function onStageUp(e) {
+    const btn = pointerEventButton(e);
+    if (btn === 2) {
+      if (isStageBackgroundTarget(e.target)) {
+        if (viewLevel !== 'galaxy') goBack();
+        else if (xrayOpen) closeXray();
+      }
+      dragStart = null;
+      return;
+    }
     if (dragStart && !didDrag) {
-      if (e.target === app.stage || e.target === world || e.target === layerEdges || e.target === gridGraphics) {
-        zoomOutOne();
+      if (isStageBackgroundTarget(e.target)) {
+        if (xrayOpen) closeXray();
       }
     }
     dragStart = null;
@@ -2052,10 +4249,11 @@
     drawBackground();
     drawHexGrid();
     buildStarfield();
-    if (simNodes.length) {
+    if (viewLevel === 'galaxy' && simNodes.length) {
       fitWorldToNodes(false);
       syncPixiFromSim();
     }
+    relayoutOmnixViews();
   }
 
   /** --- Search --- */
@@ -2088,29 +4286,45 @@
   }
 
   function zoomToRawNode(n) {
-    if (!n || !n.file) return;
+    if (!n || !n.file || !model) return;
     const dir = dirname(n.file);
     const fp = n.file;
+    const baseName = basename(fp);
+    const mapList = model.dirFilesMap[dir] || [];
+    const fileEntry = mapList.find(f => f.name === baseName);
+    const fileData = Object.assign({}, fileEntry || { name: baseName, symbolCount: 0 }, {
+      dirId: dir,
+      filePath: fp,
+    });
+
     if (n.type === 'file') {
-      loadLevelStar(dir);
-      return;
-    }
-    if (n.type === 'function' || n.type === 'class' || n.type === 'method') {
-      selectedDir = dir;
-      loadLevelPlanet(fp, n.id);
-      const symId = n.id;
-      gsap.delayedCall(0.65, () => {
-        const target = simNodes.find(sn => sn.symId === symId);
-        if (!target || !app) return;
-        const s = world.scale.x;
-        targetWorldScale = s;
-        targetWorldTx = app.screen.width / 2 - target.x * s;
-        targetWorldTy = app.screen.height / 2 - target.y * s;
-        smoothWorld(0.45, 'power3.out');
+      if (viewLevel !== 'galaxy') loadLevelGalaxy();
+      const dirNode = simNodes.find(sn => sn.kind === 'directory' && sn.dirId === dir);
+      gsap.delayedCall(0.05, () => transitionToStar(dir, dirNode || null));
+      gsap.delayedCall(1.0, () => {
+        if (selectedDir === dir && viewLevel === 'star') transitionToPlanet(fileData);
       });
       return;
     }
-    if (dir) loadLevelStar(dir);
+    if (n.type === 'function' || n.type === 'class' || n.type === 'method') {
+      if (viewLevel !== 'galaxy') loadLevelGalaxy();
+      const dirNode = simNodes.find(sn => sn.kind === 'directory' && sn.dirId === dir);
+      gsap.delayedCall(0.05, () => transitionToStar(dir, dirNode || null));
+      gsap.delayedCall(1.0, () => {
+        if (selectedDir === dir && viewLevel === 'star') transitionToPlanet(fileData);
+      });
+      gsap.delayedCall(1.55, () => {
+        const syms = getSymbolsForFile(fp, dir);
+        const hit = syms.find(s => s.name === n.name && s.type === n.type);
+        if (hit) showSymbolDetailPopup(hit, fileData);
+      });
+      return;
+    }
+    if (dir) {
+      if (viewLevel !== 'galaxy') loadLevelGalaxy();
+      const dirNode = simNodes.find(sn => sn.kind === 'directory' && sn.dirId === dir);
+      gsap.delayedCall(0.05, () => transitionToStar(dir, dirNode || null));
+    }
   }
 
   /** --- Entrance --- */
@@ -2276,8 +4490,47 @@
     if (ev.key === 'Enter' && searchMatches.length) zoomToRawNode(searchMatches[0]);
   });
 
+  document.getElementById('xray-close').addEventListener('click', closeXray);
+
   window.addEventListener('keydown', ev => {
-    if (ev.key === 'Escape') zoomOutOne();
+    if (
+      ev.key === 'Enter' &&
+      document.activeElement &&
+      document.activeElement.id === 'ai-question-input'
+    ) {
+      const dirId = xrayDirId || '';
+      void runAIAsk(dirId);
+      return;
+    }
+    if (ev.key === 'Escape') {
+      hideSymbolPopup();
+      if (xrayOpen) {
+        closeXray();
+        return;
+      }
+      if (viewLevel === 'planet' || viewLevel === 'star') {
+        goBack();
+        return;
+      }
+      if (viewLevel === 'galaxy' && selectedDir) {
+        selectedDir = null;
+        killTweens();
+        gsap.set(layerEdges, { alpha: 1 });
+        nodePool.forEach(p => {
+          if (!p.container) return;
+          gsap.killTweensOf(p.container);
+          gsap.killTweensOf(p.container.scale);
+          p.container.alpha = searchQuery && p.simNode && !nodeMatchesSearch(p.simNode) ? 0.25 : 1;
+        });
+        syncPixiFromSim();
+        updateBreadcrumb();
+        return;
+      }
+      killTweens();
+      resetGalaxyDrillState();
+      fitWorldToNodes();
+      updateBreadcrumb();
+    }
   });
   window.addEventListener('resize', resizePixi);
 
@@ -2313,7 +4566,9 @@
         return;
       }
       data = sanitizePayload(data);
+      rawGraphData = data;
       model = buildGraphModel(data);
+      void ensureAiStatus();
       updateStatsPanel(data.stats || {});
       document.getElementById('stat-dark').textContent = data.nodes.filter(n => n.type === 'dark_matter').length;
       document.getElementById('stat-entangled').textContent = data.links.filter(l => l.type === 'ENTANGLED').length;
