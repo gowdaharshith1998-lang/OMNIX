@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 
@@ -35,12 +36,14 @@ def main() -> None:
     from src.parser.typescript_parser import parse_typescript_files
     from src.parser.dark_matter_parser import parse_dark_matter
     from src.parser.entanglement_parser import parse_entanglements
+    from src.parser.git_parser import parse_git_history
     from src.graph.store import GraphStore
     from src.graph.exporter import export_json
 
     target = os.path.abspath(args.path)
     db_path = os.path.join(root, "omnix.db")
     graph_json = os.path.join(root, "src", "web", "graph_data.json")
+    timeline_json = os.path.join(root, "src", "web", "timeline_data.json")
     web_root = os.path.join(root, "src", "web")
 
     print(f"🔍 OMNIX analyzing {target}...")
@@ -53,6 +56,14 @@ def main() -> None:
 
     dm_count = parse_dark_matter(target, store)
     ent_count = parse_entanglements(target, store)
+
+    timeline = parse_git_history(target, store)
+    if timeline:
+        with open(timeline_json, "w", encoding="utf-8") as f:
+            json.dump(timeline, f)
+        print(
+            f"⏳ Timeline saved: {timeline['first_date']} → {timeline['last_date']}"
+        )
 
     print(f"📊 Parsed {py_count} Python + {ts_count} TypeScript files")
     print(f"🌀 {dm_count} dark matter nodes detected")
@@ -81,6 +92,23 @@ def main() -> None:
                         data = f.read()
                 except OSError:
                     self.send_error(404, "graph_data.json missing — run analyze first")
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(data)
+                return
+
+            if path == "/api/timeline":
+                try:
+                    with open(timeline_json, "rb") as f:
+                        data = f.read()
+                except OSError:
+                    self.send_error(
+                        404, "timeline_data.json missing — run analyze on a git repo"
+                    )
                     return
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")

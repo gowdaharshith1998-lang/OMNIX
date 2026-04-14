@@ -302,6 +302,26 @@
       transition: opacity 0.5s ease;
     }
     #ui-fade.visible { opacity: 1; }
+
+    #timeline-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #a855f7;
+      cursor: pointer;
+      box-shadow: 0 0 10px rgba(168, 85, 247, 0.5);
+    }
+    #timeline-slider::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #a855f7;
+      cursor: pointer;
+      border: none;
+      box-shadow: 0 0 10px rgba(168, 85, 247, 0.5);
+    }
   </style>
 </head>
 <body>
@@ -351,10 +371,46 @@
       <div class="tooltip-lines"></div>
     </div>
 
+    <div id="timeline-panel" style="
+      position: fixed;
+      bottom: 60px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: none;
+      z-index: 100;
+      background: rgba(10, 15, 26, 0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(99, 102, 241, 0.2);
+      border-radius: 12px;
+      padding: 10px 24px 10px 24px;
+      min-width: 500px;
+      max-width: 80vw;
+    ">
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <span id="timeline-date" style="color: #a855f7; font-family: 'JetBrains Mono', monospace; font-size: 12px; min-width: 90px;">2024-01-01</span>
+        <input type="range" id="timeline-slider" min="0" max="99" value="99" style="
+          flex: 1;
+          -webkit-appearance: none;
+          appearance: none;
+          height: 4px;
+          background: linear-gradient(90deg, #6366f1, #a855f7, #06b6d4);
+          border-radius: 2px;
+          outline: none;
+          cursor: pointer;
+        " />
+        <span id="timeline-date-end" style="color: #06b6d4; font-family: 'JetBrains Mono', monospace; font-size: 12px; min-width: 90px; text-align: right;">2026-04-14</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; margin-top: 6px;">
+        <span id="timeline-info" style="color: #64748b; font-size: 11px; font-family: 'Outfit', sans-serif;"></span>
+        <span id="timeline-stats" style="color: #64748b; font-size: 11px; font-family: 'Outfit', sans-serif;"></span>
+      </div>
+    </div>
+
     <div class="hud glass" id="bottom-bar">
       <span id="omnix-version">OMNIX V0.1</span>
       <button type="button" id="btn-fullscreen">Fullscreen</button>
       <button type="button" id="btn-dark-matter" style="opacity:0.5;border-color:rgba(99,102,241,0.2)">🌀 Dark Matter</button>
+      <button type="button" id="btn-timeline" style="display:none;opacity:0.5;border-color:rgba(99,102,241,0.2)">⏳ Timeline</button>
       <button type="button" id="btn-export">Export JSON</button>
       <span id="fps-counter">— FPS</span>
     </div>
@@ -411,6 +467,12 @@
     const proto = window.location.protocol;
     if (proto === 'file:' || !window.location.origin || window.location.origin === 'null') return null;
     return new URL('/api/graph', window.location.origin).href;
+  })();
+
+  const TIMELINE_API_URL = (function () {
+    const proto = window.location.protocol;
+    if (proto === 'file:' || !window.location.origin || window.location.origin === 'null') return null;
+    return new URL('/api/timeline', window.location.origin).href;
   })();
 
   function escapeHtml(s) {
@@ -784,6 +846,9 @@
   let darkMatterGfx = null;
   let entanglementGfx = null;
   let darkMatterVisible = false;
+
+  let timelineData = null;
+  let timelineVisible = false;
 
   let model = null;
   let viewLevel = 'galaxy';
@@ -1591,6 +1656,72 @@
     return false;
   }
 
+  function findMatchingDir(snapDirs, dirId) {
+    if (snapDirs == null) return null;
+    const candidates = [dirId];
+    if (dirId === '') candidates.push('.');
+    if (dirId === '.') candidates.push('');
+    for (let c = 0; c < candidates.length; c++) {
+      const k = candidates[c];
+      if (k != null && snapDirs[k]) return snapDirs[k];
+    }
+    for (const [key, val] of Object.entries(snapDirs)) {
+      if (dirId.endsWith(key) || key.endsWith(dirId) ||
+          dirId.includes(key) || key.includes(dirId)) {
+        return val;
+      }
+    }
+    return null;
+  }
+
+  function applyTimelineSnapshot(idx) {
+    if (!timelineData || !timelineData.snapshots || !timelineData.snapshots.length) return;
+    const snap = timelineData.snapshots[idx];
+    if (!snap) return;
+
+    document.getElementById('timeline-date').textContent = snap.date;
+    document.getElementById('timeline-info').textContent =
+      snap.author + ': "' + snap.message + '"';
+    document.getElementById('timeline-stats').textContent =
+      snap.total_files + ' files · ' + Number(snap.total_lines).toLocaleString() + ' lines';
+
+    for (let i = 0; i < simNodes.length; i++) {
+      const simNode = simNodes[i];
+      if (simNode.kind !== 'directory') {
+        delete simNode._timelineScale;
+        delete simNode._timelineAlpha;
+        continue;
+      }
+      const dirPath = simNode.dirId != null ? simNode.dirId : '';
+      const snapDir = findMatchingDir(snap.directories, dirPath);
+
+      if (snapDir) {
+        simNode._timelineScale = Math.max(0.3, Math.min(2.5, snapDir.lines / 500));
+        simNode._timelineAlpha = 1.0;
+      } else {
+        simNode._timelineScale = 0.1;
+        simNode._timelineAlpha = 0.15;
+      }
+    }
+  }
+
+  function applyTimelineToPixiContainers() {
+    if (!timelineVisible || !timelineData || viewLevel !== 'galaxy') return;
+    for (let i = 0; i < simNodes.length; i++) {
+      const simNode = simNodes[i];
+      if (simNode.kind !== 'directory') continue;
+      const pool = nodePool[i];
+      if (!pool || !pool.container || !pool.container.visible || pool.simNode !== simNode) continue;
+      if (simNode._timelineScale === undefined) continue;
+      const baseScale = simNode._warpScale || 1;
+      const timeScale = simNode._timelineScale || 1;
+      pool.container.scale.set(baseScale * timeScale);
+      const searchDim = searchQuery && !nodeMatchesSearch(simNode) ? 0.25 : 1;
+      const ta = simNode._timelineAlpha != null ? simNode._timelineAlpha : 1;
+      pool.container.alpha = searchDim * ta;
+    }
+  }
+
   function loadLevelGalaxy() {
     killTweens();
     viewLevel = 'galaxy';
@@ -1603,6 +1734,10 @@
     startSimulation(currentNodes, currentLinks);
     fitWorldToNodes();
     gsap.fromTo(world, { alpha: 0.3 }, { alpha: 1, duration: 0.45, ease: 'power2.out' });
+    if (timelineVisible && timelineData) {
+      const s = document.getElementById('timeline-slider');
+      applyTimelineSnapshot(parseInt(s.value, 10) || 0);
+    }
   }
 
   function loadLevelStar(dirId) {
@@ -1852,6 +1987,7 @@
         syncPixiFromSim();
       }
       updateGalaxyGravitationalHover();
+      applyTimelineToPixiContainers();
       drawEntanglementOverlay();
       drawDarkMatterOverlay();
     });
@@ -2085,6 +2221,27 @@
     b.style.opacity = darkMatterVisible ? '1' : '0.5';
     b.style.borderColor = darkMatterVisible ? '#8b5cf6' : 'rgba(99,102,241,0.2)';
   });
+  document.getElementById('btn-timeline').addEventListener('click', () => {
+    timelineVisible = !timelineVisible;
+    document.getElementById('timeline-panel').style.display = timelineVisible ? 'block' : 'none';
+    const b = document.getElementById('btn-timeline');
+    b.style.opacity = timelineVisible ? '1' : '0.5';
+    b.style.borderColor = timelineVisible ? '#a855f7' : 'rgba(99,102,241,0.2)';
+    if (timelineVisible) {
+      const s = document.getElementById('timeline-slider');
+      applyTimelineSnapshot(parseInt(s.value, 10) || 0);
+    } else {
+      for (let i = 0; i < simNodes.length; i++) {
+        delete simNodes[i]._timelineScale;
+        delete simNodes[i]._timelineAlpha;
+      }
+      syncPixiFromSim();
+    }
+  });
+  document.getElementById('timeline-slider').addEventListener('input', (e) => {
+    const idx = parseInt(e.target.value, 10);
+    applyTimelineSnapshot(idx);
+  });
   document.getElementById('btn-export').addEventListener('click', async () => {
     if (!GRAPH_API_URL) {
       alert('Export needs the OMNIX server URL.');
@@ -2163,6 +2320,24 @@
 
       initPixi();
       loadLevelGalaxy();
+
+      if (TIMELINE_API_URL) {
+        fetch(TIMELINE_API_URL, { cache: 'no-store' })
+          .then(r => r.ok ? r.json() : null)
+          .then(data => {
+            if (data && data.snapshots && data.snapshots.length > 0) {
+              timelineData = data;
+              document.getElementById('btn-timeline').style.display = '';
+              const slider = document.getElementById('timeline-slider');
+              slider.max = String(data.snapshots.length - 1);
+              slider.value = String(data.snapshots.length - 1);
+              document.getElementById('timeline-date').textContent = data.first_date;
+              document.getElementById('timeline-date-end').textContent = data.last_date;
+            }
+          })
+          .catch(() => {});
+      }
+
       playEntrance(data.stats || {});
     } catch (e) {
       console.error(e);
