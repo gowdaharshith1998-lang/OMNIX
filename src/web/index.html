@@ -1,0 +1,1806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OMNIX — Code Intelligence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@300;400;500;600;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.3/pixi.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <!-- cdnjs d3-force@3.0.0 has no published file; d3@7.9.0 bundles the same force API (pinned). -->
+  <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Outfit', system-ui, sans-serif;
+      background: #020615;
+      color: #e2e8f0;
+    }
+
+    #graph-container {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+    }
+    #graph-container canvas {
+      display: block;
+      outline: none;
+    }
+
+    .hud {
+      position: fixed;
+      z-index: 20;
+      pointer-events: none;
+    }
+    .hud * { pointer-events: auto; }
+
+    .glass {
+      background: rgba(10, 15, 26, 0.8);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(99, 102, 241, 0.2);
+      border-radius: 12px;
+      box-shadow:
+        0 0 40px rgba(59, 130, 246, 0.06),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    #search-panel {
+      top: 20px;
+      left: 20px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 300px;
+      max-width: min(420px, calc(100vw - 40px));
+    }
+    .search-label {
+      font-family: 'Syne', sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.2em;
+      color: #6366f1;
+    }
+    #search-input {
+      flex: 1;
+      min-width: 0;
+      background: rgba(2, 6, 23, 0.65);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: #f1f5f9;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+    #search-input:focus {
+      outline: none;
+      border-color: rgba(99, 102, 241, 0.65);
+      box-shadow: 0 0 18px rgba(99, 102, 241, 0.22);
+    }
+    #search-input::placeholder { color: #64748b; }
+    #search-count {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: #64748b;
+      white-space: nowrap;
+    }
+    #search-panel-wrap {
+      display: flex;
+      flex-direction: column;
+      top: 20px;
+      left: 20px;
+      padding: 10px 14px;
+      min-width: 300px;
+      max-width: min(420px, calc(100vw - 40px));
+    }
+    #search-panel-wrap #search-panel {
+      top: auto;
+      left: auto;
+      padding: 0;
+      min-width: 0;
+    }
+
+    #stats-panel {
+      top: 20px;
+      right: 20px;
+      padding: 14px 18px;
+      min-width: 200px;
+    }
+    .stats-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: #a78bfa;
+      margin-bottom: 10px;
+    }
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      font-size: 12px;
+      font-family: 'JetBrains Mono', monospace;
+      margin-bottom: 4px;
+    }
+    .stat-row span:first-child { color: #94a3b8; }
+    .stat-val { color: #4ade80; text-align: right; }
+
+    #breadcrumb {
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: center;
+      max-width: min(90vw, 720px);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+    }
+    #breadcrumb .sep { color: #475569; user-select: none; }
+    .crumb {
+      color: #94a3b8;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 6px;
+      transition: color 0.2s ease, background 0.2s ease;
+    }
+    .crumb:hover { color: #e2e8f0; background: rgba(99, 102, 241, 0.15); }
+    .crumb.current { color: #e2e8f0; cursor: default; }
+    .crumb.current:hover { background: transparent; }
+
+    #tooltip {
+      position: fixed;
+      z-index: 30;
+      display: none;
+      max-width: 380px;
+      padding: 12px 14px;
+      pointer-events: none;
+      font-size: 12px;
+      line-height: 1.45;
+      background: rgba(17, 26, 46, 0.95);
+      border: 1px solid rgba(99, 102, 241, 0.25);
+      border-radius: 10px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+    }
+    .tooltip-name {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+      font-size: 13px;
+      color: #fff;
+      margin-bottom: 6px;
+    }
+    .tooltip-type {
+      display: inline-block;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-bottom: 6px;
+    }
+    .tooltip-file { color: #94a3b8; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+    .tooltip-lines { color: #64748b; font-size: 11px; margin-top: 6px; }
+
+    #bottom-bar {
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 12px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    #omnix-version {
+      font-family: 'Syne', sans-serif;
+      letter-spacing: 0.15em;
+      font-size: 10px;
+      color: #64748b;
+      margin-right: 8px;
+    }
+    #bottom-bar button {
+      font-family: 'Outfit', sans-serif;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      background: rgba(30, 41, 59, 0.55);
+      color: #cbd5e1;
+      cursor: pointer;
+      transition: all 0.25s ease;
+    }
+    #bottom-bar button:hover {
+      border-color: #6366f1;
+      color: #fff;
+      box-shadow: 0 0 18px rgba(99, 102, 241, 0.2);
+    }
+    #fps-counter {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: #4ade80;
+      margin-left: 8px;
+    }
+
+    #entrance {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    #entrance.skip-hint {
+      cursor: pointer;
+    }
+    .ent-title {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: clamp(2.5rem, 8vw, 5rem);
+      letter-spacing: 0.08em;
+      color: #e2e8f0;
+      opacity: 0;
+    }
+    .ent-sub {
+      margin-top: 16px;
+      font-family: 'Outfit', sans-serif;
+      font-size: 14px;
+      color: #64748b;
+      opacity: 0;
+    }
+    .ent-skip {
+      position: absolute;
+      bottom: 28px;
+      font-size: 11px;
+      color: #475569;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    #loading-error {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: #020615;
+      padding: 24px;
+      text-align: center;
+    }
+    #loading-error.visible { display: flex; }
+    #loading-error .msg {
+      max-width: 440px;
+      color: #f87171;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+    #loading-error .sub {
+      margin-top: 12px;
+      font-size: 12px;
+      color: #94a3b8;
+    }
+
+    #ui-fade {
+      opacity: 0;
+      transition: opacity 0.5s ease;
+    }
+    #ui-fade.visible { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div id="loading-error" aria-live="polite">
+    <div>
+      <div class="msg" id="loading-error-msg"></div>
+      <div class="sub">Open DevTools (F12) → Console for details.</div>
+    </div>
+  </div>
+
+  <div id="entrance" class="skip-hint" title="Click to skip">
+    <div class="ent-title" id="ent-title">OMNIX</div>
+    <div class="ent-sub" id="ent-sub"></div>
+    <div class="ent-skip">Click anywhere to skip</div>
+  </div>
+
+  <div id="ui-fade">
+    <div id="graph-container"></div>
+
+    <div class="hud glass" id="search-panel-wrap">
+      <div id="search-panel" style="display:flex;align-items:center;gap:10px;width:100%;">
+        <span class="search-label">FIND</span>
+        <input type="text" id="search-input" placeholder="symbol, file, path…" autocomplete="off" />
+        <span id="search-count"></span>
+      </div>
+      <div id="search-hint" style="display:none;margin-top:8px;font-size:11px;color:#64748b;font-family:'JetBrains Mono',monospace;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+    </div>
+
+    <div class="hud glass" id="stats-panel">
+      <div class="stats-title">GRAPH</div>
+      <div class="stat-row"><span>Files</span><span class="stat-val" id="stat-files">0</span></div>
+      <div class="stat-row"><span>Functions</span><span class="stat-val" id="stat-functions">0</span></div>
+      <div class="stat-row"><span>Classes</span><span class="stat-val" id="stat-classes">0</span></div>
+      <div class="stat-row"><span>Edges</span><span class="stat-val" id="stat-edges">0</span></div>
+    </div>
+
+    <div class="hud glass" id="breadcrumb">
+      <span class="crumb current" data-level="galaxy">OMNIX</span>
+    </div>
+
+    <div id="tooltip">
+      <div class="tooltip-name"></div>
+      <div class="tooltip-type"></div>
+      <div class="tooltip-file"></div>
+      <div class="tooltip-lines"></div>
+    </div>
+
+    <div class="hud glass" id="bottom-bar">
+      <span id="omnix-version">OMNIX V0.1</span>
+      <button type="button" id="btn-fullscreen">Fullscreen</button>
+      <button type="button" id="btn-export">Export JSON</button>
+      <span id="fps-counter">— FPS</span>
+    </div>
+  </div>
+
+  <script>
+(function () {
+  'use strict';
+
+  const COLORS = {
+    bg: 0x020615,
+    bgGradientEnd: 0x0a0f1a,
+    directory: 0x6366f1,
+    filePython: 0x3b82f6,
+    fileTS: 0x06b6d4,
+    fileMixed: 0x8b5cf6,
+    function: 0x4ade80,
+    class: 0xa855f7,
+    method: 0x22d3ee,
+    import: 0xf97316,
+    edgeCalls: 0x4ade80,
+    edgeImports: 0xf97316,
+    edgeDefines: 0x3b82f6,
+    edgeInherits: 0xa855f7,
+    edgeDecorates: 0xf472b6,
+    edgeDefault: 0x475569,
+    text: 0xe2e8f0,
+    textDim: 0x64748b,
+  };
+
+  const LINK_HEX = {
+    CALLS: COLORS.edgeCalls,
+    IMPORTS: COLORS.edgeImports,
+    DEFINES: COLORS.edgeDefines,
+    INHERITS: COLORS.edgeInherits,
+    DECORATES: COLORS.edgeDecorates,
+  };
+
+  const STORAGE_VISITED = 'omnix_visited';
+  const MAX_GALAXY_DIRS = 78;
+  const MAX_STAR_FILES = 50;
+  const MAX_PLANET_SYMBOLS = 30;
+  const MAX_POOL_NODES = 200;
+  const MAX_POOL_EDGES = 500;
+  const ZOOM_MIN = 0.3;
+  const ZOOM_MAX = 3.0;
+  const SEARCH_DEBOUNCE_MS = 150;
+
+  const GRAPH_API_URL = (function () {
+    const proto = window.location.protocol;
+    if (proto === 'file:' || !window.location.origin || window.location.origin === 'null') return null;
+    return new URL('/api/graph', window.location.origin).href;
+  })();
+
+  function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s == null ? '' : String(s);
+    return d.innerHTML;
+  }
+
+  function dirname(path) {
+    if (!path) return '';
+    const parts = path.split('/').filter(Boolean);
+    if (parts.length <= 1) return '';
+    parts.pop();
+    return parts.join('/');
+  }
+
+  function basename(path) {
+    if (!path) return '';
+    const parts = path.split('/').filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : '';
+  }
+
+  function truncateGraphLabel(s, maxLen) {
+    const t = s == null ? '' : String(s);
+    if (t.length <= maxLen) return t;
+    return t.slice(0, Math.max(0, maxLen - 1)) + '…';
+  }
+
+  function extLang(file) {
+    const m = (file || '').match(/\.([a-z0-9]+)$/i);
+    const e = m ? m[1].toLowerCase() : '';
+    if (e === 'py') return 'py';
+    if (e === 'ts' || e === 'tsx' || e === 'js' || e === 'jsx' || e === 'mjs' || e === 'cjs') return 'ts';
+    return 'other';
+  }
+
+  function hexToRgb(hex) {
+    return {
+      r: (hex >> 16) & 255,
+      g: (hex >> 8) & 255,
+      b: hex & 255,
+    };
+  }
+
+  function lerpColor(fromHex, toHex, t) {
+    const A = hexToRgb(fromHex);
+    const B = hexToRgb(toHex);
+    const r = Math.round(A.r + (B.r - A.r) * t);
+    const g = Math.round(A.g + (B.g - A.g) * t);
+    const b = Math.round(A.b + (B.b - A.b) * t);
+    return (r << 16) | (g << 8) | b;
+  }
+
+  function directoryColor(types) {
+    const py = types.py || 0;
+    const ts = types.ts || 0;
+    const tot = py + ts;
+    if (tot === 0) return COLORS.directory;
+    if (py > 0 && ts === 0) return COLORS.filePython;
+    if (ts > 0 && py === 0) return COLORS.fileTS;
+    const ratio = py / tot;
+    return lerpColor(COLORS.fileTS, COLORS.filePython, ratio);
+  }
+
+  function sanitizePayload(data) {
+    const nodes = Array.isArray(data.nodes) ? data.nodes : [];
+    const links = Array.isArray(data.links) ? data.links : [];
+    const ids = new Set(nodes.map(n => n.id).filter(Boolean));
+    const cleanLinks = links.filter(l => {
+      const s = typeof l.source === 'object' ? l.source.id : l.source;
+      const t = typeof l.target === 'object' ? l.target.id : l.target;
+      return s && t && ids.has(s) && ids.has(t);
+    });
+    return { nodes, links: cleanLinks, stats: data.stats || {} };
+  }
+
+  /** --- Build semantic levels from raw graph --- */
+  function buildGraphModel(raw) {
+    const nodeById = new Map();
+    raw.nodes.forEach(n => nodeById.set(n.id, n));
+
+    function nodeDir(n) {
+      const f = n.file || '';
+      return dirname(f);
+    }
+
+    const dirMap = new Map();
+    function ensureDir(d) {
+      if (!d && d !== '') return null;
+      if (!dirMap.has(d)) {
+        dirMap.set(d, {
+          id: d,
+          name: basename(d) || d || 'root',
+          childCount: 0,
+          types: { function: 0, class: 0, method: 0, import: 0, file: 0 },
+          lang: { py: 0, ts: 0, other: 0 },
+        });
+      }
+      return dirMap.get(d);
+    }
+
+    raw.nodes.forEach(n => {
+      const d = nodeDir(n);
+      if (d === null || d === undefined) return;
+      const rec = ensureDir(d);
+      if (!rec) return;
+      const t = n.type || '';
+      if (t === 'function' || t === 'class' || t === 'method' || t === 'import' || t === 'file') {
+        rec.childCount += 1;
+        if (rec.types[t] != null) rec.types[t] += 1;
+        else rec.types.other = (rec.types.other || 0) + 1;
+      }
+      const f = n.file || '';
+      if (f) {
+        const L = extLang(f);
+        if (L === 'py') rec.lang.py += 1;
+        else if (L === 'ts') rec.lang.ts += 1;
+        else rec.lang.other += 1;
+      }
+    });
+
+    const dirEdges = new Map();
+    function edgeKey(a, b) {
+      return a < b ? `${a}\t${b}` : `${b}\t${a}`;
+    }
+    raw.links.forEach(l => {
+      const sid = typeof l.source === 'object' ? l.source.id : l.source;
+      const tid = typeof l.target === 'object' ? l.target.id : l.target;
+      const sn = nodeById.get(sid);
+      const tn = nodeById.get(tid);
+      if (!sn || !tn) return;
+      const da = nodeDir(sn);
+      const db = nodeDir(tn);
+      if (!da && !db) return;
+      if (da === db) return;
+      const k = edgeKey(da || '_', db || '_');
+      if (!dirEdges.has(k)) {
+        dirEdges.set(k, { source: da || '_', target: db || '_', weight: 0, types: {} });
+      }
+      const e = dirEdges.get(k);
+      e.weight += 1;
+      const lt = l.type || 'CALLS';
+      e.types[lt] = (e.types[lt] || 0) + 1;
+    });
+
+    const dirsSorted = [...dirMap.values()]
+      .filter(d => d.childCount > 0)
+      .sort((a, b) => b.childCount - a.childCount);
+
+    const topDirs = dirsSorted.slice(0, MAX_GALAXY_DIRS);
+    const visibleDirSet = new Set(topDirs.map(d => d.id));
+
+    const galaxyNodes = topDirs.map(d => ({
+      id: 'dir:' + d.id,
+      kind: 'directory',
+      dirId: d.id,
+      name: d.name,
+      label: d.name,
+      childCount: d.childCount,
+      types: { ...d.types },
+      lang: { ...d.lang },
+      color: directoryColor(d.lang),
+      radius: 18 + Math.sqrt(d.childCount) * 1.2,
+    }));
+
+    const galaxyLinks = [];
+    dirEdges.forEach(e => {
+      if (!visibleDirSet.has(e.source) || !visibleDirSet.has(e.target)) return;
+      if (e.source === e.target) return;
+      galaxyLinks.push({
+        source: 'dir:' + e.source,
+        target: 'dir:' + e.target,
+        weight: e.weight,
+        type: Object.keys(e.types).sort((a, b) => (e.types[b] || 0) - (e.types[a] || 0))[0] || 'CALLS',
+      });
+    });
+
+    const filesByDir = new Map();
+    raw.nodes.forEach(n => {
+      if (n.type !== 'file' || !n.file) return;
+      const d = dirname(n.file);
+      if (!filesByDir.has(d)) filesByDir.set(d, []);
+      filesByDir.get(d).push(n);
+    });
+
+    const fileEdgesByDir = new Map();
+    raw.links.forEach(l => {
+      if (l.type !== 'IMPORTS') return;
+      const sid = typeof l.source === 'object' ? l.source.id : l.source;
+      const tid = typeof l.target === 'object' ? l.target.id : l.target;
+      const sn = nodeById.get(sid);
+      const tn = nodeById.get(tid);
+      if (!sn || !tn || !sn.file || !tn.file) return;
+      const ds = dirname(sn.file);
+      const dt = dirname(tn.file);
+      if (ds !== dt) return;
+      const fa = sn.file;
+      const fb = tn.file;
+      if (fa === fb) return;
+      if (!fileEdgesByDir.has(ds)) fileEdgesByDir.set(ds, new Map());
+      const m = fileEdgesByDir.get(ds);
+      const fk = fa < fb ? `${fa}\t${fb}` : `${fb}\t${fa}`;
+      if (!m.has(fk)) m.set(fk, { source: fa, target: fb, weight: 0, type: 'IMPORTS' });
+      m.get(fk).weight += 1;
+    });
+
+    function symbolCountInFile(filePath) {
+      let c = 0;
+      raw.nodes.forEach(n => {
+        if (n.file === filePath && (n.type === 'function' || n.type === 'method')) c += 1;
+      });
+      return c;
+    }
+
+    function buildStar(dirId) {
+      let files = filesByDir.get(dirId) || [];
+      if (files.length === 0) {
+        const seen = new Set();
+        raw.nodes.forEach(n => {
+          if (!n.file || dirname(n.file) !== dirId) return;
+          if (n.type === 'file') seen.add(n.file);
+        });
+        if (seen.size === 0) {
+          raw.nodes.forEach(n => {
+            if (!n.file || dirname(n.file) !== dirId) return;
+            seen.add(n.file);
+          });
+        }
+        files = [...seen].map(fp => ({
+          id: 'vf:' + fp,
+          name: basename(fp),
+          type: 'file',
+          file: fp,
+          line: 0,
+          val: 1,
+        }));
+      }
+      const nodes = files.slice(0, MAX_STAR_FILES).map(f => {
+        const fp = f.file || f.id;
+        const sc = symbolCountInFile(fp) + 1;
+        const col = extLang(fp) === 'py' ? COLORS.filePython : extLang(fp) === 'ts' ? COLORS.fileTS : COLORS.fileMixed;
+        return {
+          id: 'file:' + fp,
+          kind: 'file',
+          rawId: f.id,
+          name: f.name || basename(fp),
+          file: fp,
+          color: col,
+          radius: Math.max(12, 12 + Math.sqrt(sc) * 1.5),
+        };
+      });
+      const fset = new Set(nodes.map(n => n.file));
+      const linkMap = fileEdgesByDir.get(dirId) || new Map();
+      const links = [];
+      linkMap.forEach(e => {
+        if (fset.has(e.source) && fset.has(e.target)) {
+          links.push({
+            source: 'file:' + e.source,
+            target: 'file:' + e.target,
+            weight: e.weight,
+            type: 'IMPORTS',
+          });
+        }
+      });
+      return { nodes, links };
+    }
+
+    function buildPlanet(filePath, preferSymIds) {
+      const prefer = Array.isArray(preferSymIds) ? preferSymIds.filter(Boolean) : [];
+      const nodes = [];
+      raw.nodes.forEach(n => {
+        if (n.file !== filePath) return;
+        if (n.type !== 'function' && n.type !== 'class' && n.type !== 'method') return;
+        const isClass = n.type === 'class';
+        const col = isClass ? COLORS.class : n.type === 'method' ? COLORS.method : COLORS.function;
+        const baseR = isClass ? 14 : n.type === 'method' ? 11 : 10;
+        nodes.push({
+          id: 'sym:' + n.id,
+          kind: isClass ? 'class' : 'function',
+          symId: n.id,
+          raw: n,
+          name: n.name || n.id,
+          color: col,
+          radius: Math.max(10, baseR),
+        });
+      });
+      nodes.sort((a, b) => (b.raw.val || 0) - (a.raw.val || 0) || (a.name || '').localeCompare(b.name || ''));
+      const seen = new Set();
+      const kept = [];
+      prefer.forEach(pid => {
+        const n = nodes.find(x => x.symId === pid);
+        if (n && !seen.has(n.symId)) {
+          kept.push(n);
+          seen.add(n.symId);
+        }
+      });
+      for (let i = 0; i < nodes.length && kept.length < MAX_PLANET_SYMBOLS; i++) {
+        const n = nodes[i];
+        if (!seen.has(n.symId)) {
+          kept.push(n);
+          seen.add(n.symId);
+        }
+      }
+      const idset = new Set(kept.map(n => n.symId));
+      const links = [];
+      raw.links.forEach(l => {
+        if (l.type !== 'CALLS') return;
+        const sid = typeof l.source === 'object' ? l.source.id : l.source;
+        const tid = typeof l.target === 'object' ? l.target.id : l.target;
+        if (!idset.has(sid) || !idset.has(tid)) return;
+        links.push({
+          source: 'sym:' + sid,
+          target: 'sym:' + tid,
+          weight: 1,
+          type: 'CALLS',
+        });
+      });
+      return { nodes: kept, links };
+    }
+
+    return {
+      raw,
+      nodeById,
+      galaxy: { nodes: galaxyNodes, links: galaxyLinks },
+      buildStar,
+      buildPlanet,
+      dirsSorted,
+    };
+  }
+
+  /** --- Pixi + sim --- */
+  let app = null;
+  let world = null;
+  let layerEdges = null;
+  let layerNodes = null;
+  let bgGraphics = null;
+  let starGraphics = null;
+  let gridGraphics = null;
+
+  let model = null;
+  let viewLevel = 'galaxy';
+  let selectedDir = null;
+  let selectedFile = null;
+  let currentNodes = [];
+  let currentLinks = [];
+  let simulation = null;
+  let simNodes = [];
+  let simLinks = [];
+
+  const nodePool = [];
+  const edgePool = [];
+
+  let worldScale = 1;
+  let worldTx = 0;
+  let worldTy = 0;
+  let targetWorldScale = 1;
+  let targetWorldTx = 0;
+  let targetWorldTy = 0;
+
+  let searchQuery = '';
+  let searchMatches = [];
+  let searchDebounceTimer = null;
+  let hoveredSimNode = null;
+  let activeTweens = [];
+  let labelTop20Key = '';
+  let labelTop20Set = null;
+
+  function killTweens() {
+    activeTweens.forEach(t => t.kill());
+    activeTweens = [];
+  }
+
+  function edgeColor(linkType) {
+    return LINK_HEX[linkType] || COLORS.edgeDefault;
+  }
+
+  function drawHexagon(g, r, fill, alpha, lineW, lineColor) {
+    g.clear();
+    const pts = [];
+    for (let i = 0; i < 6; i++) {
+      const a = (Math.PI / 3) * i - Math.PI / 6;
+      pts.push(Math.cos(a) * r, Math.sin(a) * r);
+    }
+    g.beginFill(fill, alpha);
+    g.drawPolygon(pts);
+    g.endFill();
+    g.lineStyle(lineW, lineColor, 0.85);
+    g.drawPolygon(pts);
+  }
+
+  function drawCircleNode(g, r, fill, alpha, ringColor) {
+    g.clear();
+    g.beginFill(fill, 0.12);
+    g.drawCircle(0, 0, r * 2.4);
+    g.endFill();
+    g.lineStyle(2, ringColor, 0.9);
+    g.drawCircle(0, 0, r);
+    g.beginFill(fill, 0.35);
+    g.drawCircle(0, 0, r * 0.92);
+    g.endFill();
+  }
+
+  function drawDiamond(g, r, fill) {
+    g.clear();
+    g.beginFill(fill, 0.12);
+    g.drawCircle(0, 0, r * 2.2);
+    g.endFill();
+    g.lineStyle(2, fill, 0.95);
+    g.beginFill(fill, 0.4);
+    g.drawPolygon([0, -r, r, 0, 0, r, -r, 0]);
+    g.endFill();
+  }
+
+  function drawClassSquare(g, r, fill) {
+    g.clear();
+    g.beginFill(fill, 0.12);
+    g.drawCircle(0, 0, r * 2.4);
+    g.endFill();
+    g.lineStyle(2, fill, 0.95);
+    g.beginFill(fill, 0.38);
+    g.drawRoundedRect(-r, -r, r * 2, r * 2, 4);
+    g.endFill();
+  }
+
+  function acquireNodePool(i) {
+    while (nodePool.length <= i) {
+      const c = new PIXI.Container();
+      const glow = new PIXI.Graphics();
+      const shape = new PIXI.Graphics();
+      const label = new PIXI.Text('', {
+        fontFamily: 'Outfit, system-ui, sans-serif',
+        fontSize: 11,
+        fill: 0xffffff,
+        align: 'center',
+      });
+      label.anchor.set(0.5, 0);
+      label.visible = false;
+      c.addChild(glow);
+      c.addChild(shape);
+      c.addChild(label);
+      c.eventMode = 'static';
+      c.cursor = 'pointer';
+      c.visible = false;
+      c.on('pointerover', onNodeOver);
+      c.on('pointerout', onNodeOut);
+      c.on('pointertap', onNodeClick);
+      nodePool.push({ container: c, glow, shape, label, simNode: null });
+      layerNodes.addChild(c);
+    }
+    return nodePool[i];
+  }
+
+  function acquireEdgePool(i) {
+    while (edgePool.length <= i) {
+      const g = new PIXI.Graphics();
+      g.visible = false;
+      edgePool.push(g);
+      layerEdges.addChild(g);
+    }
+    return edgePool[i];
+  }
+
+  function clientFromPixiEvent(e) {
+    const o = e.data && e.data.originalEvent;
+    if (o && o.clientX != null) return { x: o.clientX, y: o.clientY };
+    const br = app.view.getBoundingClientRect();
+    return { x: br.left + e.global.x, y: br.top + e.global.y };
+  }
+
+  function onNodeOver(e) {
+    const c = e.currentTarget;
+    const entry = nodePool.find(p => p.container === c);
+    if (!entry || !entry.simNode) return;
+    hoveredSimNode = entry.simNode;
+    gsap.to(c.scale, { x: 1.3, y: 1.3, duration: 0.2, ease: 'back.out(1.7)' });
+    const glow = entry.glow;
+    glow.clear();
+    const sn = entry.simNode;
+    const col = sn.color;
+    glow.beginFill(col, 0.4);
+    glow.drawCircle(0, 0, (sn.radius || 12) * 2.8);
+    glow.endFill();
+    const pt = clientFromPixiEvent(e);
+    showTooltip(sn, pt.x, pt.y);
+    pulseNeighbors(sn);
+    syncPixiFromSim();
+  }
+
+  function onNodeOut(e) {
+    const c = e.currentTarget;
+    const entry = nodePool.find(p => p.container === c);
+    hoveredSimNode = null;
+    hideTooltip();
+    gsap.to(c.scale, { x: 1, y: 1, duration: 0.18, ease: 'power2.out' });
+    if (entry && entry.simNode) redrawNodeGlow(entry, entry.simNode, false);
+    clearNeighborPulse();
+    syncPixiFromSim();
+  }
+
+  function redrawNodeGlow(entry, sn, isHover) {
+    const g = entry.glow;
+    g.clear();
+    const a = isHover ? 0.4 : 0.15;
+    g.beginFill(sn.color, a);
+    g.drawCircle(0, 0, (sn.radius || 12) * 2.5);
+    g.endFill();
+  }
+
+  let neighborPulseTweens = [];
+  function clearNeighborPulse() {
+    neighborPulseTweens.forEach(t => t.kill());
+    neighborPulseTweens = [];
+    nodePool.forEach(p => {
+      if (!p.simNode || !p.container.visible) return;
+      const sn = p.simNode;
+      const dim = searchQuery && !nodeMatchesSearch(sn) ? 0.25 : 1;
+      gsap.to(p.container, { alpha: dim, duration: 0.15 });
+    });
+  }
+
+  function pulseNeighbors(center) {
+    clearNeighborPulse();
+    const id = center.id;
+    const nbr = new Set();
+    currentLinks.forEach(l => {
+      const s = l.source.id || l.source;
+      const t = l.target.id || l.target;
+      if (s === id) nbr.add(t);
+      if (t === id) nbr.add(s);
+    });
+    nodePool.forEach(p => {
+      if (!p.simNode || !nbr.has(p.simNode.id)) return;
+      const tw = gsap.to(p.container.scale, {
+        x: 1.15,
+        y: 1.15,
+        duration: 0.2,
+        yoyo: true,
+        repeat: 1,
+        ease: 'sine.inOut',
+      });
+      neighborPulseTweens.push(tw);
+    });
+  }
+
+  function onNodeClick(e) {
+    e.stopPropagation();
+    const entry = nodePool.find(p => p.container === e.currentTarget);
+    if (!entry || !entry.simNode) return;
+    const sn = entry.simNode;
+    nodePool.forEach(p => {
+      if (!p.container.visible) return;
+      gsap.to(p.container, { alpha: p === entry ? 1 : 0.2, duration: 0.35 });
+    });
+    gsap.to(entry.container.scale, { x: 2, y: 2, duration: 0.35, ease: 'power2.out' });
+    if (sn.kind === 'directory') zoomToDirectory(sn.dirId);
+    else if (sn.kind === 'file') zoomToFile(sn.file);
+  }
+
+  function showTooltip(sn, gx, gy) {
+    const el = document.getElementById('tooltip');
+    const raw = sn.raw;
+    el.querySelector('.tooltip-name').textContent = sn.name || sn.id;
+    const typeEl = el.querySelector('.tooltip-type');
+    const typ = raw ? raw.type : sn.kind;
+    typeEl.textContent = typ || '';
+    typeEl.style.background = 'rgba(99,102,241,0.2)';
+    typeEl.style.color = '#a5b4fc';
+    typeEl.style.border = '1px solid rgba(99,102,241,0.35)';
+    let fileLine = raw ? (raw.file || '') : (sn.file || sn.dirId || '');
+    if (sn.kind === 'directory') {
+      fileLine = (sn.dirId || '') + ' · ' + (sn.childCount || 0) + ' symbols';
+    }
+    el.querySelector('.tooltip-file').textContent = fileLine;
+    const line = raw && raw.line != null ? 'Line ' + raw.line : '';
+    const comp = raw && raw.val != null ? 'Complexity ' + raw.val : '';
+    el.querySelector('.tooltip-lines').textContent = [line, comp].filter(Boolean).join(' · ');
+    el.style.display = 'block';
+    el.style.left = Math.min(gx + 14, window.innerWidth - 400) + 'px';
+    el.style.top = Math.min(gy + 14, window.innerHeight - 140) + 'px';
+  }
+
+  function hideTooltip() {
+    document.getElementById('tooltip').style.display = 'none';
+  }
+
+  function fitWorldToNodes(animate) {
+    if (!simNodes.length || !app) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const labelPadWorld = (viewLevel === 'star' || viewLevel === 'planet') ? 28 : 0;
+    simNodes.forEach(n => {
+      const r = n.radius || 12;
+      minX = Math.min(minX, n.x - r);
+      maxX = Math.max(maxX, n.x + r);
+      minY = Math.min(minY, n.y - r);
+      maxY = Math.max(maxY, n.y + r + labelPadWorld);
+    });
+    const bw = maxX - minX || 1;
+    const bh = maxY - minY || 1;
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const pad = 0.85;
+    const sx = (app.screen.width * pad) / bw;
+    const sy = (app.screen.height * pad) / bh;
+    let s = Math.min(sx, sy);
+    if (viewLevel === 'star' && simNodes.length) {
+      const minNodeR = Math.min(...simNodes.map(n => n.radius || 12));
+      s = Math.max(s, 12 / Math.max(minNodeR, 1e-6));
+    } else if (viewLevel === 'planet' && simNodes.length) {
+      const minNodeR = Math.min(...simNodes.map(n => n.radius || 10));
+      s = Math.max(s, 10 / Math.max(minNodeR, 1e-6));
+    }
+    s = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, s));
+    targetWorldScale = s;
+    targetWorldTx = app.screen.width / 2 - cx * s;
+    targetWorldTy = app.screen.height / 2 - cy * s;
+    if (animate === false) {
+      world.scale.set(s);
+      world.position.set(targetWorldTx, targetWorldTy);
+      worldScale = s;
+      worldTx = targetWorldTx;
+      worldTy = targetWorldTy;
+      return;
+    }
+    smoothWorld(0.6, 'power3.out');
+  }
+
+  function smoothWorld(dur, ease) {
+    killTweens();
+    const from = {
+      s: world.scale.x,
+      x: world.position.x,
+      y: world.position.y,
+    };
+    const tw = gsap.to(from, {
+      s: targetWorldScale,
+      x: targetWorldTx,
+      y: targetWorldTy,
+      duration: dur,
+      ease: ease || 'power3.out',
+      onUpdate: () => {
+        world.scale.set(from.s);
+        world.position.set(from.x, from.y);
+        worldScale = from.s;
+        worldTx = from.x;
+        worldTy = from.y;
+      },
+    });
+    activeTweens.push(tw);
+  }
+
+  function stopSimulation() {
+    if (simulation) {
+      simulation.stop();
+      simulation = null;
+    }
+  }
+
+  function startSimulation(nodes, links) {
+    stopSimulation();
+    labelTop20Key = '';
+    labelTop20Set = null;
+    simNodes = nodes.map(n => Object.assign({}, n));
+    simLinks = links.map(l => ({
+      source: l.source,
+      target: l.target,
+      type: l.type,
+      weight: l.weight,
+    }));
+
+    const d3f = typeof d3 !== 'undefined' ? d3 : window.d3;
+    if (!d3f || !d3f.forceSimulation) {
+      console.error('d3-force not available');
+      return;
+    }
+
+    if (!simNodes.length) {
+      syncPixiFromSim();
+      return;
+    }
+
+    const isGalaxyView = viewLevel === 'galaxy';
+    const chargeStrength = isGalaxyView ? -120 : -420;
+    const collidePad = isGalaxyView ? 6 : 16;
+    simulation = d3f.forceSimulation(simNodes)
+      .force('charge', d3f.forceManyBody().strength(chargeStrength))
+      .force('center', d3f.forceCenter(0, 0))
+      .force('collide', d3f.forceCollide().radius(d => (d.radius || 14) + collidePad))
+      .alphaDecay(0.022)
+      .velocityDecay(0.6);
+    if (simLinks.length) {
+      const linkDistance = isGalaxyView
+        ? l => {
+            const w = l.weight || 1;
+            return 40 + 120 / Math.sqrt(w + 1);
+          }
+        : l => {
+            const w = l.weight || 1;
+            return 100 + 220 / Math.sqrt(w + 1);
+          };
+      const linkStrength = isGalaxyView ? 0.5 : 0.32;
+      simulation.force(
+        'link',
+        d3f.forceLink(simLinks).id(d => d.id).distance(linkDistance).strength(linkStrength)
+      );
+    }
+
+    simulation.alpha(1);
+    for (let i = 0; i < 120; i++) simulation.tick();
+    syncPixiFromSim();
+  }
+
+  function top20LabelIds() {
+    if (simNodes.length <= 20) return null;
+    const key = viewLevel + '\0' + simNodes.map(n => n.id).join('|');
+    if (key === labelTop20Key && labelTop20Set) return labelTop20Set;
+    labelTop20Key = key;
+    if (viewLevel === 'star') {
+      labelTop20Set = new Set(
+        [...simNodes]
+          .sort((a, b) => (b.radius || 0) - (a.radius || 0))
+          .slice(0, 20)
+          .map(n => n.id)
+      );
+    } else if (viewLevel === 'planet') {
+      labelTop20Set = new Set(
+        [...simNodes]
+          .sort((a, b) => {
+            const va = (a.raw && a.raw.val) || 0;
+            const vb = (b.raw && b.raw.val) || 0;
+            if (vb !== va) return vb - va;
+            return (b.radius || 0) - (a.radius || 0);
+          })
+          .slice(0, 20)
+          .map(n => n.id)
+      );
+    } else {
+      labelTop20Set = null;
+    }
+    return labelTop20Set;
+  }
+
+  function syncPixiFromSim() {
+    const labelIdSet =
+      viewLevel === 'star' || viewLevel === 'planet' ? top20LabelIds() : null;
+
+    simNodes.forEach((sn, i) => {
+      const p = acquireNodePool(i);
+      p.simNode = sn;
+      p.container.visible = true;
+      p.container.x = sn.x;
+      p.container.y = sn.y;
+      p.container.alpha = searchQuery && !nodeMatchesSearch(sn) ? 0.25 : 1;
+      const rVis = sn.radius || 12;
+      const hitMult = viewLevel === 'galaxy' ? 1.35 : 1.5;
+      p.container.hitArea = new PIXI.Circle(0, 0, rVis * hitMult);
+      const sh = p.shape;
+      const kind = sn.kind;
+      if (kind === 'directory') {
+        drawHexagon(sh, sn.radius || 20, sn.color, 0.25, 2, sn.color);
+        redrawNodeGlow(p, sn, hoveredSimNode === sn);
+      } else if (kind === 'file') {
+        drawCircleNode(sh, sn.radius || 14, sn.color, 1, sn.color);
+        redrawNodeGlow(p, sn, hoveredSimNode === sn);
+      } else if (kind === 'class') {
+        drawClassSquare(sh, sn.radius || 12, sn.color);
+        redrawNodeGlow(p, sn, hoveredSimNode === sn);
+      } else {
+        drawDiamond(sh, sn.radius || 10, sn.color);
+        redrawNodeGlow(p, sn, hoveredSimNode === sn);
+      }
+
+      const lab = p.label;
+      if (lab) {
+        if (viewLevel === 'star' && kind === 'file') {
+          const nm = sn.name || basename(sn.file || '');
+          const allow = !labelIdSet || labelIdSet.has(sn.id);
+          lab.visible = allow && !!nm;
+          lab.text = truncateGraphLabel(nm, 24);
+          lab.style.fontSize = 11;
+          lab.position.set(0, rVis + 6);
+        } else if (viewLevel === 'planet' && (kind === 'function' || kind === 'class')) {
+          const nm = sn.name || '';
+          const allow = !labelIdSet || labelIdSet.has(sn.id);
+          lab.visible = allow && !!nm;
+          lab.text = truncateGraphLabel(nm, 24);
+          lab.style.fontSize = 10;
+          lab.position.set(0, rVis + 5);
+        } else {
+          lab.visible = false;
+        }
+      }
+    });
+    for (let j = simNodes.length; j < nodePool.length; j++) {
+      nodePool[j].container.visible = false;
+      nodePool[j].simNode = null;
+      if (nodePool[j].label) nodePool[j].label.visible = false;
+    }
+
+    const maxE = Math.min(simLinks.length, MAX_POOL_EDGES);
+    for (let e = 0; e < maxE; e++) {
+      const g = acquireEdgePool(e);
+      const l = simLinks[e];
+      const sid = typeof l.source === 'object' && l.source !== null ? l.source.id : l.source;
+      const tid = typeof l.target === 'object' && l.target !== null ? l.target.id : l.target;
+      const s = typeof l.source === 'object' && l.source !== null && l.source.x != null
+        ? l.source
+        : simNodes.find(n => n.id === sid);
+      const t = typeof l.target === 'object' && l.target !== null && l.target.x != null
+        ? l.target
+        : simNodes.find(n => n.id === tid);
+      if (!s || !t || s.x == null || t.x == null) {
+        g.visible = false;
+        continue;
+      }
+      g.visible = true;
+      const col = edgeColor(l.type);
+      const wGal = 0.5 + Math.log(1 + (l.weight || 1)) * 0.6;
+      const mx = (s.x + t.x) / 2;
+      const my = (s.y + t.y) / 2;
+      const dx = t.x - s.x;
+      const dy = t.y - s.y;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const ox = (-dy / len) * 24;
+      const oy = (dx / len) * 24;
+      const cx = mx + ox;
+      const cy = my + oy;
+      g.clear();
+      if (viewLevel === 'galaxy') {
+        g.lineStyle(wGal, col, 0.35);
+      } else {
+        const hid = hoveredSimNode && hoveredSimNode.id;
+        const connected = hid && (sid === hid || tid === hid);
+        g.lineStyle(1, col, connected ? 0.72 : 0.15);
+      }
+      g.moveTo(s.x, s.y);
+      g.bezierCurveTo(cx, cy, cx, cy, t.x, t.y);
+    }
+    for (let k = maxE; k < edgePool.length; k++) edgePool[k].visible = false;
+  }
+
+  function nodeMatchesSearch(sn) {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    const raw = sn.raw;
+    const name = (sn.name || '').toLowerCase();
+    const id = (sn.id || '').toLowerCase();
+    const file = (sn.file || '').toLowerCase();
+    const dir = (sn.dirId || '').toLowerCase();
+    if (name.includes(q) || id.includes(q) || file.includes(q) || dir.includes(q)) return true;
+    if (raw) {
+      if ((raw.name || '').toLowerCase().includes(q)) return true;
+      if ((raw.id || '').toLowerCase().includes(q)) return true;
+    }
+    return false;
+  }
+
+  function loadLevelGalaxy() {
+    killTweens();
+    viewLevel = 'galaxy';
+    selectedDir = null;
+    selectedFile = null;
+    currentNodes = model.galaxy.nodes;
+    currentLinks = model.galaxy.links;
+    world.alpha = 1;
+    updateBreadcrumb();
+    startSimulation(currentNodes, currentLinks);
+    fitWorldToNodes();
+    gsap.fromTo(world, { alpha: 0.3 }, { alpha: 1, duration: 0.45, ease: 'power2.out' });
+  }
+
+  function loadLevelStar(dirId) {
+    killTweens();
+    viewLevel = 'star';
+    selectedDir = dirId;
+    selectedFile = null;
+    const { nodes, links } = model.buildStar(dirId);
+    currentNodes = nodes;
+    currentLinks = links;
+    updateBreadcrumb();
+    startSimulation(currentNodes, currentLinks);
+    fitWorldToNodes();
+    gsap.to(world, { alpha: 1, duration: 0.4 });
+  }
+
+  function loadLevelPlanet(filePath, focusSymId) {
+    killTweens();
+    viewLevel = 'planet';
+    selectedFile = filePath;
+    const { nodes, links } = model.buildPlanet(filePath, focusSymId ? [focusSymId] : []);
+    currentNodes = nodes;
+    currentLinks = links;
+    updateBreadcrumb();
+    startSimulation(currentNodes, currentLinks);
+    fitWorldToNodes();
+    gsap.to(world, { alpha: 1, duration: 0.4 });
+  }
+
+  function zoomToDirectory(dirId) {
+    killTweens();
+    nodePool.forEach(p => gsap.set(p.container, { alpha: 1, scale: 1 }));
+    loadLevelStar(dirId);
+  }
+
+  function zoomToFile(filePath, focusSymId) {
+    killTweens();
+    nodePool.forEach(p => gsap.set(p.container, { alpha: 1, scale: 1 }));
+    loadLevelPlanet(filePath, focusSymId);
+  }
+
+  function zoomOutOne() {
+    killTweens();
+    nodePool.forEach(p => gsap.set(p.container, { alpha: 1, scale: 1 }));
+    if (viewLevel === 'planet') {
+      loadLevelStar(selectedDir);
+    } else if (viewLevel === 'star') {
+      loadLevelGalaxy();
+    }
+  }
+
+  function updateBreadcrumb() {
+    const bc = document.getElementById('breadcrumb');
+    bc.innerHTML = '';
+    const addCrumb = (label, level, data) => {
+      const span = document.createElement('span');
+      span.className = 'crumb' + (level === 'current' ? ' current' : '');
+      span.textContent = label;
+      span.dataset.level = data || '';
+      if (level !== 'current') {
+        span.addEventListener('click', () => {
+          if (data === 'galaxy') {
+            loadLevelGalaxy();
+          } else if (data === 'star' && selectedDir) {
+            loadLevelStar(selectedDir);
+          }
+        });
+      }
+      bc.appendChild(span);
+    };
+    addCrumb('OMNIX', viewLevel === 'galaxy' ? 'current' : '', 'galaxy');
+    if (selectedDir) {
+      const sep = document.createElement('span');
+      sep.className = 'sep';
+      sep.textContent = '›';
+      bc.appendChild(sep);
+      const dirTitle = basename(selectedDir) || selectedDir;
+      const label = dirTitle.length > 40 ? dirTitle.slice(0, 37) + '…' : dirTitle;
+      addCrumb(label, viewLevel === 'star' ? 'current' : '', 'star');
+    }
+    if (selectedFile && viewLevel === 'planet') {
+      const sep2 = document.createElement('span');
+      sep2.className = 'sep';
+      sep2.textContent = '›';
+      bc.appendChild(sep2);
+      addCrumb(basename(selectedFile), 'current', 'file');
+    }
+    gsap.fromTo(bc, { opacity: 0.5 }, { opacity: 1, duration: 0.35 });
+  }
+
+  function drawBackground() {
+    const w = app.screen.width;
+    const h = app.screen.height;
+    bgGraphics.clear();
+    const steps = 12;
+    for (let i = 0; i < steps; i++) {
+      const t = i / (steps - 1);
+      const c = lerpColor(COLORS.bg, COLORS.bgGradientEnd, t);
+      bgGraphics.beginFill(c, 1);
+      bgGraphics.drawRect(0, (h / steps) * i, w, h / steps + 1);
+      bgGraphics.endFill();
+    }
+  }
+
+  let starfieldTwinkle = null;
+  function buildStarfield() {
+    if (starfieldTwinkle) {
+      starfieldTwinkle.kill();
+      starfieldTwinkle = null;
+    }
+    starGraphics.clear();
+    const n = 200;
+    for (let i = 0; i < n; i++) {
+      const x = Math.random() * app.screen.width;
+      const y = Math.random() * app.screen.height;
+      const s = 0.4 + Math.random() * 1.2;
+      starGraphics.beginFill(0xffffff, 0.15 + Math.random() * 0.35);
+      starGraphics.drawCircle(x, y, s);
+      starGraphics.endFill();
+    }
+    starGraphics.alpha = 0.85;
+    starfieldTwinkle = gsap.to(starGraphics, {
+      alpha: 1,
+      duration: 2.4,
+      repeat: -1,
+      yoyo: true,
+      ease: 'sine.inOut',
+    });
+  }
+
+  function drawHexGrid() {
+    gridGraphics.clear();
+    const h = 40;
+    const w = app.screen.width;
+    const ht = app.screen.height;
+    gridGraphics.lineStyle(1, 0x6366f1, 0.06);
+    for (let y = -h; y < ht + h; y += h * 0.866) {
+      let row = 0;
+      for (let x = -w; x < w + w; x += h * 1.5) {
+        const ox = (row % 2) * h * 0.75;
+        const cx = x + ox;
+        const pts = [];
+        for (let i = 0; i < 6; i++) {
+          const a = (Math.PI / 3) * i - Math.PI / 6;
+          pts.push(cx + Math.cos(a) * h * 0.45, y + Math.sin(a) * h * 0.45);
+        }
+        gridGraphics.moveTo(pts[0], pts[1]);
+        for (let k = 2; k < pts.length; k += 2) gridGraphics.lineTo(pts[k], pts[k + 1]);
+        gridGraphics.closePath();
+        row++;
+      }
+    }
+  }
+
+  function initPixi() {
+    const host = document.getElementById('graph-container');
+    app = new PIXI.Application({
+      width: window.innerWidth,
+      height: window.innerHeight,
+      backgroundColor: COLORS.bg,
+      antialias: true,
+      resolution: window.devicePixelRatio || 1,
+      autoDensity: true,
+    });
+    host.appendChild(app.view);
+
+    bgGraphics = new PIXI.Graphics();
+    starGraphics = new PIXI.Graphics();
+    gridGraphics = new PIXI.Graphics();
+    world = new PIXI.Container();
+    layerEdges = new PIXI.Container();
+    layerNodes = new PIXI.Container();
+    world.addChild(layerEdges);
+    world.addChild(layerNodes);
+    layerEdges.eventMode = 'none';
+
+    app.stage.addChild(bgGraphics);
+    app.stage.addChild(starGraphics);
+    app.stage.addChild(gridGraphics);
+    app.stage.addChild(world);
+
+    app.stage.eventMode = 'static';
+    app.stage.hitArea = app.screen;
+    app.stage.on('pointerdown', onStageDown);
+    app.stage.on('pointermove', onStageMove);
+    app.stage.on('pointerup', onStageUp);
+    app.stage.on('pointerupoutside', onStageUp);
+    app.view.addEventListener('wheel', onWheel, { passive: false });
+    app.view.addEventListener('mousemove', ev => {
+      if (!hoveredSimNode) return;
+      const t = document.getElementById('tooltip');
+      if (t.style.display !== 'block') return;
+      showTooltip(hoveredSimNode, ev.clientX, ev.clientY);
+    });
+
+    drawBackground();
+    drawHexGrid();
+    buildStarfield();
+
+    world.position.set(0, 0);
+    world.scale.set(1);
+    worldScale = 1;
+    worldTx = 0;
+    worldTy = 0;
+    targetWorldScale = 1;
+    targetWorldTx = 0;
+    targetWorldTy = 0;
+
+    let lastFps = performance.now();
+    let frames = 0;
+    app.ticker.add(() => {
+      frames++;
+      const now = performance.now();
+      if (now - lastFps >= 500) {
+        const fps = Math.round((frames * 1000) / (now - lastFps));
+        document.getElementById('fps-counter').textContent = fps + ' FPS';
+        frames = 0;
+        lastFps = now;
+      }
+      if (simulation && simulation.alpha() > 0.002) {
+        simulation.tick();
+        syncPixiFromSim();
+      }
+    });
+  }
+
+  let dragStart = null;
+  let worldStart = null;
+  let didDrag = false;
+
+  function onStageDown(e) {
+    if (e.target === app.stage || e.target === world || e.target === layerEdges || e.target === gridGraphics || e.target === bgGraphics || e.target === starGraphics) {
+      dragStart = { x: e.global.x, y: e.global.y };
+      worldStart = { x: world.position.x, y: world.position.y };
+      didDrag = false;
+    }
+  }
+
+  function onStageMove(e) {
+    if (!dragStart) return;
+    const dx = e.global.x - dragStart.x;
+    const dy = e.global.y - dragStart.y;
+    if (Math.hypot(dx, dy) > 4) didDrag = true;
+    world.position.set(worldStart.x + dx, worldStart.y + dy);
+    worldTx = world.position.x;
+    worldTy = world.position.y;
+    targetWorldTx = worldTx;
+    targetWorldTy = worldTy;
+  }
+
+  function onStageUp(e) {
+    if (dragStart && !didDrag) {
+      if (e.target === app.stage || e.target === world || e.target === layerEdges || e.target === gridGraphics) {
+        zoomOutOne();
+      }
+    }
+    dragStart = null;
+  }
+
+  function onWheel(ev) {
+    ev.preventDefault();
+    const delta = ev.deltaY > 0 ? 0.92 : 1.08;
+    const ns = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, world.scale.x * delta));
+    const rect = app.view.getBoundingClientRect();
+    const lx = ev.clientX - rect.left;
+    const ly = ev.clientY - rect.top;
+    const wx = (lx - world.position.x) / world.scale.x;
+    const wy = (ly - world.position.y) / world.scale.y;
+    world.scale.set(ns);
+    world.position.set(lx - wx * ns, ly - wy * ns);
+    worldScale = ns;
+    targetWorldScale = ns;
+    worldTx = world.position.x;
+    worldTy = world.position.y;
+    targetWorldTx = worldTx;
+    targetWorldTy = worldTy;
+  }
+
+  function resizePixi() {
+    if (!app) return;
+    app.renderer.resize(window.innerWidth, window.innerHeight);
+    app.stage.hitArea = app.screen;
+    drawBackground();
+    drawHexGrid();
+    buildStarfield();
+    if (simNodes.length) {
+      fitWorldToNodes(false);
+      syncPixiFromSim();
+    }
+  }
+
+  /** --- Search --- */
+  function runSearchIndex() {
+    if (!model) return;
+    const q = searchQuery.toLowerCase();
+    searchMatches = [];
+    if (!q) {
+      document.getElementById('search-count').textContent = '';
+      document.getElementById('search-hint').style.display = 'none';
+      syncPixiFromSim();
+      return;
+    }
+    model.raw.nodes.forEach(n => {
+      const hay = ((n.name || '') + (n.id || '') + (n.file || '')).toLowerCase();
+      if (hay.includes(q)) searchMatches.push(n);
+    });
+    document.getElementById('search-count').textContent = searchMatches.length ? searchMatches.length + ' hits' : '0 hits';
+    const hint = document.getElementById('search-hint');
+    if (searchMatches.length) {
+      const m = searchMatches[0];
+      const bn = m.name || m.id;
+      const fp = m.file || '';
+      hint.textContent = bn + (fp ? ' → ' + fp : '');
+      hint.style.display = 'block';
+    } else {
+      hint.style.display = 'none';
+    }
+    syncPixiFromSim();
+  }
+
+  function zoomToRawNode(n) {
+    if (!n || !n.file) return;
+    const dir = dirname(n.file);
+    const fp = n.file;
+    if (n.type === 'file') {
+      loadLevelStar(dir);
+      return;
+    }
+    if (n.type === 'function' || n.type === 'class' || n.type === 'method') {
+      selectedDir = dir;
+      loadLevelPlanet(fp, n.id);
+      const symId = n.id;
+      gsap.delayedCall(0.65, () => {
+        const target = simNodes.find(sn => sn.symId === symId);
+        if (!target || !app) return;
+        const s = world.scale.x;
+        targetWorldScale = s;
+        targetWorldTx = app.screen.width / 2 - target.x * s;
+        targetWorldTy = app.screen.height / 2 - target.y * s;
+        smoothWorld(0.45, 'power3.out');
+      });
+      return;
+    }
+    if (dir) loadLevelStar(dir);
+  }
+
+  /** --- Entrance --- */
+  let entranceDone = false;
+  function skipEntrance() {
+    if (entranceDone) return;
+    entranceDone = true;
+    gsap.killTweensOf('#entrance *');
+    const el = document.getElementById('entrance');
+    gsap.to(el, {
+      opacity: 0,
+      duration: 0.35,
+      onComplete: () => {
+        el.style.display = 'none';
+        document.getElementById('ui-fade').classList.add('visible');
+      },
+    });
+    try { localStorage.setItem(STORAGE_VISITED, '1'); } catch (e) { /* ignore */ }
+  }
+
+  function playEntrance(stats) {
+    const skip = localStorage.getItem(STORAGE_VISITED) === '1';
+    if (skip) {
+      entranceDone = true;
+      document.getElementById('entrance').style.display = 'none';
+      document.getElementById('ui-fade').classList.add('visible');
+      return;
+    }
+    const tl = gsap.timeline({
+      onComplete: () => {
+        skipEntrance();
+      },
+    });
+    tl.to('#ent-title', { opacity: 1, duration: 0.5, ease: 'power2.out' }, 0);
+    tl.to('#ent-sub', {
+      opacity: 1,
+      duration: 0.4,
+      onStart: () => {
+        document.getElementById('ent-sub').textContent =
+          'Scanning ' + (stats.files || 0) + ' files…';
+      },
+    }, 0.5);
+    tl.add(() => {
+      buildStarfield();
+      starGraphics.alpha = 0;
+      gsap.to(starGraphics, { alpha: 1, duration: 0.5 });
+    }, 1);
+    tl.add(() => {
+      if (model && simNodes.length) {
+        nodePool.forEach((p, i) => {
+          if (i >= simNodes.length) return;
+          p.container.visible = true;
+          p.simNode = simNodes[i];
+          p.container.x = simNodes[i].x;
+          p.container.y = simNodes[i].y;
+          gsap.fromTo(p.container.scale, { x: 0, y: 0 }, {
+            x: 1,
+            y: 1,
+            duration: 0.45,
+            ease: 'back.out(1.4)',
+            delay: i * 0.03,
+          });
+        });
+      }
+    }, 1.5);
+    tl.add(() => {
+      edgePool.forEach((g, i) => {
+        if (!g.visible) return;
+        g.alpha = 0;
+        gsap.to(g, { alpha: 1, duration: 0.35, delay: i * 0.008 });
+      });
+    }, 2.5);
+    tl.add(() => {
+      const files = stats.files || 0;
+      const funcs = (stats.functions || 0) + (stats.methods || 0);
+      const edges = stats.edges || 0;
+      document.getElementById('ent-sub').textContent = files + ' files · ' + funcs + ' functions · ' + edges + ' edges';
+      gsap.fromTo('#ent-sub', { opacity: 0.4 }, { opacity: 1, duration: 0.4 });
+    }, 3);
+    tl.to('#ent-title', { opacity: 0, duration: 0.4 }, 3.5);
+    tl.to('#ent-sub', { opacity: 0, duration: 0.4 }, 3.5);
+  }
+
+  function showLoadError(msg) {
+    const wrap = document.getElementById('loading-error');
+    document.getElementById('loading-error-msg').innerHTML = escapeHtml(msg);
+    wrap.classList.add('visible');
+  }
+
+  function updateStatsPanel(stats) {
+    document.getElementById('stat-files').textContent = stats.files ?? 0;
+    document.getElementById('stat-functions').textContent = (stats.functions ?? 0) + (stats.methods ?? 0);
+    document.getElementById('stat-classes').textContent = stats.classes ?? 0;
+    document.getElementById('stat-edges').textContent = stats.edges ?? 0;
+  }
+
+  /** --- Boot --- */
+  document.getElementById('entrance').addEventListener('click', skipEntrance);
+  document.getElementById('btn-fullscreen').addEventListener('click', () => {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+    else document.exitFullscreen?.();
+  });
+  document.getElementById('btn-export').addEventListener('click', async () => {
+    if (!GRAPH_API_URL) {
+      alert('Export needs the OMNIX server URL.');
+      return;
+    }
+    try {
+      const r = await fetch(GRAPH_API_URL, { cache: 'no-store' });
+      if (!r.ok) {
+        alert('Export failed: HTTP ' + r.status);
+        return;
+      }
+      const j = await r.json();
+      const blob = new Blob([JSON.stringify(j, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'graph.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      alert('Export failed');
+    }
+  });
+
+  document.getElementById('search-input').addEventListener('input', () => {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      searchQuery = document.getElementById('search-input').value.trim();
+      runSearchIndex();
+    }, SEARCH_DEBOUNCE_MS);
+  });
+  document.getElementById('search-input').addEventListener('keydown', ev => {
+    if (ev.key === 'Enter' && searchMatches.length) zoomToRawNode(searchMatches[0]);
+  });
+
+  window.addEventListener('keydown', ev => {
+    if (ev.key === 'Escape') zoomOutOne();
+  });
+  window.addEventListener('resize', resizePixi);
+
+  (async function boot() {
+    if (!GRAPH_API_URL) {
+      showLoadError('Open this UI from the OMNIX server (http://…), not as a local file.');
+      return;
+    }
+    if (typeof PIXI === 'undefined') {
+      showLoadError('PixiJS failed to load from CDN.');
+      return;
+    }
+    try {
+      const r = await fetch(GRAPH_API_URL, { cache: 'no-store' });
+      if (!r.ok) {
+        showLoadError('Could not load graph (HTTP ' + r.status + '). Is analyze complete and the server running?');
+        return;
+      }
+      const text = await r.text();
+      if (!String(text).trim()) {
+        showLoadError('Empty response from /api/graph.');
+        return;
+      }
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        showLoadError('Invalid JSON from /api/graph.');
+        return;
+      }
+      if (!data || !Array.isArray(data.nodes) || !Array.isArray(data.links)) {
+        showLoadError('Invalid graph payload (expected nodes + links arrays).');
+        return;
+      }
+      data = sanitizePayload(data);
+      model = buildGraphModel(data);
+      updateStatsPanel(data.stats || {});
+
+      initPixi();
+      loadLevelGalaxy();
+      playEntrance(data.stats || {});
+    } catch (e) {
+      console.error(e);
+      showLoadError('Network error loading graph. Start the OMNIX server and open http://127.0.0.1:<port>/');
+    }
+  })();
+})();
+  </script>
+</body>
+</html>
