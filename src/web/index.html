@@ -938,13 +938,17 @@
   let layerEdges = null;
   /** Single batched Graphics for all galaxy-level directory edges (Physarum). */
   let galaxyEdgeGfx = null;
+  let galaxyEdgeFrameCounter = -1;
+  /** Low-end mobile iGPU: reduce fidelity; set false to restore richer visuals (heavier GPU). */
+  const GPU_SAFE_MODE = true;
+  const MAX_GALAXY_PHYSARUM_EDGES_PER_FRAME = 500;
   let layerNodes = null;
   let childrenGfx = null;
   let signalFlowGfx = null;
   let rippleGfx = null;
   /** Mycelium flow: fixed pool, galaxy view only (single batched Graphics). */
-  const MYCELIUM_POOL_SIZE = 4000;
-  const MYCELIUM_TOP_EDGES = 500;
+  const MYCELIUM_POOL_SIZE = 500;
+  const MYCELIUM_TOP_EDGES = 50;
   const myceliumParticlePool = [];
   for (let _mi = 0; _mi < MYCELIUM_POOL_SIZE; _mi++) {
     myceliumParticlePool.push({
@@ -979,6 +983,11 @@
   let rawGraphData = null;
   let xrayOpen = false;
   let xrayDirId = null;
+  /** @type {'module'|'function'} */
+  let xrayViewKind = 'module';
+  let planetCreateDelayed = null;
+  let planetReverseActive = false;
+  let starReverseActive = false;
   let viewLevel = 'galaxy';
   let selectedDir = null;
   /** @type {null | { name: string, dirId?: string, filePath?: string, symbolCount?: number, id?: string }} */
@@ -1056,7 +1065,74 @@
         line: n.line,
         complexity: n.val || 0,
       }))
-      .sort((a, b) => (b.complexity || 0) - (a.complexity || 0));
+      .sort((a, b) => (b.complexity || 0) - (a.complexity || 0))
+      .slice(0, 100);
+  }
+
+  /** Route / validation / error / helper heuristics on symbol name (planet view). */
+  function classifyFunction(sym) {
+    const name = (sym && sym.name ? String(sym.name) : '').toLowerCase();
+    if (
+      name.includes('get_') ||
+      name.includes('post_') ||
+      name.includes('put_') ||
+      name.includes('delete_') ||
+      name.includes('patch_') ||
+      name.startsWith('api_') ||
+      name.includes('endpoint') ||
+      name.includes('route') ||
+      name.includes('handler') ||
+      name.includes('view')
+    ) {
+      return { type: 'nucleus', color: 0x00e676, label: 'Handler' };
+    }
+    if (
+      name.includes('valid') ||
+      name.includes('check') ||
+      name.includes('verify') ||
+      name.includes('auth') ||
+      name.includes('permission') ||
+      name.includes('sanitize') ||
+      name.includes('assert')
+    ) {
+      return { type: 'membrane', color: 0xff5252, label: 'Validator' };
+    }
+    if (
+      name.includes('error') ||
+      name.includes('exception') ||
+      name.includes('cleanup') ||
+      name.includes('dispose') ||
+      name.includes('close') ||
+      name.includes('shutdown') ||
+      name.startsWith('_handle_error') ||
+      name.includes('fallback')
+    ) {
+      return { type: 'lysosome', color: 0xb388ff, label: 'Error Handler' };
+    }
+    if (
+      name.startsWith('_') ||
+      name.includes('helper') ||
+      name.includes('util') ||
+      name.includes('format') ||
+      name.includes('convert') ||
+      name.includes('parse') ||
+      name.includes('normalize') ||
+      name.includes('transform')
+    ) {
+      return { type: 'ribosome', color: 0xffd740, label: 'Helper' };
+    }
+    return { type: 'mitochondria', color: 0x00e5ff, label: 'Logic' };
+  }
+
+  function classifyPlanetSymbol(sym) {
+    if (sym.type === 'class') {
+      return { type: 'class', color: 0xa855f7, label: 'Class' };
+    }
+    const c = classifyFunction(sym);
+    if (sym.type === 'method') {
+      return { type: c.type, color: c.color, label: 'Method · ' + c.label };
+    }
+    return c;
   }
 
   function edgeColor(linkType) {
@@ -1361,6 +1437,197 @@
   }
 
   const SUBVIEW_SIGNAL_MAX = 30;
+  const STAR_VIEW_MAX_FILES = 150;
+  const STAR_GROWTH_MAX_ANIM = 50;
+  const STAR_GROWTH_TOTAL_SEC = 0.8;
+  const STAR_MIGRATE_SEC = 0.4;
+  const STAR_DEPTH_STAGGER_SEC = 0.15;
+  const STAR_DRILL_CREATE_DELAY_SEC = 0.2;
+
+  function easeBackOut(t) {
+    const s = 1.70158;
+    return 1 + (s + 1) * Math.pow(t - 1, 3) + s * Math.pow(t - 1, 2);
+  }
+
+  function starGrowthSeed(dirId) {
+    let h = 2166136261;
+    const s = String(dirId || '');
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+
+  function starGrowthRng(seed) {
+    let state = seed >>> 0;
+    return function () {
+      state = (state + 0x6d2b79f5) | 0;
+      let t = Math.imul(state ^ (state >>> 15), state | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function starGrowthNeighbors(current, links, idSet, visited) {
+    const out = [];
+    const seen = new Set();
+    for (let li = 0; li < links.length; li++) {
+      const l = links[li];
+      const s = l.source;
+      const t = l.target;
+      if (!s || !t) continue;
+      const sid = s.growthId;
+      const tid = t.growthId;
+      if (sid == null || tid == null) continue;
+      if (sid === current && idSet.has(tid) && !visited.has(tid)) {
+        if (!seen.has(tid)) {
+          seen.add(tid);
+          out.push(tid);
+        }
+      } else if (tid === current && idSet.has(sid) && !visited.has(sid)) {
+        if (!seen.has(sid)) {
+          seen.add(sid);
+          out.push(sid);
+        }
+      }
+    }
+    return out;
+  }
+
+  function computeStarGrowthTree(nodes, links) {
+    if (!nodes.length) return null;
+    const idSet = new Set(nodes.map(n => n.growthId));
+    const root = nodes.reduce((a, b) => ((a.connections || 0) > (b.connections || 0) ? a : b));
+    const rootId = root.growthId;
+    const tree = { root, rootId, children: {}, depth: {}, parent: {}, edges: [] };
+    const queue = [rootId];
+    tree.depth[rootId] = 0;
+    const visited = new Set([rootId]);
+    while (queue.length) {
+      const current = queue.shift();
+      const neighbors = starGrowthNeighbors(current, links, idSet, visited);
+      tree.children[current] = neighbors;
+      for (let ni = 0; ni < neighbors.length; ni++) {
+        const nid = neighbors[ni];
+        visited.add(nid);
+        tree.depth[nid] = tree.depth[current] + 1;
+        tree.parent[nid] = current;
+        tree.edges.push({ parent: current, child: nid });
+        queue.push(nid);
+      }
+    }
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+      const id = n.growthId;
+      if (!visited.has(id)) {
+        if (!tree.children[rootId]) tree.children[rootId] = [];
+        tree.children[rootId].push(id);
+        tree.depth[id] = (tree.depth[rootId] || 0) + 1;
+        tree.parent[id] = rootId;
+        tree.edges.push({ parent: rootId, child: id });
+        visited.add(id);
+      }
+    }
+    return tree;
+  }
+
+  function computeStarGrowthPositions(tree, centerX, centerY, rand) {
+    const positions = {};
+    const angleSpread = Math.PI * 0.6;
+    const branchLength = 80;
+    const rootId = tree.rootId;
+    positions[rootId] = { x: centerX, y: centerY, angle: -Math.PI / 2 };
+
+    const parentIds = Object.keys(tree.children);
+    for (let pi = 0; pi < parentIds.length; pi++) {
+      const parentId = parentIds[pi];
+      const childIds = tree.children[parentId];
+      if (!childIds || !childIds.length) continue;
+      const parentPos = positions[parentId];
+      if (!parentPos) continue;
+      const baseAngle = parentPos.angle;
+      const step = angleSpread / (childIds.length + 1);
+      for (let i = 0; i < childIds.length; i++) {
+        const childId = childIds[i];
+        const angle = baseAngle - angleSpread / 2 + step * (i + 1);
+        const jitterAngle = angle + (rand() - 0.5) * ((5 * Math.PI) / 180);
+        const depth = tree.depth[childId] || 1;
+        const decay = Math.pow(0.75, depth);
+        const jitterLen = branchLength * (0.85 + rand() * 0.3);
+        positions[childId] = {
+          x: parentPos.x + Math.cos(jitterAngle) * jitterLen * decay,
+          y: parentPos.y + Math.sin(jitterAngle) * jitterLen * decay,
+          angle: jitterAngle,
+        };
+      }
+    }
+    return positions;
+  }
+
+  function relaxStarGrowthCollisions(positions, growthIdToNode, minGap) {
+    const ids = Object.keys(positions);
+    for (let pass = 0; pass < 8; pass++) {
+      for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+          const a = positions[ids[i]];
+          const b = positions[ids[j]];
+          const na = growthIdToNode.get(ids[i]);
+          const nb = growthIdToNode.get(ids[j]);
+          const ra = (na && na.radius) || 12;
+          const rb = (nb && nb.radius) || 12;
+          const need = minGap + ra + rb;
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const d = Math.hypot(dx, dy) || 1e-6;
+          if (d < need) {
+            const push = (need - d) * 0.5;
+            const ux = (dx / d) * push;
+            const uy = (dy / d) * push;
+            a.x -= ux;
+            a.y -= uy;
+            b.x += ux;
+            b.y += uy;
+          }
+        }
+      }
+    }
+  }
+
+  function drawStarGrowthEdges(growthGfx, sc) {
+    if (!growthGfx || !sc || !sc._growthTree) return;
+    growthGfx.clear();
+    const tree = sc._growthTree;
+    const edges = tree.edges;
+    if (!edges || !edges.length) {
+      growthGfx.lineStyle(0);
+      return;
+    }
+    const byId = sc._growthIdToNode;
+    if (!byId) {
+      growthGfx.lineStyle(0);
+      return;
+    }
+    for (let ei = 0; ei < edges.length; ei++) {
+      const e = edges[ei];
+      const pNode = byId.get(e.parent);
+      const cNode = byId.get(e.child);
+      if (!pNode || !cNode) continue;
+      const pu = pNode._growEdgeU != null ? pNode._growEdgeU : 1;
+      const cu = cNode._growEdgeU != null ? cNode._growEdgeU : 0;
+      const t = Math.min(pu, cu);
+      if (t <= 0.001) continue;
+      const sx = pNode.x;
+      const sy = pNode.y;
+      const ex = sx + (cNode.x - sx) * t;
+      const ey = sy + (cNode.y - sy) * t;
+      const col = cNode.color != null ? cNode.color : 0x3b82f6;
+      growthGfx.lineStyle(1, col, 0.45);
+      growthGfx.moveTo(sx, sy);
+      growthGfx.lineTo(ex, ey);
+    }
+    growthGfx.lineStyle(0);
+  }
 
   /** Edges between files in a directory for star-view force + rendering (deduped). */
   function buildStarEdgeList(dirId, starNodes) {
@@ -1589,6 +1856,10 @@
     }
     for (let j = 0; j < toRemove.length; j++) {
       const ch = toRemove[j];
+      if (ch._growthTl) {
+        ch._growthTl.kill();
+        ch._growthTl = null;
+      }
       if (ch._sim) {
         ch._sim.stop();
         ch._sim = null;
@@ -1678,20 +1949,28 @@
 
     const centerX = app.screen.width / 2;
     const centerY = app.screen.height / 2;
-    const maxFiles = Math.min(files.length, 40);
-    const fileSlice = files.slice(0, maxFiles);
+    const maxFilesAll = Math.min(files.length, STAR_VIEW_MAX_FILES);
+    const fileSlice = files.slice(0, maxFilesAll);
+    const rand = starGrowthRng(starGrowthSeed(dirId));
 
     const starEdgeGfx = new PIXI.Graphics();
     starEdgeGfx.eventMode = 'none';
+    starEdgeGfx.alpha = 0;
     starContainer.addChild(starEdgeGfx);
+
+    const starGrowthGfx = new PIXI.Graphics();
+    starGrowthGfx.eventMode = 'none';
+    starGrowthGfx.alpha = 1;
+    starContainer.addChild(starGrowthGfx);
 
     const starSignalGfx = new PIXI.Graphics();
     starSignalGfx.eventMode = 'none';
+    starSignalGfx.alpha = 0;
     starContainer.addChild(starSignalGfx);
 
     starNodes = [];
 
-    for (let i = 0; i < maxFiles; i++) {
+    for (let i = 0; i < maxFilesAll; i++) {
       const file = fileSlice[i];
       const radius = 12 + Math.min((file.symbolCount || 0) / 3, 25);
       const nm = file.name || '';
@@ -1713,12 +1992,12 @@
         filePath: resolveDirFilePath(dirId, file.name),
       });
 
-      const ix = centerX + (Math.random() - 0.5) * 160;
-      const iy = centerY + (Math.random() - 0.5) * 160;
+      const growthId = fileData.filePath || dirId + '/' + (file.name || String(i));
 
       const fileContainer = new PIXI.Container();
-      fileContainer.position.set(ix, iy);
+      fileContainer.position.set(centerX, centerY);
       fileContainer.alpha = 0;
+      fileContainer.scale.set(0.01, 0.01);
       fileContainer.eventMode = 'static';
       fileContainer.cursor = 'pointer';
 
@@ -1754,25 +2033,21 @@
 
       starContainer.addChild(fileContainer);
 
-      gsap.to(fileContainer, {
-        alpha: 1,
-        duration: 0.4,
-        delay: i * 0.02,
-        ease: 'power2.out',
-      });
-
       const snRef = {
         container: fileContainer,
         fileData,
-        x: ix,
-        y: iy,
+        growthId,
+        x: centerX,
+        y: centerY,
         vx: 0,
         vy: 0,
         radius,
         color,
         glow,
         index: i,
+        connections: 0,
         _hover: false,
+        _growEdgeU: 0,
       };
 
       fileContainer.on('pointerdown', e => {
@@ -1803,6 +2078,76 @@
 
     const starEdges = buildStarEdgeList(dirId, starNodes);
 
+    const conn = starNodes.map(() => 0);
+    for (let ei = 0; ei < starEdges.length; ei++) {
+      const e = starEdges[ei];
+      const si = e.source && e.source.index;
+      const ti = e.target && e.target.index;
+      if (si != null && conn[si] != null) conn[si]++;
+      if (ti != null && conn[ti] != null) conn[ti]++;
+    }
+    for (let ci = 0; ci < starNodes.length; ci++) {
+      starNodes[ci].connections = conn[ci] || 0;
+    }
+
+    const sortedIdx = starNodes.map((_, idx) => idx).sort((a, b) => conn[b] - conn[a]);
+    const animIndexSet = new Set(sortedIdx.slice(0, Math.min(STAR_GROWTH_MAX_ANIM, sortedIdx.length)));
+    const growthIdAnimSet = new Set();
+    animIndexSet.forEach(idx => {
+      growthIdAnimSet.add(starNodes[idx].growthId);
+    });
+
+    const animNodes = starNodes.filter((_, idx) => animIndexSet.has(idx));
+    const subLinks = starEdges.filter(
+      e =>
+        e.source &&
+        e.target &&
+        growthIdAnimSet.has(e.source.growthId) &&
+        growthIdAnimSet.has(e.target.growthId)
+    );
+
+    const growthTree = animNodes.length ? computeStarGrowthTree(animNodes, subLinks) : null;
+    const growthPositions = growthTree
+      ? computeStarGrowthPositions(growthTree, centerX, centerY, rand)
+      : {};
+    const growthIdToNode = new Map(starNodes.map(sn => [sn.growthId, sn]));
+    if (growthTree && Object.keys(growthPositions).length) {
+      relaxStarGrowthCollisions(growthPositions, growthIdToNode, 14);
+    }
+
+    function bfsStarGrowthOrder(tree, byGrowthId) {
+      const order = [];
+      if (!tree) return order;
+      const q = [tree.rootId];
+      const seen = new Set(q);
+      while (q.length) {
+        const id = q.shift();
+        const node = byGrowthId.get(id);
+        if (node) order.push(node);
+        const ch = (tree.children[id] || []).slice();
+        ch.sort(
+          (a, b) =>
+            (byGrowthId.get(b).connections || 0) - (byGrowthId.get(a).connections || 0)
+        );
+        for (let ci = 0; ci < ch.length; ci++) {
+          const cid = ch[ci];
+          if (!seen.has(cid)) {
+            seen.add(cid);
+            q.push(cid);
+          }
+        }
+      }
+      return order;
+    }
+
+    const bfsOrder = bfsStarGrowthOrder(growthTree, growthIdToNode);
+    const depthMap = new Map();
+    if (growthTree) {
+      for (const id of Object.keys(growthTree.depth)) {
+        depthMap.set(id, growthTree.depth[id]);
+      }
+    }
+
     const starSim = d3
       .forceSimulation(starNodes)
       .force('center', d3.forceCenter(centerX, centerY))
@@ -1813,10 +2158,14 @@
       .force('y', d3.forceY(centerY).strength(0.05))
       .alphaDecay(0.02)
       .on('tick', () => {
-        for (const sn of starNodes) {
-          sn.container.position.set(sn.x, sn.y);
+        if (starContainer._growthPhaseComplete) {
+          for (const sn of starNodes) {
+            sn.container.position.set(sn.x, sn.y);
+          }
         }
       });
+
+    starSim.stop();
 
     const starSignalParticles = [];
     const nStarPart = Math.min(starEdges.length, SUBVIEW_SIGNAL_MAX);
@@ -1833,9 +2182,16 @@
     starContainer._sim = starSim;
     starContainer._edges = starEdges;
     starContainer._edgeGfx = starEdgeGfx;
+    starContainer._growthGfx = starGrowthGfx;
     starContainer._signalGfx = starSignalGfx;
     starContainer._signalParticles = starSignalParticles;
     starContainer._nodes = starNodes;
+    starContainer._growthTree = growthTree;
+    starContainer._growthIdToNode = growthIdToNode;
+    starContainer._growthAnimSet = growthIdAnimSet;
+    starContainer._growthDepthMap = depthMap;
+    starContainer._growthAnimNodes = animNodes.slice();
+    starContainer._growthPhaseComplete = false;
 
     const titleText = new PIXI.Text((dirId && dirId.split('/').pop()) || dirId || '', {
       fontFamily: 'Syne, sans-serif',
@@ -1843,12 +2199,200 @@
       fill: 0x6366f1,
       align: 'center',
     });
-    titleText.alpha = 0.3;
+    titleText.alpha = 0.25;
     titleText.anchor.set(0.5);
     titleText.position.set(centerX, centerY);
     titleText.eventMode = 'none';
     starContainer.addChild(titleText);
     starViewTitle = titleText;
+
+    const growthMaster = gsap.timeline({
+      onKill: () => {
+        starContainer._growthTl = null;
+      },
+    });
+    starContainer._growthTl = growthMaster;
+
+    if (growthTree && bfsOrder.length) {
+      const rootSn = growthTree.root;
+      rootSn.x = centerX;
+      rootSn.y = centerY;
+      rootSn.container.position.set(centerX, centerY);
+      rootSn._growEdgeU = 1;
+      const rootScale = { s: 0 };
+      growthMaster.to(
+        rootScale,
+        {
+          s: 1,
+          duration: 0.3,
+          ease: 'back.out(1.4)',
+          onUpdate: () => {
+            const sc = Math.max(0.001, rootScale.s);
+            rootSn.container.scale.set(sc, sc);
+          },
+        },
+        0
+      );
+      growthMaster.to(
+        rootSn.container,
+        { alpha: 1, duration: 0.12, ease: 'power2.out' },
+        0
+      );
+
+      const maxDepth = bfsOrder.reduce(
+        (m, n) => Math.max(m, growthTree.depth[n.growthId] || 0),
+        0
+      );
+      const rootIntroSec = 0.32;
+      let tLayer = rootIntroSec;
+      if (maxDepth >= 1) {
+        const budget = STAR_GROWTH_TOTAL_SEC - rootIntroSec;
+        let layerGap =
+          maxDepth > 1 ? Math.min(0.02, (budget * 0.2) / (maxDepth - 1)) : 0;
+        let layerDur = (budget - layerGap * (maxDepth - 1)) / maxDepth;
+        if (layerDur < 0.015) {
+          layerGap = 0;
+          layerDur = budget / maxDepth;
+        }
+        for (let d = 1; d <= maxDepth; d++) {
+          const layerNodes = bfsOrder.filter(
+            n => (growthTree.depth[n.growthId] || 0) === d
+          );
+          for (let li = 0; li < layerNodes.length; li++) {
+            const node = layerNodes[li];
+            const pos = growthPositions[node.growthId];
+            if (!pos) continue;
+            const parentId = growthTree.parent[node.growthId];
+            const parentSn = parentId != null ? growthIdToNode.get(parentId) : rootSn;
+            if (!parentSn) continue;
+            node._growEdgeU = 0;
+            const prog = { u: 0 };
+            growthMaster.to(
+              prog,
+              {
+                u: 1,
+                duration: layerDur,
+                ease: 'back.out(1.4)',
+                delay: tLayer,
+                onStart: () => {
+                  node._gx0 = parentSn.x;
+                  node._gy0 = parentSn.y;
+                  node.x = node._gx0;
+                  node.y = node._gy0;
+                  node.container.position.set(node._gx0, node._gy0);
+                  node.container.alpha = 1;
+                  node.container.scale.set(0.02, 0.02);
+                },
+                onUpdate: () => {
+                  const t = prog.u;
+                  const ox = node._gx0;
+                  const oy = node._gy0;
+                  node.x = ox + (pos.x - ox) * t;
+                  node.y = oy + (pos.y - oy) * t;
+                  node.container.position.set(node.x, node.y);
+                  node._growEdgeU = t;
+                  const sc = 0.02 + 0.98 * t;
+                  node.container.scale.set(sc, sc);
+                },
+              },
+              0
+            );
+          }
+          tLayer += layerDur + (d < maxDepth ? layerGap : 0);
+        }
+      }
+    } else {
+      for (let fi = 0; fi < starNodes.length; fi++) {
+        const sn = starNodes[fi];
+        sn.x = centerX + (rand() - 0.5) * 24;
+        sn.y = centerY + (rand() - 0.5) * 24;
+        sn.container.position.set(sn.x, sn.y);
+        const st = Math.min(fi * 0.03, STAR_GROWTH_TOTAL_SEC * 0.45);
+        growthMaster.to(
+          sn.container,
+          { alpha: 1, duration: 0.32, ease: 'back.out(1.4)' },
+          st
+        );
+        growthMaster.to(
+          sn.container.scale,
+          { x: 1, y: 1, duration: 0.32, ease: 'back.out(1.4)' },
+          st
+        );
+      }
+    }
+
+    for (let ri = 0; ri < starNodes.length; ri++) {
+      const sn = starNodes[ri];
+      if (!growthIdAnimSet.has(sn.growthId)) {
+        sn.x = centerX;
+        sn.y = centerY;
+        sn.container.position.set(centerX, centerY);
+        sn.container.alpha = 0;
+        sn.container.scale.set(1, 1);
+        sn._growEdgeU = 0;
+      }
+    }
+
+    const migrateProxy = { _p: 0 };
+    growthMaster.to(
+      migrateProxy,
+      {
+        _p: 1,
+        duration: STAR_MIGRATE_SEC,
+        ease: 'power2.inOut',
+        onStart: () => {
+          for (const sn of starNodes) {
+            sn._gxEnd = sn.x;
+            sn._gyEnd = sn.y;
+            sn.vx = 0;
+            sn.vy = 0;
+          }
+          starSim.alpha(1);
+          for (let tk = 0; tk < 400; tk++) {
+            starSim.tick();
+          }
+          for (const sn of starNodes) {
+            sn._fx = sn.x;
+            sn._fy = sn.y;
+            sn.vx = 0;
+            sn.vy = 0;
+          }
+          for (const sn of starNodes) {
+            sn.x = sn._gxEnd;
+            sn.y = sn._gyEnd;
+            sn.container.position.set(sn.x, sn.y);
+          }
+        },
+        onUpdate: () => {
+          const t = migrateProxy._p;
+          for (const sn of starNodes) {
+            sn.x = sn._gxEnd + (sn._fx - sn._gxEnd) * t;
+            sn.y = sn._gyEnd + (sn._fy - sn._gyEnd) * t;
+            sn.container.position.set(sn.x, sn.y);
+            if (!growthIdAnimSet.has(sn.growthId)) {
+              sn.container.alpha = t;
+            }
+          }
+        },
+        onComplete: () => {
+          for (const sn of starNodes) {
+            sn.x = sn._fx;
+            sn.y = sn._fy;
+            sn.container.position.set(sn.x, sn.y);
+            sn._growEdgeU = 1;
+          }
+          starContainer._growthPhaseComplete = true;
+          starSim.alpha(1).restart();
+          gsap.to(starEdgeGfx, { alpha: 1, duration: 0.2, ease: 'power2.out' });
+          gsap.to(starSignalGfx, { alpha: 1, duration: 0.2, ease: 'power2.out' });
+        },
+      },
+      STAR_GROWTH_TOTAL_SEC
+    );
+
+    growthMaster.eventCallback('onComplete', () => {
+      starContainer._growthTl = null;
+    });
   }
 
   function createPlanetView(fileData, symbols) {
@@ -1857,12 +2401,18 @@
     const planetContainer = new PIXI.Container();
     planetContainer.eventMode = 'none';
     planetContainer._omnixType = 'planet';
+    planetContainer.alpha = 1;
     world.addChild(planetContainer);
 
     const centerX = app.screen.width / 2;
     const centerY = app.screen.height / 2;
-    const maxSymbols = Math.min(symbols.length, 30);
+    planetContainer._planetCenterX = centerX;
+    planetContainer._planetCenterY = centerY;
+    const maxSymbols = Math.min(symbols.length, 100);
     const fp = fileData.filePath || resolveDirFilePath(selectedDir, fileData.name);
+    const boundaryR =
+      Math.min(app.screen.width, app.screen.height) * 0.36;
+    planetContainer._planetBoundaryR = boundaryR;
 
     const planetEdgeGfx = new PIXI.Graphics();
     planetEdgeGfx.eventMode = 'none';
@@ -1870,6 +2420,7 @@
 
     const planetSignalGfx = new PIXI.Graphics();
     planetSignalGfx.eventMode = 'none';
+    planetSignalGfx.alpha = 1;
     planetContainer.addChild(planetSignalGfx);
 
     planetNodes = [];
@@ -1877,9 +2428,10 @@
 
     for (let j = 0; j < maxSymbols; j++) {
       const sym = symSlice[j];
-      const radius = 8 + Math.min((sym.complexity || 1) / 5, 15);
-      const color =
-        sym.type === 'class' ? 0xa855f7 : sym.type === 'method' ? 0x22d3ee : 0x4ade80;
+      const val = sym.complexity != null && sym.complexity > 0 ? sym.complexity : 1;
+      const radius = Math.sqrt(val) * 4 + 8;
+      const classification = classifyPlanetSymbol(sym);
+      const color = classification.color;
 
       const jx = centerX + (Math.random() - 0.5) * 140;
       const jy = centerY + (Math.random() - 0.5) * 140;
@@ -1897,32 +2449,35 @@
       glow.alpha = 0.55;
       symContainer.addChild(glow);
 
-      const shape = new PIXI.Graphics();
-      if (sym.type === 'class') {
-        shape.beginFill(color, 0.85);
-        shape.drawRoundedRect(-radius, -radius, radius * 2, radius * 2, 3);
-        shape.endFill();
-      } else {
-        shape.beginFill(color, 0.85);
-        shape.moveTo(0, -radius);
-        shape.lineTo(radius, 0);
-        shape.lineTo(0, radius);
-        shape.lineTo(-radius, 0);
-        shape.closePath();
-        shape.endFill();
-      }
-      symContainer.addChild(shape);
+      const cellFill = new PIXI.Graphics();
+      cellFill.beginFill(color, 0.25);
+      cellFill.drawCircle(0, 0, radius);
+      cellFill.endFill();
+      symContainer.addChild(cellFill);
 
-      const nm = sym.name.length > 18 ? sym.name.slice(0, 16) + '…' : sym.name;
+      const membraneGfx = new PIXI.Graphics();
+      symContainer.addChild(membraneGfx);
+
+      const nucleus = new PIXI.Graphics();
+      nucleus.beginFill(color, 0.9);
+      nucleus.drawCircle(0, 0, 3);
+      nucleus.endFill();
+      symContainer.addChild(nucleus);
+
+      const rawName = sym.name || '';
+      const nm =
+        rawName.length > 20 ? rawName.slice(0, 18) + '…' : rawName;
       const label = new PIXI.Text(nm, {
         fontFamily: 'JetBrains Mono, monospace',
-        fontSize: 9,
+        fontSize: 11,
         fill: 0xe2e8f0,
         align: 'center',
       });
+      label.alpha = 0.8;
       label.anchor.set(0.5, 0);
-      label.position.set(0, radius + 4);
+      label.position.set(0, radius + 5);
       label.eventMode = 'none';
+      label.visible = radius > 12;
       symContainer.addChild(label);
 
       const symHitR = Math.max(radius * 2.8, radius + 36);
@@ -1932,8 +2487,8 @@
 
       gsap.to(symContainer, {
         alpha: 1,
-        duration: 0.4,
-        delay: j * 0.02,
+        duration: 0.35,
+        delay: j * 0.015,
         ease: 'power2.out',
       });
 
@@ -1946,7 +2501,12 @@
         vy: 0,
         radius,
         color,
+        classification,
         glow,
+        cellFill,
+        membraneGfx,
+        nucleus,
+        label,
         index: j,
         _hover: false,
       };
@@ -1957,7 +2517,7 @@
           e.stopPropagation();
           const oe = e.data && e.data.originalEvent;
           if (oe && oe.preventDefault) oe.preventDefault();
-          if (selectedDir) openXrayForDir(selectedDir);
+          void openXrayForPlanetFunction(fileData, sym, classification, fp);
           return;
         }
         if (btn !== 0) return;
@@ -2043,7 +2603,10 @@
       nodePool.forEach(p => {
         if (p.container) gsap.set(p.container, { alpha: 0.08 });
       });
-      createStarView(dirId, model.dirFilesMap[dirId] || []);
+      const filesEarly = model.dirFilesMap[dirId] || [];
+      gsap.delayedCall(STAR_DRILL_CREATE_DELAY_SEC, () => {
+        createStarView(dirId, filesEarly);
+      });
       return;
     }
 
@@ -2057,6 +2620,20 @@
       gsap.killTweensOf(pool.container);
       gsap.killTweensOf(pool.container.scale);
       if (isClicked) {
+        const sx = pool.container.scale.x || 1;
+        const sy = pool.container.scale.y || 1;
+        gsap.fromTo(
+          pool.container.scale,
+          { x: sx, y: sy },
+          {
+            x: sx * 1.1,
+            y: sy * 1.1,
+            duration: 0.1,
+            ease: 'power2.out',
+            yoyo: true,
+            repeat: 1,
+          }
+        );
         gsap.to(pool.container, {
           x: centerLocal.x,
           y: centerLocal.y,
@@ -2074,30 +2651,48 @@
     gsap.to(layerEdges, { alpha: 0, duration: 0.3 });
 
     const files = model.dirFilesMap[dirId] || [];
-    gsap.delayedCall(0.85, () => {
+    gsap.delayedCall(STAR_DRILL_CREATE_DELAY_SEC, () => {
       if (viewLevel !== 'galaxy' || selectedDir !== dirId) return;
       createStarView(dirId, files);
     });
   }
 
   function transitionToPlanet(fileData) {
-    console.log('transitionToPlanet', fileData && fileData.name);
     if (!model || !world || !app || viewLevel !== 'star') return;
     hideSymbolPopup();
     killTweens();
+    if (planetCreateDelayed) {
+      planetCreateDelayed.kill();
+      planetCreateDelayed = null;
+    }
     for (let ci = 0; ci < world.children.length; ci++) {
       const ch = world.children[ci];
       if (ch._omnixType === 'star') {
+        if (ch._growthTl) {
+          ch._growthTl.kill();
+          ch._growthTl = null;
+        }
+        ch._growthPhaseComplete = true;
         if (ch._sim) ch._sim.stop();
         if (ch._edgeGfx) ch._edgeGfx.clear();
+        if (ch._growthGfx) ch._growthGfx.clear();
         if (ch._signalGfx) ch._signalGfx.clear();
       }
     }
+    for (let si = 0; si < starNodes.length; si++) {
+      const sn = starNodes[si];
+      if (sn && sn.container) {
+        sn.x = sn.container.x;
+        sn.y = sn.container.y;
+      }
+    }
     const symbols = getSymbolsForFile(fileData.filePath || fileData.name, selectedDir);
-    console.log('symbols found:', symbols.length);
     selectedFile = fileData;
     viewLevel = 'planet';
     updateBreadcrumb();
+
+    const cx = app.screen.width / 2;
+    const cy = app.screen.height / 2;
 
     for (let i = 0; i < starNodes.length; i++) {
       const sn = starNodes[i];
@@ -2106,40 +2701,231 @@
       gsap.killTweensOf(sn.container);
       gsap.killTweensOf(sn.container.scale);
       if (isSel) {
-        const cx = app.screen.width / 2;
-        const cy = app.screen.height / 2;
-        gsap.to(sn.container, {
-          x: cx,
-          y: cy,
-          duration: 0.5,
-          ease: 'power2.inOut',
-          onComplete: () => {
-            gsap.to(sn.container, { alpha: 0, duration: 0.3 });
-          },
-        });
+        sn.container.alpha = 1;
+        const tl = gsap.timeline();
+        tl.to(
+          sn.container.scale,
+          { x: 1.1, y: 1.1, duration: 0.2, ease: 'power2.out' },
+          0
+        );
+        tl.to(
+          sn.container,
+          { x: cx, y: cy, duration: 0.35, ease: 'power2.inOut' },
+          0.15
+        );
+        tl.to(
+          sn.container.scale,
+          { x: 1.75, y: 0.9, duration: 0.28, ease: 'power1.inOut' },
+          0.28
+        );
+        tl.to(
+          sn.container.scale,
+          { x: 1.2, y: 1.15, duration: 0.22, ease: 'sine.inOut' },
+          0.52
+        );
+        tl.to(sn.container.scale, { x: 0.85, y: 1.08, duration: 0.18, ease: 'sine.inOut' }, 0.72);
+        tl.to(sn.container, { alpha: 0, duration: 0.25, ease: 'power2.in' }, 0.75);
       } else {
-        gsap.to(sn.container, { alpha: 0.05, duration: 0.4 });
+        gsap.to(sn.container, { alpha: 0.2, duration: 0.22, ease: 'power2.out' });
       }
     }
 
-    gsap.delayedCall(0.85, () => {
+    planetCreateDelayed = gsap.delayedCall(1, () => {
+      planetCreateDelayed = null;
       if (viewLevel !== 'planet' || !selectedFile || selectedFile !== fileData) return;
       createPlanetView(fileData, symbols);
     });
   }
 
-  function goBack() {
-    hideSymbolPopup();
-    if (viewLevel === 'planet') {
+  function runPlanetReverseMitosis(onDone) {
+    if (!world || !app) {
+      onDone();
+      return;
+    }
+    const pc = world.children.find(c => c._omnixType === 'planet');
+    if (!pc) {
+      onDone();
+      return;
+    }
+    if (!planetNodes.length) {
       cleanupPlanetView();
-      viewLevel = 'star';
-      restoreStarView();
-    } else if (viewLevel === 'star') {
+      onDone();
+      return;
+    }
+    planetReverseActive = true;
+    if (pc._sim) pc._sim.stop();
+
+    const cx = app.screen.width / 2;
+    const cy = app.screen.height / 2;
+    const nodes = planetNodes.slice();
+
+    if (pc._signalGfx) gsap.killTweensOf(pc._signalGfx);
+    if (planetViewTitle) gsap.killTweensOf(planetViewTitle);
+
+    const tl = gsap.timeline({
+      onComplete: () => {
+        cleanupPlanetView();
+        planetReverseActive = false;
+        onDone();
+      },
+    });
+
+    if (pc._signalGfx) tl.to(pc._signalGfx, { alpha: 0, duration: 0.2, ease: 'power2.out' }, 0);
+    if (planetViewTitle) tl.to(planetViewTitle, { alpha: 0, duration: 0.2, ease: 'power2.out' }, 0);
+
+    for (let i = 0; i < nodes.length; i++) {
+      const pn = nodes[i];
+      if (!pn || !pn.container) continue;
+      gsap.killTweensOf(pn.container);
+      gsap.killTweensOf(pn.container.scale);
+      tl.to(
+        pn.container,
+        { x: cx, y: cy, duration: 0.55, ease: 'power2.in' },
+        0.18
+      );
+      tl.to(
+        pn.container.scale,
+        { x: 0.04, y: 0.04, duration: 0.52, ease: 'power2.in' },
+        0.22
+      );
+    }
+
+    tl.to(pc, { alpha: 0, duration: 0.2, ease: 'power2.in' }, 0.82);
+    tl.set({}, {}, 1);
+  }
+
+  function runStarReverseCollapse() {
+    hideSymbolPopup();
+    if (!world || !app) {
       cleanupStarView();
       viewLevel = 'galaxy';
       selectedDir = null;
       selectedFile = null;
       restoreGalaxyView();
+      return;
+    }
+    const sc = world.children.find(c => c._omnixType === 'star');
+    if (!sc || !starNodes.length) {
+      cleanupStarView();
+      viewLevel = 'galaxy';
+      selectedDir = null;
+      selectedFile = null;
+      restoreGalaxyView();
+      return;
+    }
+    starReverseActive = true;
+    closeXray();
+    if (sc._growthTl) {
+      sc._growthTl.kill();
+      sc._growthTl = null;
+    }
+    if (sc._sim) sc._sim.stop();
+    const cx = app.screen.width / 2;
+    const cy = app.screen.height / 2;
+    const depthMap = sc._growthDepthMap || new Map();
+    const animNodes =
+      sc._growthAnimNodes && sc._growthAnimNodes.length
+        ? sc._growthAnimNodes.slice()
+        : starNodes.slice();
+    animNodes.sort((a, b) => (depthMap.get(b.growthId) || 0) - (depthMap.get(a.growthId) || 0));
+
+    if (starViewTitle) gsap.killTweensOf(starViewTitle);
+
+    sc._growthPhaseComplete = true;
+
+    const seen = new Set();
+    const tl = gsap.timeline({
+      onComplete: () => {
+        starReverseActive = false;
+        cleanupStarView();
+        viewLevel = 'galaxy';
+        selectedDir = null;
+        selectedFile = null;
+        restoreGalaxyView();
+      },
+    });
+
+    if (sc._signalGfx) tl.to(sc._signalGfx, { alpha: 0, duration: 0.15, ease: 'power2.out' }, 0);
+    if (sc._edgeGfx) tl.to(sc._edgeGfx, { alpha: 0, duration: 0.15, ease: 'power2.out' }, 0);
+    if (sc._growthGfx) tl.to(sc._growthGfx, { alpha: 0, duration: 0.12, ease: 'power2.out' }, 0);
+    if (starViewTitle) tl.to(starViewTitle, { alpha: 0, duration: 0.12 }, 0);
+
+    for (let i = 0; i < animNodes.length; i++) {
+      const sn = animNodes[i];
+      if (!sn || !sn.container || seen.has(sn)) continue;
+      seen.add(sn);
+      gsap.killTweensOf(sn.container);
+      gsap.killTweensOf(sn.container.scale);
+      const o = { x: sn.x, y: sn.y };
+      tl.to(
+        o,
+        {
+          x: cx,
+          y: cy,
+          duration: 0.5,
+          ease: 'power2.in',
+          onUpdate: () => {
+            sn.x = o.x;
+            sn.y = o.y;
+            sn.container.position.set(o.x, o.y);
+          },
+        },
+        0.06 + i * 0.026
+      );
+      tl.to(
+        sn.container.scale,
+        { x: 0.05, y: 0.05, duration: 0.46, ease: 'power2.in' },
+        0.08 + i * 0.026
+      );
+      tl.to(sn.container, { alpha: 0, duration: 0.18, ease: 'power2.in' }, 0.58 + i * 0.022);
+    }
+
+    for (let ri = 0; ri < starNodes.length; ri++) {
+      const sn = starNodes[ri];
+      if (seen.has(sn)) continue;
+      if (!sn || !sn.container) continue;
+      gsap.killTweensOf(sn.container);
+      tl.to(
+        sn.container,
+        { x: cx, y: cy, alpha: 0, duration: 0.38, ease: 'power2.in' },
+        0.04 + ri * 0.018
+      );
+    }
+
+    tl.to(sc, { alpha: 0, duration: 0.2, ease: 'power2.in' }, 0.88);
+  }
+
+  function goBack() {
+    hideSymbolPopup();
+    if (viewLevel === 'planet') {
+      if (planetReverseActive) return;
+      if (planetCreateDelayed) {
+        planetCreateDelayed.kill();
+        planetCreateDelayed = null;
+        viewLevel = 'star';
+        selectedFile = null;
+        for (let i = 0; i < starNodes.length; i++) {
+          const sn = starNodes[i];
+          if (!sn || !sn.container) continue;
+          gsap.killTweensOf(sn.container);
+          gsap.killTweensOf(sn.container.scale);
+          sn.container.scale.set(1, 1);
+          gsap.to(sn.container, { alpha: 1, duration: 0.25, ease: 'power2.out' });
+        }
+        const sc = world && world.children.find(c => c._omnixType === 'star');
+        if (sc && sc._sim) sc._sim.alpha(0.45).restart();
+        updateBreadcrumb();
+        return;
+      }
+      closeXray();
+      runPlanetReverseMitosis(() => {
+        viewLevel = 'star';
+        selectedFile = null;
+        restoreStarView();
+      });
+    } else if (viewLevel === 'star') {
+      if (starReverseActive) return;
+      runStarReverseCollapse();
     }
   }
 
@@ -3199,6 +3985,59 @@
   window.runAIArchitecture = runAIArchitecture;
   window.runAIAsk = runAIAsk;
 
+  function buildXrayFunctionHTML(fileData, sym, classification, filePath) {
+    const nm = sym.name || '?';
+    const lineStr = sym.line != null && sym.line !== '' ? String(sym.line) : '—';
+    const valStr =
+      sym.complexity != null && sym.complexity !== '' ? String(sym.complexity) : '—';
+    const conn = countSymbolConnections(sym.id, filePath);
+    const typeChip =
+      '<span style="display:inline-block;padding:4px 10px;border-radius:6px;font-size:11px;background:rgba(99,102,241,0.15);color:#a5b4fc;border:1px solid rgba(99,102,241,0.35);">' +
+      escapeHtml(classification.label) +
+      '</span>';
+    return (
+      '<div style="margin-bottom: 18px;">' +
+      '<div style="font-family: \'Syne\', sans-serif; font-size: 13px; color: #6366f1; letter-spacing: 2px; margin-bottom: 4px;">X-RAY · SYMBOL</div>' +
+      '<div style="font-size: 18px; font-weight: 600; color: #fff; word-break: break-word;">' +
+      escapeHtml(nm) +
+      '</div>' +
+      '<div style="font-size: 12px; color: #64748b; margin-top: 6px; font-family: \'JetBrains Mono\', monospace; word-break: break-all;">' +
+      escapeHtml(fileData.name || '') +
+      '</div></div>' +
+      '<div style="display: flex; flex-direction: column; gap: 12px;">' +
+      '<div><div style="font-size: 10px; color: #64748b; letter-spacing: 1px; margin-bottom: 4px;">LINE</div>' +
+      '<div style="font-size: 14px; color: #e2e8f0; font-family: \'JetBrains Mono\', monospace;">' +
+      escapeHtml(lineStr) +
+      '</div></div>' +
+      '<div><div style="font-size: 10px; color: #64748b; letter-spacing: 1px; margin-bottom: 4px;">COMPLEXITY (VAL)</div>' +
+      '<div style="font-size: 14px; color: #4ade80; font-family: \'JetBrains Mono\', monospace;">' +
+      escapeHtml(valStr) +
+      '</div></div>' +
+      '<div><div style="font-size: 10px; color: #64748b; letter-spacing: 1px; margin-bottom: 4px;">TYPE</div>' +
+      '<div>' +
+      typeChip +
+      '</div></div>' +
+      '<div><div style="font-size: 10px; color: #64748b; letter-spacing: 1px; margin-bottom: 4px;">INTERNAL CALL EDGES</div>' +
+      '<div style="font-size: 14px; color: #e2e8f0;">' +
+      String(conn) +
+      '</div></div>' +
+      '</div>'
+    );
+  }
+
+  async function openXrayForPlanetFunction(fileData, sym, classification, filePath) {
+    const panel = document.getElementById('xray-panel');
+    const content = document.getElementById('xray-content');
+    if (!panel || !content) return;
+    xrayDirId = selectedDir;
+    xrayViewKind = 'function';
+    await ensureAiStatus();
+    content.innerHTML = buildXrayFunctionHTML(fileData, sym, classification, filePath);
+    panel.scrollTop = 0;
+    gsap.to(panel, { right: 0, duration: 0.4, ease: 'power3.out' });
+    xrayOpen = true;
+  }
+
   async function openXray(simNode) {
     const panel = document.getElementById('xray-panel');
     const content = document.getElementById('xray-content');
@@ -3208,6 +4047,7 @@
     if (did === undefined || did === null) return;
 
     xrayDirId = did;
+    xrayViewKind = 'module';
     await ensureAiStatus();
     content.innerHTML = buildXrayHTML(simNode);
     panel.scrollTop = 0;
@@ -3221,6 +4061,7 @@
     gsap.to(panel, { right: -400, duration: 0.3, ease: 'power2.in' });
     xrayOpen = false;
     xrayDirId = null;
+    xrayViewKind = 'module';
   }
 
   function openXrayForDir(dirId) {
@@ -3434,7 +4275,10 @@
       if (nodePool[j].label) nodePool[j].label.visible = false;
     }
 
-    drawGalaxyPhysarumEdges(performance.now() / 1000);
+    galaxyEdgeFrameCounter++;
+    if (galaxyEdgeFrameCounter % 3 === 0) {
+      drawGalaxyPhysarumEdges(performance.now() / 1000);
+    }
   }
 
   /** True if pointer is within `screenThresholdPx` (screen space) of any file orbit dot for this directory. */
@@ -3901,6 +4745,31 @@
     }
   }
 
+  /** Straight dashed segment (cheaper than quadratic bezier sampling). */
+  function drawPhysarumDashedLine(gfx, sx, sy, tx, ty, width, color, alpha) {
+    const len = Math.hypot(tx - sx, ty - sy);
+    if (len < 1e-6) return;
+    const dash = 6;
+    const gap = 5;
+    let u = 0;
+    let drawn = true;
+    while (u < len - 1e-6) {
+      const cap = drawn ? dash : gap;
+      const u2 = Math.min(u + cap, len);
+      if (drawn) {
+        gfx.lineStyle(width, color, alpha);
+        const ax = sx + ((tx - sx) * u) / len;
+        const ay = sy + ((ty - sy) * u) / len;
+        const bx = sx + ((tx - sx) * u2) / len;
+        const by = sy + ((ty - sy) * u2) / len;
+        gfx.moveTo(ax, ay);
+        gfx.lineTo(bx, by);
+      }
+      u = u2;
+      drawn = !drawn;
+    }
+  }
+
   function drawGalaxyPhysarumEdges(timeSec) {
     if (!galaxyEdgeGfx || !world || !app) return;
     galaxyEdgeGfx.clear();
@@ -3909,8 +4778,7 @@
     const maxNW = model && model.maxNodeWeight > 0 ? model.maxNodeWeight : 1;
     const maxEW = model && model.maxEdgeWeight > 0 ? model.maxEdgeWeight : 1;
 
-    const solid = [];
-    const dashed = [];
+    const staging = [];
 
     for (let e = 0; e < simLinks.length; e++) {
       const l = simLinks[e];
@@ -3926,7 +4794,7 @@
 
       const vs = endpointOnScreenForContainer(world, s.x, s.y, margin);
       const vt = endpointOnScreenForContainer(world, t.x, t.y, margin);
-      if (!vs && !vt) continue;
+      if (!vs || !vt) continue;
 
       const cS = s.totalEdgeWeight || 0;
       const cT = t.totalEdgeWeight || 0;
@@ -3936,11 +4804,15 @@
       }
       flux = Math.min(1, Math.max(0, flux));
 
-      const pulse = 1.0 + Math.sin(timeSec * 0.8 + e * 0.5) * 0.15;
-      const baseThickness = lerp(0.5, 6.0, flux);
-      const thickness = baseThickness * pulse;
-      const baseAlpha = lerp(0.08, 0.9, flux);
-      let alpha = baseAlpha * (0.85 + pulse * 0.15);
+      const pulse = GPU_SAFE_MODE ? 1 : 1.0 + Math.sin(timeSec * 0.8 + e * 0.5) * 0.15;
+      const thickness = 1;
+      let alpha;
+      if (GPU_SAFE_MODE) {
+        alpha = 0.3;
+      } else {
+        const baseAlpha = lerp(0.08, 0.9, flux);
+        alpha = baseAlpha * (0.85 + pulse * 0.15);
+      }
 
       const lt = l.type || 'CALLS';
       const edgeKey = sid < tid ? sid + '\0' + tid : tid + '\0' + sid;
@@ -3949,7 +4821,6 @@
         alpha = Math.min(1, alpha * 1.55);
       }
 
-      const { cx, cy } = physarumOrganicControl(s.x, s.y, t.x, t.y, e, timeSec);
       const col = physarumEdgeColorByType(lt, flux);
       if (lt === 'DARK_FORCE' || lt === 'DARK') {
         alpha *= 0.55;
@@ -3958,24 +4829,31 @@
       const wBucket = Math.round(thickness * 4);
       const aBucket = Math.round(alpha * 40);
 
-      const entry = {
+      staging.push({
         sx: s.x,
         sy: s.y,
-        cx,
-        cy,
         tx: t.x,
         ty: t.y,
-        width: Math.max(0.5, wBucket / 4),
+        width: 1,
         col,
         alpha,
         wBucket,
         aBucket,
         lt,
-      };
-      if (lt === 'DARK_FORCE' || lt === 'DARK') {
-        dashed.push(entry);
+        flux,
+      });
+    }
+
+    staging.sort((a, b) => b.flux - a.flux);
+    const capped = staging.slice(0, MAX_GALAXY_PHYSARUM_EDGES_PER_FRAME);
+    const solid = [];
+    const dashed = [];
+    for (let si = 0; si < capped.length; si++) {
+      const ed = capped[si];
+      if (ed.lt === 'DARK_FORCE' || ed.lt === 'DARK') {
+        dashed.push(ed);
       } else {
-        solid.push(entry);
+        solid.push(ed);
       }
     }
 
@@ -3989,26 +4867,15 @@
     for (const ed of solid) {
       const key = ed.col + ':' + ed.wBucket + ':' + ed.aBucket;
       if (key !== lastKey) {
-        galaxyEdgeGfx.lineStyle(ed.width, ed.col, ed.alpha);
+        galaxyEdgeGfx.lineStyle(1, ed.col, ed.alpha);
         lastKey = key;
       }
       galaxyEdgeGfx.moveTo(ed.sx, ed.sy);
-      galaxyEdgeGfx.quadraticCurveTo(ed.cx, ed.cy, ed.tx, ed.ty);
+      galaxyEdgeGfx.lineTo(ed.tx, ed.ty);
     }
 
     for (const ed of dashed) {
-      drawPhysarumDashedQuadratic(
-        galaxyEdgeGfx,
-        ed.sx,
-        ed.sy,
-        ed.cx,
-        ed.cy,
-        ed.tx,
-        ed.ty,
-        Math.max(0.5, ed.width * 0.9),
-        ed.col,
-        ed.alpha
-      );
+      drawPhysarumDashedLine(galaxyEdgeGfx, ed.sx, ed.sy, ed.tx, ed.ty, 1, ed.col, ed.alpha);
     }
 
     galaxyEdgeGfx.lineStyle(0);
@@ -4060,27 +4927,28 @@
       let flux = (dS + dT) / (2 * maxD);
       flux = Math.min(1, Math.max(0, flux));
 
-      const pulse = 1.0 + Math.sin(timeSec * 0.8 + ei * 0.5) * 0.15;
-      const thickness = lerp(0.5, 6.0, flux) * pulse;
-      const baseAlpha = lerp(0.08, 0.9, flux);
-      const alpha = baseAlpha * (0.85 + pulse * 0.15);
+      const pulse = GPU_SAFE_MODE ? 1 : 1.0 + Math.sin(timeSec * 0.8 + ei * 0.5) * 0.15;
+      const thickness = 1;
+      let useAlpha;
+      if (GPU_SAFE_MODE) {
+        useAlpha = 0.3;
+      } else {
+        const baseAlpha = lerp(0.08, 0.9, flux);
+        useAlpha = baseAlpha * (0.85 + pulse * 0.15);
+      }
       const lt = edge.type || 'CALLS';
       const col = physarumEdgeColorByType(lt, flux);
-      let useAlpha = alpha;
       if (lt === 'DARK_FORCE' || lt === 'DARK') {
         useAlpha *= 0.55;
       }
-      const { cx, cy } = physarumOrganicControl(s.x, s.y, t.x, t.y, ei, timeSec);
       const wBucket = Math.round(thickness * 4);
       const aBucket = Math.round(useAlpha * 40);
       const entry = {
         sx: s.x,
         sy: s.y,
-        cx,
-        cy,
         tx: t.x,
         ty: t.y,
-        width: Math.max(0.5, wBucket / 4),
+        width: 1,
         col,
         alpha: useAlpha,
         wBucket,
@@ -4104,26 +4972,15 @@
     for (const ed of solid) {
       const key = ed.col + ':' + ed.wBucket + ':' + ed.aBucket;
       if (key !== lastKey) {
-        edgeGfx.lineStyle(ed.width, ed.col, ed.alpha);
+        edgeGfx.lineStyle(1, ed.col, ed.alpha);
         lastKey = key;
       }
       edgeGfx.moveTo(ed.sx, ed.sy);
-      edgeGfx.quadraticCurveTo(ed.cx, ed.cy, ed.tx, ed.ty);
+      edgeGfx.lineTo(ed.tx, ed.ty);
     }
 
     for (const ed of dashed) {
-      drawPhysarumDashedQuadratic(
-        edgeGfx,
-        ed.sx,
-        ed.sy,
-        ed.cx,
-        ed.cy,
-        ed.tx,
-        ed.ty,
-        Math.max(0.5, ed.width * 0.9),
-        ed.col,
-        ed.alpha
-      );
+      drawPhysarumDashedLine(edgeGfx, ed.sx, ed.sy, ed.tx, ed.ty, 1, ed.col, ed.alpha);
     }
 
     edgeGfx.lineStyle(0);
@@ -4133,18 +4990,32 @@
     if (viewLevel !== 'star' || !world) return;
     const sc = world.children.find(c => c._omnixType === 'star');
     if (!sc || !sc._edges || !sc._edgeGfx || !sc._nodes) return;
-    if (sc._sim && sc._sim.alpha() > 0.002) sc._sim.tick();
+    if (sc._growthPhaseComplete && sc._sim && sc._sim.alpha() > 0.002) sc._sim.tick();
 
     const time = performance.now() / 1000;
     const nodes = sc._nodes;
     const edges = sc._edges;
     const edgeGfx = sc._edgeGfx;
+    const growthGfx = sc._growthGfx;
     const signalGfx = sc._signalGfx;
     const particles = sc._signalParticles;
 
-    drawSubviewPhysarumEdges(edgeGfx, sc, edges, time);
+    if (!sc._growthPhaseComplete && growthGfx) {
+      drawStarGrowthEdges(growthGfx, sc);
+      edgeGfx.clear();
+      edgeGfx.lineStyle(0);
+    } else {
+      drawSubviewPhysarumEdges(edgeGfx, sc, edges, time);
+      if (growthGfx) {
+        growthGfx.clear();
+        growthGfx.lineStyle(0);
+      }
+    }
 
     signalGfx.clear();
+    if (!sc._growthPhaseComplete) {
+      return;
+    }
     for (const p of particles) {
       p.progress += p.speed;
       if (p.progress > 1) p.progress = 0;
@@ -4154,16 +5025,35 @@
       const t = edge.target;
       if (!s || !t) continue;
       const ei = edges.indexOf(edge);
-      const { cx, cy } = physarumOrganicControl(s.x, s.y, t.x, t.y, ei >= 0 ? ei : 0, time);
-      const pos = quadBezierPoint(s.x, s.y, cx, cy, t.x, t.y, p.progress);
-      signalGfx.beginFill(p.color, 0.7);
-      signalGfx.drawCircle(pos.x, pos.y, 2.5);
-      signalGfx.endFill();
+      let pos;
+      let tpos;
       const tp = Math.max(0, p.progress - 0.06);
-      const tpos = quadBezierPoint(s.x, s.y, cx, cy, t.x, t.y, tp);
-      signalGfx.beginFill(p.color, 0.25);
-      signalGfx.drawCircle(tpos.x, tpos.y, 1.5);
-      signalGfx.endFill();
+      if (GPU_SAFE_MODE) {
+        pos = {
+          x: s.x + (t.x - s.x) * p.progress,
+          y: s.y + (t.y - s.y) * p.progress,
+        };
+        tpos = {
+          x: s.x + (t.x - s.x) * tp,
+          y: s.y + (t.y - s.y) * tp,
+        };
+        signalGfx.beginFill(p.color, 0.65);
+        signalGfx.drawRect(Math.floor(pos.x), Math.floor(pos.y), 1, 1);
+        signalGfx.endFill();
+        signalGfx.beginFill(p.color, 0.2);
+        signalGfx.drawRect(Math.floor(tpos.x), Math.floor(tpos.y), 1, 1);
+        signalGfx.endFill();
+      } else {
+        const { cx, cy } = physarumOrganicControl(s.x, s.y, t.x, t.y, ei >= 0 ? ei : 0, time);
+        pos = quadBezierPoint(s.x, s.y, cx, cy, t.x, t.y, p.progress);
+        tpos = quadBezierPoint(s.x, s.y, cx, cy, t.x, t.y, tp);
+        signalGfx.beginFill(p.color, 0.7);
+        signalGfx.drawRect(pos.x - 1, pos.y - 1, 2, 2);
+        signalGfx.endFill();
+        signalGfx.beginFill(p.color, 0.25);
+        signalGfx.drawRect(tpos.x - 1, tpos.y - 1, 2, 2);
+        signalGfx.endFill();
+      }
     }
 
     for (const node of nodes) {
@@ -4181,8 +5071,29 @@
     if (!pc || !pc._edges || !pc._edgeGfx || !pc._nodes) return;
     if (pc._sim && pc._sim.alpha() > 0.002) pc._sim.tick();
 
-    const time = performance.now() / 1000;
+    const pcx = pc._planetCenterX != null ? pc._planetCenterX : app.screen.width / 2;
+    const pcy = pc._planetCenterY != null ? pc._planetCenterY : app.screen.height / 2;
+    const pbr = pc._planetBoundaryR;
     const nodes = pc._nodes;
+    if (pbr > 0 && nodes && nodes.length) {
+      for (let ni = 0; ni < nodes.length; ni++) {
+        const pn = nodes[ni];
+        const dx = pn.x - pcx;
+        const dy = pn.y - pcy;
+        const d = Math.hypot(dx, dy);
+        if (d > pbr) {
+          const f = pbr / d;
+          pn.x = pcx + dx * f;
+          pn.y = pcy + dy * f;
+        }
+      }
+      for (let nj = 0; nj < nodes.length; nj++) {
+        const pn2 = nodes[nj];
+        if (pn2.container) pn2.container.position.set(pn2.x, pn2.y);
+      }
+    }
+
+    const time = performance.now() / 1000;
     const edges = pc._edges;
     const edgeGfx = pc._edgeGfx;
     const signalGfx = pc._signalGfx;
@@ -4200,16 +5111,35 @@
       const t = edge.target;
       if (!s || !t) continue;
       const ei = edges.indexOf(edge);
-      const { cx, cy } = physarumOrganicControl(s.x, s.y, t.x, t.y, ei >= 0 ? ei : 0, time);
-      const pos = quadBezierPoint(s.x, s.y, cx, cy, t.x, t.y, p.progress);
-      signalGfx.beginFill(p.color, 0.7);
-      signalGfx.drawCircle(pos.x, pos.y, 2.5);
-      signalGfx.endFill();
+      let pos;
+      let tpos;
       const tp = Math.max(0, p.progress - 0.06);
-      const tpos = quadBezierPoint(s.x, s.y, cx, cy, t.x, t.y, tp);
-      signalGfx.beginFill(p.color, 0.25);
-      signalGfx.drawCircle(tpos.x, tpos.y, 1.5);
-      signalGfx.endFill();
+      if (GPU_SAFE_MODE) {
+        pos = {
+          x: s.x + (t.x - s.x) * p.progress,
+          y: s.y + (t.y - s.y) * p.progress,
+        };
+        tpos = {
+          x: s.x + (t.x - s.x) * tp,
+          y: s.y + (t.y - s.y) * tp,
+        };
+        signalGfx.beginFill(p.color, 0.65);
+        signalGfx.drawRect(Math.floor(pos.x), Math.floor(pos.y), 1, 1);
+        signalGfx.endFill();
+        signalGfx.beginFill(p.color, 0.2);
+        signalGfx.drawRect(Math.floor(tpos.x), Math.floor(tpos.y), 1, 1);
+        signalGfx.endFill();
+      } else {
+        const { cx, cy } = physarumOrganicControl(s.x, s.y, t.x, t.y, ei >= 0 ? ei : 0, time);
+        pos = quadBezierPoint(s.x, s.y, cx, cy, t.x, t.y, p.progress);
+        tpos = quadBezierPoint(s.x, s.y, cx, cy, t.x, t.y, tp);
+        signalGfx.beginFill(p.color, 0.7);
+        signalGfx.drawRect(pos.x - 1, pos.y - 1, 2, 2);
+        signalGfx.endFill();
+        signalGfx.beginFill(p.color, 0.25);
+        signalGfx.drawRect(tpos.x - 1, tpos.y - 1, 2, 2);
+        signalGfx.endFill();
+      }
     }
 
     for (const node of nodes) {
@@ -4218,6 +5148,16 @@
       node.glow.scale.set(beat);
       const baseA = 0.5 + 0.3 * Math.sin(time * 1.5 + node._heartbeatPhase);
       node.glow.alpha = node._hover ? Math.min(1, baseA * 1.35) : baseA;
+
+      const mem = node.membraneGfx;
+      const cls = node.classification;
+      if (mem && cls) {
+        const wobble = 1 + Math.sin(time * 1.2 + node.index * 0.7) * 0.03;
+        const r = node.radius * wobble;
+        mem.clear();
+        mem.lineStyle(1.5, cls.color, 0.7);
+        mem.drawCircle(0, 0, r);
+      }
     }
   }
 
@@ -4264,22 +5204,25 @@
 
       if (isDarkEdge && !darkMatterVisible) continue;
 
-      const e = p.edgeIndex;
-      const { cx, cy } = physarumOrganicControl(s.x, s.y, t.x, t.y, e, timeSec);
       const u = p.reverse ? 1 - p.t : p.t;
-      const pos = quadBezierPoint(s.x, s.y, cx, cy, t.x, t.y, u);
+      const pos = {
+        x: s.x + (t.x - s.x) * u,
+        y: s.y + (t.y - s.y) * u,
+      };
       const col = physarumEdgeColorByType(lt, flux);
-      const pulse = 0.7 + Math.sin(timeSec * 3 + p.t * Math.PI * 2) * 0.3;
-      const baseA = Math.min(1, p.alpha * alphaMul);
-      const haloA = Math.min(1, baseA * pulse * 0.32);
-      const coreA = Math.min(1, baseA * pulse);
-
-      signalFlowGfx.beginFill(col, haloA);
-      signalFlowGfx.drawCircle(pos.x, pos.y, p.size * 2.15);
-      signalFlowGfx.endFill();
-      signalFlowGfx.beginFill(col, coreA);
-      signalFlowGfx.drawCircle(pos.x, pos.y, p.size);
-      signalFlowGfx.endFill();
+      if (GPU_SAFE_MODE) {
+        const baseA = Math.min(1, p.alpha * alphaMul * 0.95);
+        signalFlowGfx.beginFill(col, baseA);
+        signalFlowGfx.drawRect(Math.floor(pos.x), Math.floor(pos.y), 1, 1);
+        signalFlowGfx.endFill();
+      } else {
+        const pulse = 0.7 + Math.sin(timeSec * 3 + p.t * Math.PI * 2) * 0.3;
+        const baseA = Math.min(1, p.alpha * alphaMul);
+        const coreA = Math.min(1, baseA * pulse);
+        signalFlowGfx.beginFill(col, coreA);
+        signalFlowGfx.drawRect(pos.x - 1, pos.y - 1, 2, 2);
+        signalFlowGfx.endFill();
+      }
     }
   }
 
@@ -4502,7 +5445,7 @@
     if (viewLevel === 'star' && selectedDir && starNodes.length) {
       if (starViewTitle) starViewTitle.position.set(cx, cy);
       const sc = world.children.find(c => c._omnixType === 'star');
-      if (sc && sc._sim) {
+      if (sc && sc._sim && sc._growthPhaseComplete) {
         sc._sim.force('center', d3.forceCenter(cx, cy));
         sc._sim.force('x', d3.forceX(cx).strength(0.05));
         sc._sim.force('y', d3.forceY(cy).strength(0.05));
@@ -4511,11 +5454,16 @@
     } else if (viewLevel === 'planet' && selectedFile && planetNodes.length && selectedDir) {
       if (planetViewTitle) planetViewTitle.position.set(cx, cy);
       const pc = world.children.find(c => c._omnixType === 'planet');
-      if (pc && pc._sim) {
-        pc._sim.force('center', d3.forceCenter(cx, cy));
-        pc._sim.force('x', d3.forceX(cx).strength(0.06));
-        pc._sim.force('y', d3.forceY(cy).strength(0.06));
-        pc._sim.alpha(0.28).restart();
+      if (pc) {
+        pc._planetCenterX = cx;
+        pc._planetCenterY = cy;
+        pc._planetBoundaryR = Math.min(app.screen.width, app.screen.height) * 0.36;
+        if (pc._sim) {
+          pc._sim.force('center', d3.forceCenter(cx, cy));
+          pc._sim.force('x', d3.forceX(cx).strength(0.06));
+          pc._sim.force('y', d3.forceY(cy).strength(0.06));
+          pc._sim.alpha(0.28).restart();
+        }
       }
     }
   }
@@ -4640,11 +5588,23 @@
       width: window.innerWidth,
       height: window.innerHeight,
       backgroundColor: COLORS.bg,
-      antialias: true,
-      resolution: window.devicePixelRatio || 1,
+      antialias: false,
+      resolution: 1,
       autoDensity: true,
+      powerPreference: 'low-power',
+      preserveDrawingBuffer: false,
     });
     host.appendChild(app.view);
+    const _omnixGlCanvas = app.view;
+    if (_omnixGlCanvas && _omnixGlCanvas.addEventListener) {
+      _omnixGlCanvas.addEventListener('webglcontextlost', (e) => {
+        e.preventDefault();
+        console.warn('WebGL context lost — attempting recovery');
+      });
+      _omnixGlCanvas.addEventListener('webglcontextrestored', () => {
+        console.log('WebGL context restored');
+      });
+    }
 
     bgGraphics = new PIXI.Graphics();
     starGraphics = new PIXI.Graphics();
@@ -4920,7 +5880,7 @@
       if (viewLevel !== 'galaxy') loadLevelGalaxy();
       const dirNode = simNodes.find(sn => sn.kind === 'directory' && sn.dirId === dir);
       gsap.delayedCall(0.05, () => transitionToStar(dir, dirNode || null));
-      gsap.delayedCall(1.0, () => {
+      gsap.delayedCall(1.45, () => {
         if (selectedDir === dir && viewLevel === 'star') transitionToPlanet(fileData);
       });
       return;
@@ -4929,10 +5889,10 @@
       if (viewLevel !== 'galaxy') loadLevelGalaxy();
       const dirNode = simNodes.find(sn => sn.kind === 'directory' && sn.dirId === dir);
       gsap.delayedCall(0.05, () => transitionToStar(dir, dirNode || null));
-      gsap.delayedCall(1.0, () => {
+      gsap.delayedCall(1.45, () => {
         if (selectedDir === dir && viewLevel === 'star') transitionToPlanet(fileData);
       });
-      gsap.delayedCall(1.55, () => {
+      gsap.delayedCall(2.0, () => {
         const syms = getSymbolsForFile(fp, dir);
         const hit = syms.find(s => s.name === n.name && s.type === n.type);
         if (hit) showSymbolDetailPopup(hit, fileData);
