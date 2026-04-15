@@ -147,12 +147,14 @@ class OmnixMCPServer:
             }
 
             if tool_name not in tool_map:
-                return self._error(req_id, f"Unknown tool: {tool_name}")
+                return self._error(req_id, -32602, f"Unknown tool: {tool_name}")
 
             real_name, real_args = tool_map[tool_name]
             execute = getattr(self.tools, "execute_tool", None)
             if not callable(execute):
-                return self._error(req_id, "Tools object has no execute_tool")
+                return self._error(
+                    req_id, -32603, "Tools object has no execute_tool"
+                )
             result = execute(real_name, **real_args)
 
             return self._response(
@@ -164,38 +166,50 @@ class OmnixMCPServer:
                 },
             )
 
-        return self._error(req_id, f"Unknown method: {method}")
+        return self._error(req_id, -32601, f"Unknown method: {method}")
 
     def _response(self, req_id: object, result: object) -> dict[str, object]:
         return {"jsonrpc": "2.0", "id": req_id, "result": result}
 
-    def _error(self, req_id: object, message: str) -> dict[str, object]:
+    def _error(
+        self, req_id: object, code: int, message: str
+    ) -> dict[str, object]:
         return {
             "jsonrpc": "2.0",
             "id": req_id,
-            "error": {"code": -1, "message": message},
+            "error": {"code": code, "message": message},
         }
 
     def run_stdio(self) -> None:
-        """Run MCP server over stdin/stdout."""
-        for line in sys.stdin:
-            line = line.strip()
-            if not line:
-                continue
+        """Run MCP server over stdin/stdout (newline-delimited JSON-RPC)."""
+        while True:
+            req_id: object | None = None
             try:
+                line = sys.stdin.readline()
+                if not line:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
                 request = json.loads(line)
                 if not isinstance(request, dict):
-                    raise ValueError("request must be a JSON object")
+                    continue
+                # JSON-RPC notifications omit "id"; MCP sends e.g. notifications/initialized.
+                if "id" not in request:
+                    continue
+                req_id = request.get("id")
                 response = self.handle_request(request)
                 sys.stdout.write(json.dumps(response) + "\n")
                 sys.stdout.flush()
+            except json.JSONDecodeError:
+                continue
             except Exception as e:
-                error_response = {
+                err = {
                     "jsonrpc": "2.0",
-                    "id": None,
-                    "error": {"code": -1, "message": str(e)},
+                    "id": req_id,
+                    "error": {"code": -32603, "message": str(e)},
                 }
-                sys.stdout.write(json.dumps(error_response) + "\n")
+                sys.stdout.write(json.dumps(err) + "\n")
                 sys.stdout.flush()
 
 
