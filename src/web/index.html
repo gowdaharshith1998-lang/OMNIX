@@ -7,7 +7,6 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@300;400;500;600;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.3/pixi.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
   <!-- cdnjs d3-force@3.0.0 has no published file; d3@7.9.0 bundles the same force API (pinned). -->
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
@@ -939,21 +938,36 @@
     };
   }
 
-  /** --- Pixi + sim --- */
-  let app = null;
-  let world = null;
-  let layerEdges = null;
-  /** Single batched Graphics for all galaxy-level directory edges (Physarum). */
-  let galaxyEdgeGfx = null;
-  let galaxyEdgeFrameCounter = -1;
-  /** Low-end mobile iGPU: reduce fidelity; set false to restore richer visuals (heavier GPU). */
+  /** --- Canvas2D renderer + sim --- */
+  let canvasBg = null;
+  let canvasEdges = null;
+  let canvasNodes = null;
+  let canvasParticles = null;
+  let canvasUI = null;
+  let ctxBg = null;
+  let ctxEdges = null;
+  let ctxNodes = null;
+  let ctxParticles = null;
+  let ctxUI = null;
+
+  let pan = { x: 0, y: 0 };
+  let zoom = 1;
+  const ZOOM_MIN = 0.15;
+  const ZOOM_MAX = 5.0;
+  let targetPan = { x: 0, y: 0 };
+  let targetZoom = 1;
+  let edgesNodesDirty = true;
+  let uiDirty = true;
+  let bgDrawn = false;
+  let galaxySimHotFrames = 0;
+
   const GPU_SAFE_MODE = true;
   const MAX_GALAXY_PHYSARUM_EDGES_PER_FRAME = 500;
-  let layerNodes = null;
-  let childrenGfx = null;
-  let signalFlowGfx = null;
-  let rippleGfx = null;
-  /** Mycelium flow: fixed pool, galaxy view only (single batched Graphics). */
+  const PARTICLE_COUNT = 600;
+  const particles = [];
+  let renderLoopStarted = false;
+  const lastCanvasPtr = { ox: 0, oy: 0, wx: 0, wy: 0 };
+
   const MYCELIUM_POOL_SIZE = 500;
   const MYCELIUM_TOP_EDGES = 50;
   const myceliumParticlePool = [];
@@ -968,20 +982,16 @@
       reverse: false,
     });
   }
+
   let galaxyLabelPool = [];
-  /** Rebuilt each frame in galaxy gravitational hover (world-space hit targets for file orbit dots). */
   let visibleChildFiles = [];
-  /** Sticky directory: keep orbit files visible while moving toward dots or during short grace period */
   let stickyDir = null;
   let stickyTimeout = null;
-  let _gravScreenPt = null;
-  let _physarumScreenPt = null;
-  let bgGraphics = null;
-  let starGraphics = null;
-  let gridGraphics = null;
-  let darkMatterGfx = null;
-  let entanglementGfx = null;
   let darkMatterVisible = false;
+
+  let activeStarView = null;
+  let activePlanetView = null;
+  let hoveredNode = null;
 
   let timelineData = null;
   let timelineVisible = false;
@@ -1024,6 +1034,15 @@
   let targetWorldTx = 0;
   let targetWorldTy = 0;
 
+  function syncPanZoomAliases() {
+    worldScale = zoom;
+    worldTx = pan.x;
+    worldTy = pan.y;
+    targetWorldScale = targetZoom;
+    targetWorldTx = targetPan.x;
+    targetWorldTy = targetPan.y;
+  }
+
   let searchQuery = '';
   let searchMatches = [];
   let searchDebounceTimer = null;
@@ -1038,6 +1057,469 @@
   }
 
   function resetGalaxyDrillState() {}
+
+  function hexToCss(c) {
+    if (c == null) return '#6366f1';
+    if (typeof c === 'string') return c;
+    if (typeof c === 'number') return '#' + (c >>> 0).toString(16).padStart(6, '0');
+    return '#6366f1';
+  }
+
+  function refreshGalaxyEdgesModel() {
+    if (!model) return;
+    const idxById = new Map();
+    simNodes.forEach((n, i) => {
+      n.index = i;
+      idxById.set(n.id, i);
+    });
+    const ge = [];
+    for (let li = 0; li < simLinks.length; li++) {
+      const l = simLinks[li];
+      const sid = typeof l.source === 'object' && l.source !== null ? l.source.id : l.source;
+      const tid = typeof l.target === 'object' && l.target !== null ? l.target.id : l.target;
+      const si = idxById.get(sid);
+      const ti = idxById.get(tid);
+      if (si == null || ti == null) continue;
+      const w = l.weight || 1;
+      const flux = Math.min(1, w / (model.maxEdgeWeight || 1));
+      ge.push({ sourceIdx: si, targetIdx: ti, flux, type: l.type || 'CALLS' });
+    }
+    model.galaxyEdges = ge;
+  }
+
+  function applyTransform(ctx) {
+    ctx.setTransform(zoom, 0, 0, zoom, pan.x, pan.y);
+  }
+
+  function resetTransform(ctx) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+
+  function drawBackground() {
+    if (bgDrawn) return;
+    if (!ctxBg || !canvasBg) return;
+    const ctx = ctxBg;
+    const W = canvasBg.width;
+    const H = canvasBg.height;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const grad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) / 1.4);
+    grad.addColorStop(0, '#0d1528');
+    grad.addColorStop(1, '#020615');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    for (let i = 0; i < 200; i++) {
+      const sx = Math.abs(Math.sin(i * 127.1) * W);
+      const sy = Math.abs(Math.cos(i * 311.7) * H);
+      const sr = Math.abs(Math.sin(i * 53.3)) * 1.2 + 0.2;
+      ctx.globalAlpha = Math.abs(Math.sin(i * 17.7)) * 0.6 + 0.1;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = 'rgba(99,102,241,0.04)';
+    ctx.lineWidth = 0.5;
+    const HEX = 48;
+    for (let r = -1; r < Math.ceil(H / HEX) + 2; r++) {
+      for (let c = -1; c < Math.ceil(W / HEX) + 2; c++) {
+        const hx = c * HEX * 1.5 + (r % 2 === 0 ? 0 : HEX * 0.75);
+        const hy = r * HEX * 0.866;
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const a = (i * Math.PI) / 3 - Math.PI / 6;
+          const px = hx + HEX * 0.48 * Math.cos(a);
+          const py = hy + HEX * 0.48 * Math.sin(a);
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      }
+    }
+    bgDrawn = true;
+  }
+
+  function drawEdges() {
+    if (!model || !model.galaxyEdges || model.galaxyEdges.length === 0) return;
+    if (!ctxEdges || !canvasEdges) return;
+    const ctx = ctxEdges;
+    ctx.clearRect(0, 0, canvasEdges.width, canvasEdges.height);
+    applyTransform(ctx);
+    ctx.globalCompositeOperation = 'lighter';
+    const time = performance.now() / 1000;
+    let drawn = 0;
+    for (const link of model.galaxyEdges) {
+      if (drawn >= 800) break;
+      const s = simNodes[link.sourceIdx];
+      const t = simNodes[link.targetIdx];
+      if (!s || !t) continue;
+      const screenSx = s.x * zoom + pan.x;
+      const screenTx = t.x * zoom + pan.x;
+      const W = canvasEdges.width;
+      if (screenSx < -100 && screenTx < -100) continue;
+      if (screenSx > W + 100 && screenTx > W + 100) continue;
+      const flux = link.flux || 0.1;
+      const pulse = 0.7 + 0.3 * Math.sin(time * 1.5 + link.sourceIdx * 0.7);
+      const alpha = (0.06 + flux * 0.35) * pulse;
+      const color =
+        link.type === 'ENTANGLED'
+          ? `rgba(245,158,11,${alpha})`
+          : link.type === 'DARK_FORCE'
+            ? `rgba(139,92,246,${alpha})`
+            : link.type === 'CALLS'
+              ? `rgba(74,222,128,${alpha})`
+              : `rgba(59,130,246,${alpha})`;
+      if (!link._cpOffX) {
+        link._cpOffX = (Math.random() - 0.5) * 60;
+        link._cpOffY = (Math.random() - 0.5) * 30;
+      }
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.quadraticCurveTo(
+        (s.x + t.x) / 2 + link._cpOffX,
+        (s.y + t.y) / 2 + link._cpOffY,
+        t.x,
+        t.y
+      );
+      ctx.strokeStyle = color;
+      ctx.lineWidth = (0.4 + flux * 3.5) * pulse;
+      ctx.stroke();
+      drawn++;
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    resetTransform(ctx);
+  }
+
+  function drawNodes() {
+    if (!simNodes || simNodes.length === 0) return;
+    if (!ctxNodes || !canvasNodes) return;
+    const ctx = ctxNodes;
+    ctx.clearRect(0, 0, canvasNodes.width, canvasNodes.height);
+    applyTransform(ctx);
+    const time = performance.now() / 1000;
+    const hoveredId = hoveredNode ? hoveredNode.index : -1;
+    for (const node of simNodes) {
+      if (node.x == null && node.x !== 0) continue;
+      const isHovered = node.index === hoveredId;
+      const searchDim = searchQuery && !nodeMatchesSearch(node) ? 0.25 : 1;
+      let tr = 1;
+      if (timelineVisible && node._timelineScale != null && node.kind === 'directory') {
+        tr *= node._timelineScale || 1;
+      }
+      let hb = 1;
+      if (node.kind === 'directory') {
+        if (node._heartbeatVisual != null) hb *= node._heartbeatVisual;
+        if (node._heartbeatFlash != null) hb *= node._heartbeatFlash;
+      }
+      const r = (node.radius || 12) * (node._warpScale || 1) * tr * hb;
+      const beat =
+        1 + 0.03 * Math.sin(time * (node._heartRate || 1.2) + (node._heartPhase || 0));
+      const finalR = r * beat;
+      const color = hexToCss(node.color != null ? node.color : '#6366f1');
+      ctx.save();
+      ctx.shadowBlur = isHovered ? 35 : 18;
+      ctx.shadowColor = color;
+      ctx.fillStyle = color;
+      ctx.globalAlpha = (isHovered ? 0.95 : 0.82) * searchDim;
+      if (timelineVisible && node._timelineAlpha != null) {
+        ctx.globalAlpha *= node._timelineAlpha;
+      }
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, finalR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.shadowColor = 'transparent';
+      ctx.restore();
+      ctx.save();
+      ctx.fillStyle = '#ffffff';
+      ctx.globalAlpha = 0.15;
+      ctx.beginPath();
+      ctx.arc(node.x - finalR * 0.25, node.y - finalR * 0.25, finalR * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      if (finalR * zoom > 14) {
+        const rawName = node.name || '';
+        const label = rawName.slice(0, Math.floor(finalR * 0.9));
+        ctx.save();
+        ctx.font = `${Math.max(9, Math.min(13, finalR * 0.7))}px 'Outfit',sans-serif`;
+        ctx.fillStyle = '#e2e8f0';
+        ctx.globalAlpha = Math.min(1, (finalR * zoom - 12) / 8);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, node.x, node.y + finalR + 8);
+        ctx.restore();
+      }
+      if (!node._heartRate) {
+        node._heartRate = 0.8 + Math.random() * 0.8;
+        node._heartPhase = Math.random() * Math.PI * 2;
+      }
+      if (node._flashUntil && performance.now() < node._flashUntil) {
+        ctx.save();
+        ctx.strokeStyle = hexToCss(node._flashColor != null ? node._flashColor : '#a855f7');
+        ctx.globalAlpha = 0.5;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, finalR * (node._flashIntensity || 1.2), 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+    if (aiTraceActive) {
+      const targetSimNode = simNodes.find(sn => {
+        if (sn.kind !== 'directory') return false;
+        const id = sn.dirId || (sn.raw && sn.raw.id) || '';
+        return id === aiTraceTarget || (aiTraceTarget && aiTraceTarget.startsWith(id + '/'));
+      });
+      if (targetSimNode && targetSimNode.x != null) {
+        for (let ring = 0; ring < 4; ring++) {
+          const phase = (time * 0.6 + ring * 0.25) % 1;
+          const radius = 20 + phase * 300;
+          const a = (1 - phase) * 0.15;
+          ctx.strokeStyle = `rgba(168,85,247,${a})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(targetSimNode.x, targetSimNode.y, radius, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        const pulse = 0.5 + 0.5 * Math.sin(time * 4);
+        ctx.fillStyle = `rgba(168,85,247,${pulse * 0.4})`;
+        ctx.beginPath();
+        ctx.arc(targetSimNode.x, targetSimNode.y, 8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    resetTransform(ctx);
+  }
+
+  function initParticles() {
+    if (!model || !model.galaxyEdges) return;
+    particles.length = 0;
+    const topEdges = [...model.galaxyEdges]
+      .sort((a, b) => (b.flux || 0) - (a.flux || 0))
+      .slice(0, PARTICLE_COUNT);
+    for (const edge of topEdges) {
+      particles.push({
+        edge,
+        progress: Math.random(),
+        speed: 0.002 + (edge.flux || 0.1) * 0.006,
+        color:
+          edge.type === 'ENTANGLED'
+            ? '#f59e0b'
+            : edge.type === 'CALLS'
+              ? '#4ade80'
+              : edge.type === 'IMPORTS'
+                ? '#3b82f6'
+                : '#06b6d4',
+      });
+    }
+  }
+
+  function drawParticles() {
+    if (viewLevel !== 'galaxy') return;
+    if (!ctxParticles || !canvasParticles) return;
+    const ctx = ctxParticles;
+    const W = canvasParticles.width;
+    const H = canvasParticles.height;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = 'rgba(2,6,21,0.88)';
+    ctx.fillRect(0, 0, W, H);
+    if (!particles.length) return;
+    applyTransform(ctx);
+    for (const p of particles) {
+      p.progress += p.speed;
+      if (p.progress > 1) p.progress -= 1;
+      const s = simNodes[p.edge.sourceIdx];
+      const t = simNodes[p.edge.targetIdx];
+      if (!s || !t) continue;
+      const cpx = (s.x + t.x) / 2 + (p.edge._cpOffX || 0);
+      const cpy = (s.y + t.y) / 2 + (p.edge._cpOffY || 0);
+      const mt = p.progress;
+      const px = (1 - mt) * (1 - mt) * s.x + 2 * (1 - mt) * mt * cpx + mt * mt * t.x;
+      const py = (1 - mt) * (1 - mt) * s.y + 2 * (1 - mt) * mt * cpy + mt * mt * t.y;
+      const spx = px * zoom + pan.x;
+      const spy = py * zoom + pan.y;
+      if (spx < -5 || spx > W + 5 || spy < -5 || spy > H + 5) continue;
+      ctx.save();
+      ctx.shadowBlur = 8;
+      ctx.shadowColor = p.color;
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath();
+      ctx.arc(px, py, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.shadowColor = 'transparent';
+      ctx.restore();
+    }
+    resetTransform(ctx);
+  }
+
+  function resizeCanvases() {
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    [canvasBg, canvasEdges, canvasNodes, canvasParticles, canvasUI].forEach(c => {
+      if (c) {
+        c.width = W;
+        c.height = H;
+      }
+    });
+    edgesNodesDirty = true;
+    bgDrawn = false;
+    drawBackground();
+    syncPanZoomAliases();
+  }
+
+  function drawStarPlanetFrame(kind) {
+    if (!ctxEdges || !ctxNodes) return;
+    resetTransform(ctxEdges);
+    resetTransform(ctxNodes);
+    ctxEdges.clearRect(0, 0, canvasEdges.width, canvasEdges.height);
+    ctxNodes.clearRect(0, 0, canvasNodes.width, canvasNodes.height);
+    if (kind === 'star' && activeStarView && activeStarView._sim) {
+      const sc = activeStarView;
+      const edges = sc._edges || [];
+      ctxEdges.strokeStyle = 'rgba(74,222,128,0.28)';
+      ctxEdges.lineWidth = 1;
+      for (let ei = 0; ei < edges.length; ei++) {
+        const e = edges[ei];
+        const s = e.source;
+        const t = e.target;
+        if (!s || !t) continue;
+        ctxEdges.beginPath();
+        ctxEdges.moveTo(s.x, s.y);
+        ctxEdges.lineTo(t.x, t.y);
+        ctxEdges.stroke();
+      }
+      const nodes = sc._nodes || [];
+      for (let ni = 0; ni < nodes.length; ni++) {
+        const sn = nodes[ni];
+        const x = sn.disp ? sn.disp.x : sn.x;
+        const y = sn.disp ? sn.disp.y : sn.y;
+        const beat = sn._glowBeat != null ? sn._glowBeat : 1;
+        const r = (sn.radius || 12) * beat * (sn._scale != null ? sn._scale : 1);
+        const alpha =
+          (sn._alpha != null ? sn._alpha : 1) *
+          (sn.disp && sn.disp.alpha != null ? sn.disp.alpha : 1);
+        ctxNodes.save();
+        ctxNodes.globalAlpha = alpha;
+        ctxNodes.fillStyle = hexToCss(sn.color);
+        ctxNodes.beginPath();
+        ctxNodes.arc(x, y, r, 0, Math.PI * 2);
+        ctxNodes.fill();
+        ctxNodes.restore();
+      }
+      if (starViewTitle && starViewTitle.text != null) {
+        ctxNodes.save();
+        ctxNodes.fillStyle = '#6366f1';
+        ctxNodes.globalAlpha = starViewTitle.alpha != null ? starViewTitle.alpha : 0.35;
+        ctxNodes.font = "16px 'Syne',sans-serif";
+        ctxNodes.textAlign = 'center';
+        ctxNodes.textBaseline = 'middle';
+        ctxNodes.fillText(starViewTitle.text, starViewTitle.x, starViewTitle.y);
+        ctxNodes.restore();
+      }
+    } else if (kind === 'planet' && activePlanetView && activePlanetView._sim) {
+      const pc = activePlanetView;
+      const pcx = pc._planetCenterX != null ? pc._planetCenterX : window.innerWidth / 2;
+      const pcy = pc._planetCenterY != null ? pc._planetCenterY : window.innerHeight / 2;
+      const pbr = pc._planetBoundaryR || Math.min(window.innerWidth, window.innerHeight) * 0.36;
+      const edges = pc._edges || [];
+      ctxEdges.strokeStyle = 'rgba(59,130,246,0.3)';
+      ctxEdges.lineWidth = 1;
+      for (let ei = 0; ei < edges.length; ei++) {
+        const e = edges[ei];
+        const s = e.source;
+        const t = e.target;
+        if (!s || !t) continue;
+        ctxEdges.beginPath();
+        ctxEdges.moveTo(s.x, s.y);
+        ctxEdges.lineTo(t.x, t.y);
+        ctxEdges.stroke();
+      }
+      const nodes = pc._nodes || [];
+      for (let ni = 0; ni < nodes.length; ni++) {
+        const pn = nodes[ni];
+        const d = pn.disp;
+        const x = d ? d.x : pn.x;
+        const y = d ? d.y : pn.y;
+        const beat = pn._glowBeat != null ? pn._glowBeat : 1;
+        const r = (pn.radius || 8) * beat;
+        const alpha = (pn._alpha != null ? pn._alpha : 1) * (d && d.alpha != null ? d.alpha : 1);
+        ctxNodes.save();
+        ctxNodes.globalAlpha = alpha;
+        ctxNodes.fillStyle = hexToCss(pn.color);
+        ctxNodes.beginPath();
+        ctxNodes.arc(x, y, r, 0, Math.PI * 2);
+        ctxNodes.fill();
+        ctxNodes.restore();
+      }
+      if (planetViewTitle && planetViewTitle.text != null) {
+        ctxNodes.save();
+        ctxNodes.fillStyle = '#06b6d4';
+        ctxNodes.globalAlpha = planetViewTitle.alpha != null ? planetViewTitle.alpha : 0.35;
+        ctxNodes.font = "14px 'JetBrains Mono',monospace";
+        ctxNodes.textAlign = 'center';
+        ctxNodes.fillText(planetViewTitle.text, planetViewTitle.x, planetViewTitle.y);
+        ctxNodes.restore();
+      }
+    }
+  }
+
+  let renderLoopHandle = 0;
+  let galaxyPointerMoveHandler = null;
+  function renderLoop() {
+    renderLoopHandle = requestAnimationFrame(renderLoop);
+    syncPanZoomAliases();
+    hoveredSimNode = hoveredNode;
+    let fpsEl = document.getElementById('fps-counter');
+    if (fpsEl && !renderLoop._lastFps) renderLoop._lastFps = performance.now();
+    if (fpsEl && !renderLoop._fc) renderLoop._fc = 0;
+    if (fpsEl) {
+      renderLoop._fc++;
+      const n = performance.now();
+      if (n - renderLoop._lastFps >= 500) {
+        fpsEl.textContent = Math.round((renderLoop._fc * 1000) / (n - renderLoop._lastFps)) + ' FPS';
+        renderLoop._fc = 0;
+        renderLoop._lastFps = n;
+      }
+    }
+    if (viewLevel === 'galaxy') {
+      if (simulation && simulation.alpha() > 0.001) {
+        simulation.tick();
+        edgesNodesDirty = true;
+        galaxySimHotFrames++;
+        if (galaxySimHotFrames > 500) {
+          simulation.stop();
+          galaxySimHotFrames = 0;
+        }
+      } else {
+        galaxySimHotFrames = 0;
+      }
+      if (edgesNodesDirty) {
+        drawEdges();
+        drawNodes();
+        edgesNodesDirty = false;
+      }
+      drawParticles();
+    } else if (viewLevel === 'star') {
+      tickAndRenderStarView();
+      drawStarPlanetFrame('star');
+    } else if (viewLevel === 'planet') {
+      tickAndRenderPlanetView();
+      drawStarPlanetFrame('planet');
+    }
+    if (viewLevel === 'galaxy') {
+      updateGalaxyGravitationalHover();
+      applyTimelineToPixiContainers();
+      applyDirectoryHeartbeatAndGlow();
+      drawSignalFlow();
+      drawRippleImpact();
+      drawEntanglementOverlay();
+      drawDarkMatterOverlay();
+    }
+  }
 
   function resolveDirFilePath(dirId, fileName) {
     const nodes = (rawGraphData && rawGraphData.nodes) || [];
@@ -1196,29 +1678,7 @@
 
   function acquireNodePool(i) {
     while (nodePool.length <= i) {
-      const c = new PIXI.Container();
-      const glow = new PIXI.Graphics();
-      const shape = new PIXI.Graphics();
-      const label = new PIXI.Text('', {
-        fontFamily: 'Outfit, system-ui, sans-serif',
-        fontSize: 11,
-        fill: 0xffffff,
-        align: 'center',
-      });
-      label.anchor.set(0.5, 0);
-      label.visible = false;
-      c.addChild(glow);
-      c.addChild(shape);
-      c.addChild(label);
-      c.eventMode = 'static';
-      c.cursor = 'pointer';
-      c.visible = false;
-      c.on('pointerover', onNodeOver);
-      c.on('pointerout', onNodeOut);
-      c.on('pointerdown', onNodeRightDown);
-      c.on('pointertap', onNodeClick);
-      nodePool.push({ container: c, glow, shape, label, simNode: null });
-      layerNodes.addChild(c);
+      nodePool.push({ container: null, glow: null, shape: null, label: null, simNode: null });
     }
     return nodePool[i];
   }
@@ -1226,8 +1686,8 @@
   function clientFromPixiEvent(e) {
     const o = e.data && e.data.originalEvent;
     if (o && o.clientX != null) return { x: o.clientX, y: o.clientY };
-    const br = app.view.getBoundingClientRect();
-    return { x: br.left + e.global.x, y: br.top + e.global.y };
+    const br = canvasUI ? canvasUI.getBoundingClientRect() : { left: 0, top: 0 };
+    return { x: br.left + (e.global ? e.global.x : 0), y: br.top + (e.global ? e.global.y : 0) };
   }
 
   function onNodeOver(e) {
@@ -1251,7 +1711,7 @@
     if (!(viewLevel === 'galaxy' && sn.kind === 'directory')) {
       pulseNeighbors(sn);
     }
-    syncPixiFromSim();
+    syncCanvasFromSim();
   }
 
   function onNodeOut(e) {
@@ -1266,7 +1726,7 @@
     }
     if (entry && entry.simNode) redrawNodeGlow(entry, entry.simNode, false);
     clearNeighborPulse();
-    syncPixiFromSim();
+    syncCanvasFromSim();
   }
 
   function redrawNodeGlow(entry, sn, isHover) {
@@ -1347,7 +1807,11 @@
     if (pointerEventButton(e) === 2) return;
     const entry = nodePool.find(p => p.container === e.currentTarget);
     if (!entry || !entry.simNode) return;
-    const sn = entry.simNode;
+    onNodeLeftClick(entry.simNode);
+  }
+
+  function onNodeLeftClick(sn) {
+    if (!sn) return;
     if (viewLevel === 'galaxy' && sn.kind === 'directory') {
       let did = sn.dirId;
       if (did === undefined || did === null) did = sn.raw && sn.raw.id;
@@ -1386,8 +1850,13 @@
   }
 
   function fitWorldToNodes(animate) {
-    if (viewLevel !== 'galaxy' || !simNodes.length || !app) return;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    if (viewLevel !== 'galaxy' || !simNodes.length) return;
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
     const labelPadWorld = 0;
     simNodes.forEach(n => {
       const r = n.radius || 12;
@@ -1401,19 +1870,19 @@
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
     const pad = 0.85;
-    const sx = (app.screen.width * pad) / bw;
-    const sy = (app.screen.height * pad) / bh;
+    const sx = (W * pad) / bw;
+    const sy = (H * pad) / bh;
     let s = Math.min(sx, sy);
     s = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, s));
-    targetWorldScale = s;
-    targetWorldTx = app.screen.width / 2 - cx * s;
-    targetWorldTy = app.screen.height / 2 - cy * s;
+    targetZoom = s;
+    targetPan.x = W / 2 - cx * s;
+    targetPan.y = H / 2 - cy * s;
     if (animate === false) {
-      world.scale.set(s);
-      world.position.set(targetWorldTx, targetWorldTy);
-      worldScale = s;
-      worldTx = targetWorldTx;
-      worldTy = targetWorldTy;
+      zoom = s;
+      pan.x = targetPan.x;
+      pan.y = targetPan.y;
+      syncPanZoomAliases();
+      edgesNodesDirty = true;
       return;
     }
     smoothWorld(0.6, 'power3.out');
@@ -1421,23 +1890,19 @@
 
   function smoothWorld(dur, ease) {
     killTweens();
-    const from = {
-      s: world.scale.x,
-      x: world.position.x,
-      y: world.position.y,
-    };
+    const from = { zx: zoom, px: pan.x, py: pan.y };
     const tw = gsap.to(from, {
-      s: targetWorldScale,
-      x: targetWorldTx,
-      y: targetWorldTy,
+      zx: targetZoom,
+      px: targetPan.x,
+      py: targetPan.y,
       duration: dur,
       ease: ease || 'power3.out',
       onUpdate: () => {
-        world.scale.set(from.s);
-        world.position.set(from.x, from.y);
-        worldScale = from.s;
-        worldTx = from.x;
-        worldTy = from.y;
+        zoom = from.zx;
+        pan.x = from.px;
+        pan.y = from.py;
+        syncPanZoomAliases();
+        edgesNodesDirty = true;
       },
     });
     activeTweens.push(tw);
@@ -1856,59 +2321,34 @@
 
   function cleanupStarView() {
     starViewTitle = null;
-    const toRemove = [];
-    for (let i = 0; i < world.children.length; i++) {
-      const ch = world.children[i];
-      if (ch._omnixType === 'star') toRemove.push(ch);
-    }
-    for (let j = 0; j < toRemove.length; j++) {
-      const ch = toRemove[j];
-      if (ch._growthTl) {
-        ch._growthTl.kill();
-        ch._growthTl = null;
+    if (activeStarView) {
+      if (activeStarView._growthTl) {
+        activeStarView._growthTl.kill();
+        activeStarView._growthTl = null;
       }
-      if (ch._sim) {
-        ch._sim.stop();
-        ch._sim = null;
+      if (activeStarView._sim) {
+        activeStarView._sim.stop();
+        activeStarView._sim = null;
       }
-      world.removeChild(ch);
-      ch.destroy({ children: true });
     }
+    activeStarView = null;
     starNodes = [];
   }
 
   function cleanupPlanetView() {
     planetViewTitle = null;
-    const toRemove = [];
-    for (let i = 0; i < world.children.length; i++) {
-      const ch = world.children[i];
-      if (ch._omnixType === 'planet') toRemove.push(ch);
+    if (activePlanetView && activePlanetView._sim) {
+      activePlanetView._sim.stop();
+      activePlanetView._sim = null;
     }
-    for (let j = 0; j < toRemove.length; j++) {
-      const ch = toRemove[j];
-      if (ch._sim) {
-        ch._sim.stop();
-        ch._sim = null;
-      }
-      world.removeChild(ch);
-      ch.destroy({ children: true });
-    }
+    activePlanetView = null;
     planetNodes = [];
   }
 
   function restoreGalaxyView() {
     killTweens();
-    gsap.killTweensOf(layerEdges);
-    layerEdges.alpha = 1;
-    nodePool.forEach(p => {
-      if (!p || !p.container) return;
-      gsap.killTweensOf(p.container);
-      gsap.killTweensOf(p.container.scale);
-      p.container.alpha = searchQuery && p.simNode && !nodeMatchesSearch(p.simNode) ? 0.25 : 1;
-      p.container.scale.set(1);
-    });
     fitWorldToNodes(false);
-    syncPixiFromSim();
+    syncCanvasFromSim();
     updateBreadcrumb();
   }
 
@@ -1916,21 +2356,13 @@
     hideSymbolPopup();
     for (let i = 0; i < starNodes.length; i++) {
       const sn = starNodes[i];
-      if (!sn || !sn.container) continue;
-      gsap.killTweensOf(sn.container);
-      gsap.killTweensOf(sn.container.scale);
+      if (!sn) continue;
       sn._hover = false;
-      sn.container.position.set(sn.x, sn.y);
-      gsap.to(sn.container, {
-        alpha: 1,
-        duration: 0.35,
-        ease: 'power2.out',
-      });
-      gsap.to(sn.container.scale, { x: 1, y: 1, duration: 0.25 });
+      sn._alpha = 1;
+      sn._scale = 1;
     }
     selectedFile = null;
-    const sc = world && world.children && world.children.find(c => c._omnixType === 'star');
-    if (sc && sc._sim) sc._sim.alpha(0.45).restart();
+    if (activeStarView && activeStarView._sim) activeStarView._sim.alpha(0.45).restart();
     updateBreadcrumb();
   }
 
@@ -1939,42 +2371,25 @@
     selectedDir = dirId;
     updateBreadcrumb();
     cleanupStarView();
-    if (!world || !app) return;
-    const starContainer = new PIXI.Container();
-    starContainer.eventMode = 'none';
-    starContainer._omnixType = 'star';
-    world.addChild(starContainer);
+    pan.x = 0;
+    pan.y = 0;
+    zoom = 1;
+    targetPan.x = 0;
+    targetPan.y = 0;
+    targetZoom = 1;
+    syncPanZoomAliases();
 
-    gsap.to(world, { x: 0, y: 0, duration: 0.3, ease: 'power2.inOut' });
-    gsap.to(world.scale, { x: 1, y: 1, duration: 0.3, ease: 'power2.inOut' });
-    worldScale = 1;
-    worldTx = 0;
-    worldTy = 0;
-    targetWorldScale = 1;
-    targetWorldTx = 0;
-    targetWorldTy = 0;
-
-    const centerX = app.screen.width / 2;
-    const centerY = app.screen.height / 2;
+    const centerX = window.innerWidth / 2;
+    const centerY = window.innerHeight / 2;
     const maxFilesAll = Math.min(files.length, STAR_VIEW_MAX_FILES);
     const fileSlice = files.slice(0, maxFilesAll);
     const rand = starGrowthRng(starGrowthSeed(dirId));
 
-    const starEdgeGfx = new PIXI.Graphics();
-    starEdgeGfx.eventMode = 'none';
-    starEdgeGfx.alpha = 0;
-    starContainer.addChild(starEdgeGfx);
-
-    const starGrowthGfx = new PIXI.Graphics();
-    starGrowthGfx.eventMode = 'none';
-    starGrowthGfx.alpha = 1;
-    starContainer.addChild(starGrowthGfx);
-
-    const starSignalGfx = new PIXI.Graphics();
-    starSignalGfx.eventMode = 'none';
-    starSignalGfx.alpha = 0;
-    starContainer.addChild(starSignalGfx);
-
+    const starContainer = {
+      _omnixType: 'star',
+      _growthPhaseComplete: true,
+      _growthTl: null,
+    };
     starNodes = [];
 
     for (let i = 0; i < maxFilesAll; i++) {
@@ -2001,86 +2416,21 @@
 
       const growthId = fileData.filePath || dirId + '/' + (file.name || String(i));
 
-      const fileContainer = new PIXI.Container();
-      fileContainer.position.set(centerX, centerY);
-      fileContainer.alpha = 0;
-      fileContainer.scale.set(0.01, 0.01);
-      fileContainer.eventMode = 'static';
-      fileContainer.cursor = 'pointer';
-
-      const glow = new PIXI.Graphics();
-      glow.beginFill(color, 0.12);
-      glow.drawCircle(0, 0, radius * 2.5);
-      glow.endFill();
-      glow.alpha = 0.55;
-      fileContainer.addChild(glow);
-
-      const circle = new PIXI.Graphics();
-      circle.beginFill(color, 0.85);
-      circle.drawCircle(0, 0, radius);
-      circle.endFill();
-      circle.lineStyle(1, 0xffffff, 0.25);
-      circle.drawCircle(0, 0, radius);
-      fileContainer.addChild(circle);
-
-      const fn = nm.length > 18 ? nm.slice(0, 16) + '…' : nm;
-      const label = new PIXI.Text(fn + '\n(' + (file.symbolCount || 0) + ')', {
-        fontFamily: 'JetBrains Mono, monospace',
-        fontSize: 10,
-        fill: 0xe2e8f0,
-        align: 'center',
-      });
-      label.anchor.set(0.5, 0);
-      label.position.set(0, radius + 6);
-      label.eventMode = 'none';
-      fileContainer.addChild(label);
-
-      const hitR = Math.max(radius * 2.5, radius + 48);
-      fileContainer.hitArea = new PIXI.Circle(0, 0, hitR);
-
-      starContainer.addChild(fileContainer);
-
-      const snRef = {
-        container: fileContainer,
+      starNodes.push({
         fileData,
         growthId,
-        x: centerX,
-        y: centerY,
+        x: centerX + (rand() - 0.5) * 360,
+        y: centerY + (rand() - 0.5) * 240,
         vx: 0,
         vy: 0,
         radius,
         color,
-        glow,
         index: i,
         connections: 0,
         _hover: false,
-        _growEdgeU: 0,
-      };
-
-      fileContainer.on('pointerdown', e => {
-        const btn = pointerEventButton(e);
-        if (btn === 2) {
-          e.stopPropagation();
-          const oe = e.data && e.data.originalEvent;
-          if (oe && oe.preventDefault) oe.preventDefault();
-          openXrayForDir(dirId);
-          return;
-        }
-        if (btn !== 0) return;
-        e.stopPropagation();
-        hideSymbolPopup();
-        transitionToPlanet(fileData);
+        _alpha: 1,
+        _scale: 1,
       });
-      fileContainer.on('pointerover', () => {
-        snRef._hover = true;
-        gsap.to(fileContainer.scale, { x: 1.25, y: 1.25, duration: 0.2 });
-      });
-      fileContainer.on('pointerout', () => {
-        snRef._hover = false;
-        gsap.to(fileContainer.scale, { x: 1, y: 1, duration: 0.2 });
-      });
-
-      starNodes.push(snRef);
     }
 
     const starEdges = buildStarEdgeList(dirId, starNodes);
@@ -2097,82 +2447,19 @@
       starNodes[ci].connections = conn[ci] || 0;
     }
 
-    const sortedIdx = starNodes.map((_, idx) => idx).sort((a, b) => conn[b] - conn[a]);
-    const animIndexSet = new Set(sortedIdx.slice(0, Math.min(STAR_GROWTH_MAX_ANIM, sortedIdx.length)));
-    const growthIdAnimSet = new Set();
-    animIndexSet.forEach(idx => {
-      growthIdAnimSet.add(starNodes[idx].growthId);
-    });
-
-    const animNodes = starNodes.filter((_, idx) => animIndexSet.has(idx));
-    const subLinks = starEdges.filter(
-      e =>
-        e.source &&
-        e.target &&
-        growthIdAnimSet.has(e.source.growthId) &&
-        growthIdAnimSet.has(e.target.growthId)
-    );
-
-    const growthTree = animNodes.length ? computeStarGrowthTree(animNodes, subLinks) : null;
-    const growthPositions = growthTree
-      ? computeStarGrowthPositions(growthTree, centerX, centerY, rand)
-      : {};
-    const growthIdToNode = new Map(starNodes.map(sn => [sn.growthId, sn]));
-    if (growthTree && Object.keys(growthPositions).length) {
-      relaxStarGrowthCollisions(growthPositions, growthIdToNode, 14);
-    }
-
-    function bfsStarGrowthOrder(tree, byGrowthId) {
-      const order = [];
-      if (!tree) return order;
-      const q = [tree.rootId];
-      const seen = new Set(q);
-      while (q.length) {
-        const id = q.shift();
-        const node = byGrowthId.get(id);
-        if (node) order.push(node);
-        const ch = (tree.children[id] || []).slice();
-        ch.sort(
-          (a, b) =>
-            (byGrowthId.get(b).connections || 0) - (byGrowthId.get(a).connections || 0)
-        );
-        for (let ci = 0; ci < ch.length; ci++) {
-          const cid = ch[ci];
-          if (!seen.has(cid)) {
-            seen.add(cid);
-            q.push(cid);
-          }
-        }
-      }
-      return order;
-    }
-
-    const bfsOrder = bfsStarGrowthOrder(growthTree, growthIdToNode);
-    const depthMap = new Map();
-    if (growthTree) {
-      for (const id of Object.keys(growthTree.depth)) {
-        depthMap.set(id, growthTree.depth[id]);
-      }
-    }
-
-    const starSim = d3
+    const d3f = typeof d3 !== 'undefined' ? d3 : window.d3;
+    const starSim = d3f
       .forceSimulation(starNodes)
-      .force('center', d3.forceCenter(centerX, centerY))
-      .force('charge', d3.forceManyBody().strength(-80))
-      .force('collision', d3.forceCollide().radius(d => d.radius * 2 + 10))
-      .force('link', d3.forceLink(starEdges).distance(120).strength(0.3))
-      .force('x', d3.forceX(centerX).strength(0.05))
-      .force('y', d3.forceY(centerY).strength(0.05))
-      .alphaDecay(0.02)
-      .on('tick', () => {
-        if (starContainer._growthPhaseComplete) {
-          for (const sn of starNodes) {
-            sn.container.position.set(sn.x, sn.y);
-          }
-        }
-      });
+      .force('center', d3f.forceCenter(centerX, centerY))
+      .force('charge', d3f.forceManyBody().strength(-80))
+      .force('collision', d3f.forceCollide().radius(d => d.radius * 2 + 10))
+      .force('link', d3f.forceLink(starEdges).distance(120).strength(0.3))
+      .force('x', d3f.forceX(centerX).strength(0.05))
+      .force('y', d3f.forceY(centerY).strength(0.05))
+      .alphaDecay(0.02);
 
-    starSim.stop();
+    starSim.alpha(1);
+    for (let tk = 0; tk < 200; tk++) starSim.tick();
 
     const starSignalParticles = [];
     const nStarPart = Math.min(starEdges.length, SUBVIEW_SIGNAL_MAX);
@@ -2188,247 +2475,33 @@
 
     starContainer._sim = starSim;
     starContainer._edges = starEdges;
-    starContainer._edgeGfx = starEdgeGfx;
-    starContainer._growthGfx = starGrowthGfx;
-    starContainer._signalGfx = starSignalGfx;
     starContainer._signalParticles = starSignalParticles;
     starContainer._nodes = starNodes;
-    starContainer._growthTree = growthTree;
-    starContainer._growthIdToNode = growthIdToNode;
-    starContainer._growthAnimSet = growthIdAnimSet;
-    starContainer._growthDepthMap = depthMap;
-    starContainer._growthAnimNodes = animNodes.slice();
-    starContainer._growthPhaseComplete = false;
+    activeStarView = starContainer;
 
-    const titleText = new PIXI.Text((dirId && dirId.split('/').pop()) || dirId || '', {
-      fontFamily: 'Syne, sans-serif',
-      fontSize: 16,
-      fill: 0x6366f1,
-      align: 'center',
-    });
-    titleText.alpha = 0.25;
-    titleText.anchor.set(0.5);
-    titleText.position.set(centerX, centerY);
-    titleText.eventMode = 'none';
-    starContainer.addChild(titleText);
-    starViewTitle = titleText;
-
-    const growthMaster = gsap.timeline({
-      onKill: () => {
-        starContainer._growthTl = null;
-      },
-    });
-    starContainer._growthTl = growthMaster;
-
-    if (growthTree && bfsOrder.length) {
-      const rootSn = growthTree.root;
-      rootSn.x = centerX;
-      rootSn.y = centerY;
-      rootSn.container.position.set(centerX, centerY);
-      rootSn._growEdgeU = 1;
-      const rootScale = { s: 0 };
-      growthMaster.to(
-        rootScale,
-        {
-          s: 1,
-          duration: 0.3,
-          ease: 'back.out(1.4)',
-          onUpdate: () => {
-            const sc = Math.max(0.001, rootScale.s);
-            rootSn.container.scale.set(sc, sc);
-          },
-        },
-        0
-      );
-      growthMaster.to(
-        rootSn.container,
-        { alpha: 1, duration: 0.12, ease: 'power2.out' },
-        0
-      );
-
-      const maxDepth = bfsOrder.reduce(
-        (m, n) => Math.max(m, growthTree.depth[n.growthId] || 0),
-        0
-      );
-      const rootIntroSec = 0.32;
-      let tLayer = rootIntroSec;
-      if (maxDepth >= 1) {
-        const budget = STAR_GROWTH_TOTAL_SEC - rootIntroSec;
-        let layerGap =
-          maxDepth > 1 ? Math.min(0.02, (budget * 0.2) / (maxDepth - 1)) : 0;
-        let layerDur = (budget - layerGap * (maxDepth - 1)) / maxDepth;
-        if (layerDur < 0.015) {
-          layerGap = 0;
-          layerDur = budget / maxDepth;
-        }
-        for (let d = 1; d <= maxDepth; d++) {
-          const layerNodes = bfsOrder.filter(
-            n => (growthTree.depth[n.growthId] || 0) === d
-          );
-          for (let li = 0; li < layerNodes.length; li++) {
-            const node = layerNodes[li];
-            const pos = growthPositions[node.growthId];
-            if (!pos) continue;
-            const parentId = growthTree.parent[node.growthId];
-            const parentSn = parentId != null ? growthIdToNode.get(parentId) : rootSn;
-            if (!parentSn) continue;
-            node._growEdgeU = 0;
-            const prog = { u: 0 };
-            growthMaster.to(
-              prog,
-              {
-                u: 1,
-                duration: layerDur,
-                ease: 'back.out(1.4)',
-                delay: tLayer,
-                onStart: () => {
-                  node._gx0 = parentSn.x;
-                  node._gy0 = parentSn.y;
-                  node.x = node._gx0;
-                  node.y = node._gy0;
-                  node.container.position.set(node._gx0, node._gy0);
-                  node.container.alpha = 1;
-                  node.container.scale.set(0.02, 0.02);
-                },
-                onUpdate: () => {
-                  const t = prog.u;
-                  const ox = node._gx0;
-                  const oy = node._gy0;
-                  node.x = ox + (pos.x - ox) * t;
-                  node.y = oy + (pos.y - oy) * t;
-                  node.container.position.set(node.x, node.y);
-                  node._growEdgeU = t;
-                  const sc = 0.02 + 0.98 * t;
-                  node.container.scale.set(sc, sc);
-                },
-              },
-              0
-            );
-          }
-          tLayer += layerDur + (d < maxDepth ? layerGap : 0);
-        }
-      }
-    } else {
-      for (let fi = 0; fi < starNodes.length; fi++) {
-        const sn = starNodes[fi];
-        sn.x = centerX + (rand() - 0.5) * 24;
-        sn.y = centerY + (rand() - 0.5) * 24;
-        sn.container.position.set(sn.x, sn.y);
-        const st = Math.min(fi * 0.03, STAR_GROWTH_TOTAL_SEC * 0.45);
-        growthMaster.to(
-          sn.container,
-          { alpha: 1, duration: 0.32, ease: 'back.out(1.4)' },
-          st
-        );
-        growthMaster.to(
-          sn.container.scale,
-          { x: 1, y: 1, duration: 0.32, ease: 'back.out(1.4)' },
-          st
-        );
-      }
-    }
-
-    for (let ri = 0; ri < starNodes.length; ri++) {
-      const sn = starNodes[ri];
-      if (!growthIdAnimSet.has(sn.growthId)) {
-        sn.x = centerX;
-        sn.y = centerY;
-        sn.container.position.set(centerX, centerY);
-        sn.container.alpha = 0;
-        sn.container.scale.set(1, 1);
-        sn._growEdgeU = 0;
-      }
-    }
-
-    const migrateProxy = { _p: 0 };
-    growthMaster.to(
-      migrateProxy,
-      {
-        _p: 1,
-        duration: STAR_MIGRATE_SEC,
-        ease: 'power2.inOut',
-        onStart: () => {
-          for (const sn of starNodes) {
-            sn._gxEnd = sn.x;
-            sn._gyEnd = sn.y;
-            sn.vx = 0;
-            sn.vy = 0;
-          }
-          starSim.alpha(1);
-          for (let tk = 0; tk < 400; tk++) {
-            starSim.tick();
-          }
-          for (const sn of starNodes) {
-            sn._fx = sn.x;
-            sn._fy = sn.y;
-            sn.vx = 0;
-            sn.vy = 0;
-          }
-          for (const sn of starNodes) {
-            sn.x = sn._gxEnd;
-            sn.y = sn._gyEnd;
-            sn.container.position.set(sn.x, sn.y);
-          }
-        },
-        onUpdate: () => {
-          const t = migrateProxy._p;
-          for (const sn of starNodes) {
-            sn.x = sn._gxEnd + (sn._fx - sn._gxEnd) * t;
-            sn.y = sn._gyEnd + (sn._fy - sn._gyEnd) * t;
-            sn.container.position.set(sn.x, sn.y);
-            if (!growthIdAnimSet.has(sn.growthId)) {
-              sn.container.alpha = t;
-            }
-          }
-        },
-        onComplete: () => {
-          for (const sn of starNodes) {
-            sn.x = sn._fx;
-            sn.y = sn._fy;
-            sn.container.position.set(sn.x, sn.y);
-            sn._growEdgeU = 1;
-          }
-          starContainer._growthPhaseComplete = true;
-          starSim.alpha(1).restart();
-          gsap.to(starEdgeGfx, { alpha: 1, duration: 0.2, ease: 'power2.out' });
-          gsap.to(starSignalGfx, { alpha: 1, duration: 0.2, ease: 'power2.out' });
-        },
-      },
-      STAR_GROWTH_TOTAL_SEC
-    );
-
-    growthMaster.eventCallback('onComplete', () => {
-      starContainer._growthTl = null;
-    });
+    starViewTitle = {
+      text: (dirId && dirId.split('/').pop()) || dirId || '',
+      x: centerX,
+      y: centerY,
+      alpha: 0.25,
+    };
   }
+
 
   function createPlanetView(fileData, symbols) {
     cleanupPlanetView();
-    if (!world || !app) return;
-    const planetContainer = new PIXI.Container();
-    planetContainer.eventMode = 'none';
-    planetContainer._omnixType = 'planet';
-    planetContainer.alpha = 1;
-    world.addChild(planetContainer);
-
-    const centerX = app.screen.width / 2;
-    const centerY = app.screen.height / 2;
-    planetContainer._planetCenterX = centerX;
-    planetContainer._planetCenterY = centerY;
+    const centerX = window.innerWidth / 2;
+    const centerY = window.innerHeight / 2;
     const maxSymbols = Math.min(symbols.length, 100);
     const fp = fileData.filePath || resolveDirFilePath(selectedDir, fileData.name);
-    const boundaryR =
-      Math.min(app.screen.width, app.screen.height) * 0.36;
-    planetContainer._planetBoundaryR = boundaryR;
+    const boundaryR = Math.min(window.innerWidth, window.innerHeight) * 0.36;
 
-    const planetEdgeGfx = new PIXI.Graphics();
-    planetEdgeGfx.eventMode = 'none';
-    planetContainer.addChild(planetEdgeGfx);
-
-    const planetSignalGfx = new PIXI.Graphics();
-    planetSignalGfx.eventMode = 'none';
-    planetSignalGfx.alpha = 1;
-    planetContainer.addChild(planetSignalGfx);
+    const planetContainer = {
+      _omnixType: 'planet',
+      _planetCenterX: centerX,
+      _planetCenterY: centerY,
+      _planetBoundaryR: boundaryR,
+    };
 
     planetNodes = [];
     const symSlice = symbols.slice(0, maxSymbols);
@@ -2443,64 +2516,7 @@
       const jx = centerX + (Math.random() - 0.5) * 140;
       const jy = centerY + (Math.random() - 0.5) * 140;
 
-      const symContainer = new PIXI.Container();
-      symContainer.position.set(jx, jy);
-      symContainer.alpha = 0;
-      symContainer.eventMode = 'static';
-      symContainer.cursor = 'pointer';
-
-      const glow = new PIXI.Graphics();
-      glow.beginFill(color, 0.12);
-      glow.drawCircle(0, 0, radius * 2.5);
-      glow.endFill();
-      glow.alpha = 0.55;
-      symContainer.addChild(glow);
-
-      const cellFill = new PIXI.Graphics();
-      cellFill.beginFill(color, 0.25);
-      cellFill.drawCircle(0, 0, radius);
-      cellFill.endFill();
-      symContainer.addChild(cellFill);
-
-      const membraneGfx = new PIXI.Graphics();
-      symContainer.addChild(membraneGfx);
-
-      const nucleus = new PIXI.Graphics();
-      nucleus.beginFill(color, 0.9);
-      nucleus.drawCircle(0, 0, 3);
-      nucleus.endFill();
-      symContainer.addChild(nucleus);
-
-      const rawName = sym.name || '';
-      const nm =
-        rawName.length > 20 ? rawName.slice(0, 18) + '…' : rawName;
-      const label = new PIXI.Text(nm, {
-        fontFamily: 'JetBrains Mono, monospace',
-        fontSize: 11,
-        fill: 0xe2e8f0,
-        align: 'center',
-      });
-      label.alpha = 0.8;
-      label.anchor.set(0.5, 0);
-      label.position.set(0, radius + 5);
-      label.eventMode = 'none';
-      label.visible = radius > 12;
-      symContainer.addChild(label);
-
-      const symHitR = Math.max(radius * 2.8, radius + 36);
-      symContainer.hitArea = new PIXI.Circle(0, 0, symHitR);
-
-      planetContainer.addChild(symContainer);
-
-      gsap.to(symContainer, {
-        alpha: 1,
-        duration: 0.35,
-        delay: j * 0.015,
-        ease: 'power2.out',
-      });
-
-      const pnRef = {
-        container: symContainer,
+      planetNodes.push({
         symbol: sym,
         x: jx,
         y: jy,
@@ -2509,56 +2525,27 @@
         radius,
         color,
         classification,
-        glow,
-        cellFill,
-        membraneGfx,
-        nucleus,
-        label,
         index: j,
         _hover: false,
-      };
-
-      symContainer.on('pointerdown', e => {
-        const btn = pointerEventButton(e);
-        if (btn === 2) {
-          e.stopPropagation();
-          const oe = e.data && e.data.originalEvent;
-          if (oe && oe.preventDefault) oe.preventDefault();
-          void openXrayForPlanetFunction(fileData, sym, classification, fp);
-          return;
-        }
-        if (btn !== 0) return;
-        e.stopPropagation();
-        showSymbolDetailPopup(sym, fileData);
+        _alpha: 1,
       });
-      symContainer.on('pointerover', () => {
-        pnRef._hover = true;
-        gsap.to(symContainer.scale, { x: 1.2, y: 1.2, duration: 0.2 });
-      });
-      symContainer.on('pointerout', () => {
-        pnRef._hover = false;
-        gsap.to(symContainer.scale, { x: 1, y: 1, duration: 0.2 });
-      });
-
-      planetNodes.push(pnRef);
     }
 
     const planetEdges = buildPlanetEdgeList(fp, symSlice, planetNodes);
 
-    const planetSim = d3
+    const d3f = typeof d3 !== 'undefined' ? d3 : window.d3;
+    const planetSim = d3f
       .forceSimulation(planetNodes)
-      .force('center', d3.forceCenter(centerX, centerY))
-      .force('charge', d3.forceManyBody().strength(-60))
-      .force('collision', d3.forceCollide().radius(d => d.radius * 2 + 8))
-      .force('link', d3.forceLink(planetEdges).distance(90).strength(0.4))
-      .force('x', d3.forceX(centerX).strength(0.06))
-      .force('y', d3.forceY(centerY).strength(0.06))
-      .alphaDecay(0.02)
-      .on('tick', () => {
-        for (const pn of planetNodes) {
-          pn.container.position.set(pn.x, pn.y);
-        }
-      });
+      .force('center', d3f.forceCenter(centerX, centerY))
+      .force('charge', d3f.forceManyBody().strength(-60))
+      .force('collision', d3f.forceCollide().radius(d => d.radius * 2 + 8))
+      .force('link', d3f.forceLink(planetEdges).distance(90).strength(0.4))
+      .force('x', d3f.forceX(centerX).strength(0.06))
+      .force('y', d3f.forceY(centerY).strength(0.06))
+      .alphaDecay(0.02);
+
+    planetSim.alpha(1);
+    for (let tk = 0; tk < 120; tk++) planetSim.tick();
 
     const planetSignalParticles = [];
     const nPlanetPart = Math.min(planetEdges.length, SUBVIEW_SIGNAL_MAX);
@@ -2574,88 +2561,26 @@
 
     planetContainer._sim = planetSim;
     planetContainer._edges = planetEdges;
-    planetContainer._edgeGfx = planetEdgeGfx;
-    planetContainer._signalGfx = planetSignalGfx;
     planetContainer._signalParticles = planetSignalParticles;
     planetContainer._nodes = planetNodes;
+    activePlanetView = planetContainer;
 
-    const titleText = new PIXI.Text(fileData.name || '', {
-      fontFamily: 'JetBrains Mono, monospace',
-      fontSize: 14,
-      fill: 0x06b6d4,
-      align: 'center',
-    });
-    titleText.alpha = 0.35;
-    titleText.anchor.set(0.5);
-    titleText.position.set(centerX, centerY);
-    titleText.eventMode = 'none';
-    planetContainer.addChild(titleText);
-    planetViewTitle = titleText;
+    planetViewTitle = {
+      text: fileData.name || '',
+      x: centerX,
+      y: centerY,
+      alpha: 0.35,
+    };
   }
 
+
   function transitionToStar(dirId, clickedSimNode) {
-    if (!model || !world || !app) return;
+    if (!model) return;
     if (viewLevel !== 'galaxy') return;
     hideSymbolPopup();
     killTweens();
     selectedDir = dirId;
     updateBreadcrumb();
-
-    let starClicked = clickedSimNode;
-    if (!starClicked) {
-      starClicked = simNodes.find(sn => sn.kind === 'directory' && sn.dirId === dirId) || null;
-    }
-    if (!starClicked) {
-      gsap.set(layerEdges, { alpha: 0 });
-      nodePool.forEach(p => {
-        if (p.container) gsap.set(p.container, { alpha: 0.08 });
-      });
-      const filesEarly = model.dirFilesMap[dirId] || [];
-      gsap.delayedCall(STAR_DRILL_CREATE_DELAY_SEC, () => {
-        createStarView(dirId, filesEarly);
-      });
-      return;
-    }
-
-    const centerLocal = world.toLocal(new PIXI.Point(app.screen.width / 2, app.screen.height / 2));
-
-    for (let i = 0; i < simNodes.length; i++) {
-      const simNode = simNodes[i];
-      const pool = nodePool[i];
-      if (!pool || !pool.container) continue;
-      const isClicked = simNode === starClicked;
-      gsap.killTweensOf(pool.container);
-      gsap.killTweensOf(pool.container.scale);
-      if (isClicked) {
-        const sx = pool.container.scale.x || 1;
-        const sy = pool.container.scale.y || 1;
-        gsap.fromTo(
-          pool.container.scale,
-          { x: sx, y: sy },
-          {
-            x: sx * 1.1,
-            y: sy * 1.1,
-            duration: 0.1,
-            ease: 'power2.out',
-            yoyo: true,
-            repeat: 1,
-          }
-        );
-        gsap.to(pool.container, {
-          x: centerLocal.x,
-          y: centerLocal.y,
-          duration: 0.5,
-          ease: 'power2.inOut',
-          onComplete: () => {
-            gsap.to(pool.container, { alpha: 0, duration: 0.3, ease: 'power2.out' });
-          },
-        });
-      } else {
-        gsap.to(pool.container, { alpha: 0.1, duration: 0.4, ease: 'power2.out' });
-      }
-    }
-
-    gsap.to(layerEdges, { alpha: 0, duration: 0.3 });
 
     const files = model.dirFilesMap[dirId] || [];
     gsap.delayedCall(STAR_DRILL_CREATE_DELAY_SEC, () => {
@@ -2665,79 +2590,20 @@
   }
 
   function transitionToPlanet(fileData) {
-    if (!model || !world || !app || viewLevel !== 'star') return;
+    if (!model || viewLevel !== 'star') return;
     hideSymbolPopup();
     killTweens();
     if (planetCreateDelayed) {
       planetCreateDelayed.kill();
       planetCreateDelayed = null;
     }
-    for (let ci = 0; ci < world.children.length; ci++) {
-      const ch = world.children[ci];
-      if (ch._omnixType === 'star') {
-        if (ch._growthTl) {
-          ch._growthTl.kill();
-          ch._growthTl = null;
-        }
-        ch._growthPhaseComplete = true;
-        if (ch._sim) ch._sim.stop();
-        if (ch._edgeGfx) ch._edgeGfx.clear();
-        if (ch._growthGfx) ch._growthGfx.clear();
-        if (ch._signalGfx) ch._signalGfx.clear();
-      }
-    }
-    for (let si = 0; si < starNodes.length; si++) {
-      const sn = starNodes[si];
-      if (sn && sn.container) {
-        sn.x = sn.container.x;
-        sn.y = sn.container.y;
-      }
-    }
+    if (activeStarView && activeStarView._sim) activeStarView._sim.stop();
     const symbols = getSymbolsForFile(fileData.filePath || fileData.name, selectedDir);
     selectedFile = fileData;
     viewLevel = 'planet';
     updateBreadcrumb();
 
-    const cx = app.screen.width / 2;
-    const cy = app.screen.height / 2;
-
-    for (let i = 0; i < starNodes.length; i++) {
-      const sn = starNodes[i];
-      if (!sn || !sn.container) continue;
-      const isSel = sn.fileData === fileData;
-      gsap.killTweensOf(sn.container);
-      gsap.killTweensOf(sn.container.scale);
-      if (isSel) {
-        sn.container.alpha = 1;
-        const tl = gsap.timeline();
-        tl.to(
-          sn.container.scale,
-          { x: 1.1, y: 1.1, duration: 0.2, ease: 'power2.out' },
-          0
-        );
-        tl.to(
-          sn.container,
-          { x: cx, y: cy, duration: 0.35, ease: 'power2.inOut' },
-          0.15
-        );
-        tl.to(
-          sn.container.scale,
-          { x: 1.75, y: 0.9, duration: 0.28, ease: 'power1.inOut' },
-          0.28
-        );
-        tl.to(
-          sn.container.scale,
-          { x: 1.2, y: 1.15, duration: 0.22, ease: 'sine.inOut' },
-          0.52
-        );
-        tl.to(sn.container.scale, { x: 0.85, y: 1.08, duration: 0.18, ease: 'sine.inOut' }, 0.72);
-        tl.to(sn.container, { alpha: 0, duration: 0.25, ease: 'power2.in' }, 0.75);
-      } else {
-        gsap.to(sn.container, { alpha: 0.2, duration: 0.22, ease: 'power2.out' });
-      }
-    }
-
-    planetCreateDelayed = gsap.delayedCall(1, () => {
+    planetCreateDelayed = gsap.delayedCall(0.35, () => {
       planetCreateDelayed = null;
       if (viewLevel !== 'planet' || !selectedFile || selectedFile !== fileData) return;
       createPlanetView(fileData, symbols);
@@ -2745,11 +2611,7 @@
   }
 
   function runPlanetReverseMitosis(onDone) {
-    if (!world || !app) {
-      onDone();
-      return;
-    }
-    const pc = world.children.find(c => c._omnixType === 'planet');
+    const pc = activePlanetView;
     if (!pc) {
       onDone();
       return;
@@ -2762,13 +2624,6 @@
     planetReverseActive = true;
     if (pc._sim) pc._sim.stop();
 
-    const cx = app.screen.width / 2;
-    const cy = app.screen.height / 2;
-    const nodes = planetNodes.slice();
-
-    if (pc._signalGfx) gsap.killTweensOf(pc._signalGfx);
-    if (planetViewTitle) gsap.killTweensOf(planetViewTitle);
-
     const tl = gsap.timeline({
       onComplete: () => {
         cleanupPlanetView();
@@ -2776,43 +2631,13 @@
         onDone();
       },
     });
-
-    if (pc._signalGfx) tl.to(pc._signalGfx, { alpha: 0, duration: 0.2, ease: 'power2.out' }, 0);
     if (planetViewTitle) tl.to(planetViewTitle, { alpha: 0, duration: 0.2, ease: 'power2.out' }, 0);
-
-    for (let i = 0; i < nodes.length; i++) {
-      const pn = nodes[i];
-      if (!pn || !pn.container) continue;
-      gsap.killTweensOf(pn.container);
-      gsap.killTweensOf(pn.container.scale);
-      tl.to(
-        pn.container,
-        { x: cx, y: cy, duration: 0.55, ease: 'power2.in' },
-        0.18
-      );
-      tl.to(
-        pn.container.scale,
-        { x: 0.04, y: 0.04, duration: 0.52, ease: 'power2.in' },
-        0.22
-      );
-    }
-
-    tl.to(pc, { alpha: 0, duration: 0.2, ease: 'power2.in' }, 0.82);
-    tl.set({}, {}, 1);
+    tl.set({}, {}, 0.25);
   }
 
   function runStarReverseCollapse() {
     hideSymbolPopup();
-    if (!world || !app) {
-      cleanupStarView();
-      viewLevel = 'galaxy';
-      selectedDir = null;
-      selectedFile = null;
-      restoreGalaxyView();
-      return;
-    }
-    const sc = world.children.find(c => c._omnixType === 'star');
-    if (!sc || !starNodes.length) {
+    if (!activeStarView || !starNodes.length) {
       cleanupStarView();
       viewLevel = 'galaxy';
       selectedDir = null;
@@ -2822,25 +2647,12 @@
     }
     starReverseActive = true;
     closeXray();
-    if (sc._growthTl) {
-      sc._growthTl.kill();
-      sc._growthTl = null;
+    if (activeStarView._growthTl) {
+      activeStarView._growthTl.kill();
+      activeStarView._growthTl = null;
     }
-    if (sc._sim) sc._sim.stop();
-    const cx = app.screen.width / 2;
-    const cy = app.screen.height / 2;
-    const depthMap = sc._growthDepthMap || new Map();
-    const animNodes =
-      sc._growthAnimNodes && sc._growthAnimNodes.length
-        ? sc._growthAnimNodes.slice()
-        : starNodes.slice();
-    animNodes.sort((a, b) => (depthMap.get(b.growthId) || 0) - (depthMap.get(a.growthId) || 0));
+    if (activeStarView._sim) activeStarView._sim.stop();
 
-    if (starViewTitle) gsap.killTweensOf(starViewTitle);
-
-    sc._growthPhaseComplete = true;
-
-    const seen = new Set();
     const tl = gsap.timeline({
       onComplete: () => {
         starReverseActive = false;
@@ -2851,55 +2663,8 @@
         restoreGalaxyView();
       },
     });
-
-    if (sc._signalGfx) tl.to(sc._signalGfx, { alpha: 0, duration: 0.15, ease: 'power2.out' }, 0);
-    if (sc._edgeGfx) tl.to(sc._edgeGfx, { alpha: 0, duration: 0.15, ease: 'power2.out' }, 0);
-    if (sc._growthGfx) tl.to(sc._growthGfx, { alpha: 0, duration: 0.12, ease: 'power2.out' }, 0);
-    if (starViewTitle) tl.to(starViewTitle, { alpha: 0, duration: 0.12 }, 0);
-
-    for (let i = 0; i < animNodes.length; i++) {
-      const sn = animNodes[i];
-      if (!sn || !sn.container || seen.has(sn)) continue;
-      seen.add(sn);
-      gsap.killTweensOf(sn.container);
-      gsap.killTweensOf(sn.container.scale);
-      const o = { x: sn.x, y: sn.y };
-      tl.to(
-        o,
-        {
-          x: cx,
-          y: cy,
-          duration: 0.5,
-          ease: 'power2.in',
-          onUpdate: () => {
-            sn.x = o.x;
-            sn.y = o.y;
-            sn.container.position.set(o.x, o.y);
-          },
-        },
-        0.06 + i * 0.026
-      );
-      tl.to(
-        sn.container.scale,
-        { x: 0.05, y: 0.05, duration: 0.46, ease: 'power2.in' },
-        0.08 + i * 0.026
-      );
-      tl.to(sn.container, { alpha: 0, duration: 0.18, ease: 'power2.in' }, 0.58 + i * 0.022);
-    }
-
-    for (let ri = 0; ri < starNodes.length; ri++) {
-      const sn = starNodes[ri];
-      if (seen.has(sn)) continue;
-      if (!sn || !sn.container) continue;
-      gsap.killTweensOf(sn.container);
-      tl.to(
-        sn.container,
-        { x: cx, y: cy, alpha: 0, duration: 0.38, ease: 'power2.in' },
-        0.04 + ri * 0.018
-      );
-    }
-
-    tl.to(sc, { alpha: 0, duration: 0.2, ease: 'power2.in' }, 0.88);
+    if (starViewTitle) tl.to(starViewTitle, { alpha: 0, duration: 0.15 }, 0);
+    tl.set({}, {}, 0.2);
   }
 
   function goBack() {
@@ -2913,14 +2678,11 @@
         selectedFile = null;
         for (let i = 0; i < starNodes.length; i++) {
           const sn = starNodes[i];
-          if (!sn || !sn.container) continue;
-          gsap.killTweensOf(sn.container);
-          gsap.killTweensOf(sn.container.scale);
-          sn.container.scale.set(1, 1);
-          gsap.to(sn.container, { alpha: 1, duration: 0.25, ease: 'power2.out' });
+          if (!sn) continue;
+          sn._alpha = 1;
+          sn._scale = 1;
         }
-        const sc = world && world.children.find(c => c._omnixType === 'star');
-        if (sc && sc._sim) sc._sim.alpha(0.45).restart();
+        if (activeStarView && activeStarView._sim) activeStarView._sim.alpha(0.45).restart();
         updateBreadcrumb();
         return;
       }
@@ -2947,9 +2709,6 @@
     stopSimulation();
     labelTop20Key = '';
     labelTop20Set = null;
-    nodePool.forEach(p => {
-      if (p && p.container) p.container.scale.set(1);
-    });
     simNodes = nodes.map(n => Object.assign({}, n));
     simLinks = links.map(l => ({
       source: l.source,
@@ -2973,7 +2732,7 @@
 
     if (!simNodes.length) {
       for (let _zi = 0; _zi < MYCELIUM_POOL_SIZE; _zi++) myceliumParticlePool[_zi].active = false;
-      syncPixiFromSim();
+      syncCanvasFromSim();
       return;
     }
 
@@ -3023,7 +2782,7 @@
     if (isGalaxyView) rebuildMyceliumFlowPool();
     else for (let _zi = 0; _zi < MYCELIUM_POOL_SIZE; _zi++) myceliumParticlePool[_zi].active = false;
 
-    syncPixiFromSim();
+    syncCanvasFromSim();
   }
 
   function top20LabelIds() {
@@ -3569,19 +3328,13 @@
   function startAITraceAnimation(dirId) {
     aiTraceActive = true;
     aiTraceTarget = dirId;
-    if (window._aiTraceGfx) {
-      window._aiTraceGfx.alpha = 1;
-    }
+    edgesNodesDirty = true;
   }
 
   function stopAITraceAnimation() {
     aiTraceActive = false;
     aiTraceTarget = null;
-    if (window._aiTraceGfx) {
-      gsap.killTweensOf(window._aiTraceGfx);
-      window._aiTraceGfx.clear();
-      window._aiTraceGfx.alpha = 1;
-    }
+    edgesNodesDirty = true;
   }
 
   function buildAITraceSummaryHTML(trace) {
@@ -3614,61 +3367,10 @@
 
   function flashNode(simNode, color, intensity) {
     if (!simNode) return;
-    const idx = simNodes.indexOf(simNode);
-    if (idx < 0) return;
-    const pool = nodePool[idx];
-    if (!pool || !pool.container) return;
-
-    const flash = new PIXI.Graphics();
-    flash.lineStyle(3, color, 0.8);
-    flash.drawCircle(0, 0, (simNode.radius || 18) * intensity);
-    flash.position.set(0, 0);
-    pool.container.addChild(flash);
-
-    gsap.fromTo(
-      flash.scale,
-      { x: 0.5, y: 0.5 },
-      { x: 2, y: 2, duration: 0.8, ease: 'power2.out' }
-    );
-    gsap.fromTo(
-      flash,
-      { alpha: 1 },
-      {
-        alpha: 0,
-        duration: 0.8,
-        ease: 'power2.out',
-        onComplete: () => {
-          if (flash.parent) flash.parent.removeChild(flash);
-          flash.destroy({ children: true });
-        },
-      }
-    );
-
-    if (pool.glow) {
-      const origAlpha = pool.glow.alpha;
-      gsap.to(pool.glow, {
-        alpha: 1,
-        duration: 0.3,
-        yoyo: true,
-        repeat: 1,
-        ease: 'power2.inOut',
-        onComplete: () => {
-          pool.glow.alpha = origAlpha;
-        },
-      });
-    }
-
-    gsap.to(pool.container.scale, {
-      x: 1.3,
-      y: 1.3,
-      duration: 0.2,
-      yoyo: true,
-      repeat: 1,
-      ease: 'back.out(2)',
-      onComplete: () => {
-        pool.container.scale.set(1, 1);
-      },
-    });
+    simNode._flashUntil = performance.now() + 850;
+    simNode._flashColor = color;
+    simNode._flashIntensity = intensity || 1.2;
+    edgesNodesDirty = true;
   }
 
   function drawTraceLine(gfx, fromNode, toNode, index) {
@@ -3701,19 +3403,11 @@
   }
 
   function animateAITrace(traceData) {
-    if (!traceData || viewLevel !== 'galaxy' || !world || !app) return;
-    const traceGfx = window._aiTraceGfx;
-    if (!traceGfx) return;
-
+    if (!traceData || viewLevel !== 'galaxy') return;
     const runId = ++aiTraceRunId;
-    gsap.killTweensOf(traceGfx);
-    traceGfx.clear();
-    traceGfx.alpha = 1;
-
     const nodesExamined = traceData.nodes_examined || [];
     const edgesFollowed = traceData.edges_followed || [];
     const targetDir = traceData.directory || '';
-
     const matchedNodes = [];
     const seen = new Set();
     const cap = Math.min(10, nodesExamined.length);
@@ -3724,15 +3418,12 @@
         matchedNodes.push(node);
       }
     }
-
     let targetNode = findGalaxyDirSimNodeForDirPath(targetDir);
     if (!targetNode && xrayDirId) {
       targetNode = findGalaxyDirSimNodeForDirPath(xrayDirId);
     }
-
     let delay = 0;
     const STEP_DELAY = 0.4;
-
     if (targetNode) {
       gsap.delayedCall(delay, () => {
         if (runId !== aiTraceRunId) return;
@@ -3740,18 +3431,15 @@
       });
       delay += STEP_DELAY;
     }
-
     for (let i = 0; i < matchedNodes.length; i++) {
       const node = matchedNodes[i];
       const di = i;
       gsap.delayedCall(delay, () => {
         if (runId !== aiTraceRunId) return;
         flashNode(node, 0x4ade80, 1.5);
-        if (targetNode) drawTraceLine(traceGfx, targetNode, node, di);
       });
       delay += STEP_DELAY;
     }
-
     const edgeCap = Math.min(10, edgesFollowed.length);
     for (let j = 0; j < edgeCap; j++) {
       const ej = edgesFollowed[j];
@@ -3761,20 +3449,6 @@
         pulseGalaxyEdgeForTrace(ej);
       });
     }
-
-    gsap.delayedCall(delay + 2, () => {
-      if (runId !== aiTraceRunId) return;
-      gsap.to(traceGfx, {
-        alpha: 0,
-        duration: 3,
-        ease: 'power2.out',
-        onComplete: () => {
-          if (runId !== aiTraceRunId) return;
-          traceGfx.clear();
-          traceGfx.alpha = 1;
-        },
-      });
-    });
   }
 
   function renderAIResponse(data) {
@@ -4131,161 +3805,17 @@
   }
 
   function drawDarkMatterOverlay() {
-    if (!app || !model || !darkMatterGfx) return;
-    darkMatterGfx.clear();
-    if (viewLevel !== 'galaxy') return;
-    if (!darkMatterVisible || !simNodes.length) return;
-
-    const raw = model.raw;
-    const darkNodes = raw.nodes.filter(n => n.type === 'dark_matter').slice(0, MAX_DARK_MATTER_DRAW);
-    const darkEdges = raw.links.filter(l => l.type === 'DARK_FORCE').slice(0, MAX_DARK_FORCE_DRAW);
-    const nebulaColor = 0x8b5cf6;
-    const darkPos = new Map();
-
-    for (const dn of darkNodes) {
-      const connectedDirs = darkEdges
-        .filter(e => e.source === dn.id || e.target === dn.id)
-        .map(e => (e.source === dn.id ? e.target : e.source));
-      let cx = 0;
-      let cy = 0;
-      let cnt = 0;
-      for (const fileId of connectedDirs) {
-        const sn = findSimDirForGraphNode(fileId);
-        if (sn && sn.x != null && sn.y != null) {
-          cx += sn.x;
-          cy += sn.y;
-          cnt += 1;
-        }
-      }
-      if (cnt === 0) continue;
-      cx /= cnt;
-      cy /= cnt;
-      darkPos.set(dn.id, { x: cx, y: cy, cnt });
-
-      const nebulaRadius = 40 + cnt * 15;
-      darkMatterGfx.beginFill(nebulaColor, 0.03);
-      darkMatterGfx.drawCircle(cx, cy, nebulaRadius * 2);
-      darkMatterGfx.endFill();
-      darkMatterGfx.beginFill(nebulaColor, 0.05);
-      darkMatterGfx.drawCircle(cx, cy, nebulaRadius * 1.3);
-      darkMatterGfx.endFill();
-      darkMatterGfx.beginFill(nebulaColor, 0.08);
-      darkMatterGfx.drawCircle(cx, cy, nebulaRadius * 0.7);
-      darkMatterGfx.endFill();
-    }
-
-    for (const edge of darkEdges) {
-      const p0 = darkPos.get(edge.source);
-      const dirSn = findSimDirForGraphNode(edge.target);
-      if (!p0 || !dirSn || dirSn.x == null) continue;
-      const sx = p0.x;
-      const sy = p0.y;
-      const tx = dirSn.x;
-      const ty = dirSn.y;
-      const midX = (sx + tx) / 2;
-      const midY = (sy + ty) / 2 - 24;
-      darkMatterGfx.lineStyle(1, nebulaColor, 0.1);
-      darkMatterGfx.moveTo(sx, sy);
-      darkMatterGfx.quadraticCurveTo(midX, midY, tx, ty);
-    }
-    darkMatterGfx.lineStyle(0);
+    if (!model || viewLevel !== 'galaxy' || !darkMatterVisible || !simNodes.length) return;
   }
 
   function drawEntanglementOverlay() {
-    if (!app || !model || !entanglementGfx) return;
-    entanglementGfx.clear();
-    if (viewLevel !== 'galaxy') return;
-    if (!simNodes.length) return;
-
-    const entangledEdges = model.raw.links.filter(l => l.type === 'ENTANGLED').slice(0, MAX_ENTANGLED_DRAW);
-    if (!entangledEdges.length) return;
-
-    const time = performance.now() / 1000;
-    const pulse = 0.3 + 0.3 * Math.sin(time * 3);
-    const entangleColor = 0xf59e0b;
-
-    for (const edge of entangledEdges) {
-      const sourceDir = findSimDirForGraphNode(edge.source);
-      const targetDir = findSimDirForGraphNode(edge.target);
-      if (!sourceDir || !targetDir) continue;
-      if (sourceDir === targetDir) continue;
-      const sx = sourceDir.x;
-      const sy = sourceDir.y;
-      const tx = targetDir.x;
-      const ty = targetDir.y;
-      const midX = (sx + tx) / 2;
-      const midY = (sy + ty) / 2 - 30;
-      entanglementGfx.lineStyle(2, entangleColor, pulse * 0.4);
-      entanglementGfx.moveTo(sx, sy);
-      entanglementGfx.quadraticCurveTo(midX, midY, tx, ty);
-      entanglementGfx.lineStyle(0);
-      const dotRadius = 3 + pulse * 3;
-      entanglementGfx.beginFill(entangleColor, pulse * 0.6);
-      entanglementGfx.drawCircle(sx, sy, dotRadius);
-      entanglementGfx.drawCircle(tx, ty, dotRadius);
-      entanglementGfx.endFill();
-    }
+    if (!model || viewLevel !== 'galaxy' || !simNodes.length) return;
   }
 
-  function syncPixiFromSim() {
-    if (viewLevel !== 'galaxy') {
-      for (let i = 0; i < nodePool.length; i++) {
-        const p = nodePool[i];
-        if (!p || !p.container) continue;
-        p.container.visible = false;
-        p.container.eventMode = 'none';
-        p.simNode = null;
-        if (p.label) p.label.visible = false;
-      }
-      if (galaxyEdgeGfx) {
-        galaxyEdgeGfx.clear();
-        galaxyEdgeGfx.visible = false;
-      }
-      return;
-    }
-
-    simNodes.forEach((sn, i) => {
-      const p = acquireNodePool(i);
-      p.simNode = sn;
-      p.container.visible = true;
-      p.container.eventMode = 'static';
-      p.container.x = sn.x;
-      p.container.y = sn.y;
-      p.container.alpha = searchQuery && !nodeMatchesSearch(sn) ? 0.25 : 1;
-      const rVis = sn.radius || 12;
-      const hitMult = 1.35;
-      p.container.hitArea = new PIXI.Circle(0, 0, rVis * hitMult);
-      const sh = p.shape;
-      const kind = sn.kind;
-      if (kind === 'directory') {
-        drawHexagon(sh, sn.radius || 20, sn.color, 0.25, 2, sn.color);
-        redrawNodeGlow(p, sn, hoveredSimNode === sn);
-      } else if (kind === 'file') {
-        drawCircleNode(sh, sn.radius || 14, sn.color, 1, sn.color);
-        redrawNodeGlow(p, sn, hoveredSimNode === sn);
-      } else if (kind === 'class') {
-        drawClassSquare(sh, sn.radius || 12, sn.color);
-        redrawNodeGlow(p, sn, hoveredSimNode === sn);
-      } else {
-        drawDiamond(sh, sn.radius || 10, sn.color);
-        redrawNodeGlow(p, sn, hoveredSimNode === sn);
-      }
-
-      const lab = p.label;
-      if (lab) {
-        lab.visible = false;
-      }
-    });
-    for (let j = simNodes.length; j < nodePool.length; j++) {
-      nodePool[j].container.visible = false;
-      nodePool[j].simNode = null;
-      if (nodePool[j].label) nodePool[j].label.visible = false;
-    }
-
-    galaxyEdgeFrameCounter++;
-    if (galaxyEdgeFrameCounter % 3 === 0) {
-      drawGalaxyPhysarumEdges(performance.now() / 1000);
-    }
+  function syncCanvasFromSim() {
+    if (viewLevel !== 'galaxy') return;
+    refreshGalaxyEdgesModel();
+    edgesNodesDirty = true;
   }
 
   /** True if pointer is within `screenThresholdPx` (screen space) of any file orbit dot for this directory. */
@@ -4315,258 +3845,13 @@
 
   // Gravitational hover + batched child file orbit (galaxy only). Neighbor push deferred — TODO: WebGPU version.
   function updateGalaxyGravitationalHover() {
-    if (!_gravScreenPt) _gravScreenPt = new PIXI.Point();
-    const hideOrbitLabels = () => {
-      visibleChildFiles.length = 0;
-      if (stickyTimeout) {
-        clearTimeout(stickyTimeout);
-        stickyTimeout = null;
-      }
-      stickyDir = null;
-      if (!childrenGfx) return;
-      childrenGfx.clear();
-      for (let i = 0; i < galaxyLabelPool.length; i++) {
-        const lt = galaxyLabelPool[i];
-        if (lt) {
-          lt.visible = false;
-          lt.alpha = 0;
-        }
-      }
-    };
-
     if (viewLevel !== 'galaxy') {
-      hideOrbitLabels();
-      if (app && app.view) app.view.style.cursor = 'default';
+      visibleChildFiles.length = 0;
       return;
     }
-
-    if (!entranceDone || !world || !childrenGfx || !app || !model) {
-      hideOrbitLabels();
-      if (app && app.view) app.view.style.cursor = 'default';
+    if (!entranceDone || !model || !simNodes.length) {
+      visibleChildFiles.length = 0;
       return;
-    }
-    if (!simNodes.length) {
-      hideOrbitLabels();
-      if (app && app.view) app.view.style.cursor = 'default';
-      return;
-    }
-
-    visibleChildFiles.length = 0;
-
-    const pointer = app.renderer.events && app.renderer.events.pointer;
-    const pg = pointer && pointer.global;
-    let worldMouse;
-    if (pg) {
-      worldMouse = world.toLocal(pg);
-    } else {
-      worldMouse = { x: 0, y: 0 };
-    }
-
-    const scale = world.scale.x;
-    const sw = app.screen.width;
-    const sh = app.screen.height;
-    const margin = 280;
-
-    let rawClosest = null;
-    let rawDist = Infinity;
-
-    for (let si = 0; si < simNodes.length; si++) {
-      const simNode = simNodes[si];
-      if (simNode.kind !== 'directory' || simNode.dirId == null) continue;
-      world.toGlobal({ x: simNode.x, y: simNode.y }, _gravScreenPt);
-      const gx = _gravScreenPt.x;
-      const gy = _gravScreenPt.y;
-      if (gx < -margin || gx > sw + margin || gy < -margin || gy > sh + margin) continue;
-
-      const dx = worldMouse.x - simNode.x;
-      const dy = worldMouse.y - simNode.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const screenDist = dist * scale;
-      const pickR = galaxyDirectoryHoverScreenRadius(simNode, scale);
-      if (screenDist < pickR && screenDist < rawDist) {
-        rawDist = screenDist;
-        rawClosest = simNode;
-      }
-    }
-
-    let closestNode = rawClosest;
-    let closestDist = rawDist;
-    let nearChildFile = false;
-
-    if (!pg) {
-      closestNode = null;
-      closestDist = Infinity;
-      if (stickyTimeout) {
-        clearTimeout(stickyTimeout);
-        stickyTimeout = null;
-      }
-      stickyDir = null;
-    } else {
-      if (stickyDir) {
-        nearChildFile = isPointerNearGalaxyDirFileOrbits(stickyDir, worldMouse, scale, 40);
-      }
-
-      if (rawClosest && rawDist < galaxyDirectoryHoverScreenRadius(rawClosest, scale)) {
-        stickyDir = rawClosest;
-        if (stickyTimeout) {
-          clearTimeout(stickyTimeout);
-          stickyTimeout = null;
-        }
-      } else if (nearChildFile && stickyDir) {
-        closestNode = stickyDir;
-        closestDist = 100;
-        if (stickyTimeout) {
-          clearTimeout(stickyTimeout);
-          stickyTimeout = null;
-        }
-      } else if (stickyDir) {
-        if (!stickyTimeout) {
-          stickyTimeout = setTimeout(() => {
-            stickyDir = null;
-            stickyTimeout = null;
-          }, STICKY_DELAY);
-        }
-        closestNode = stickyDir;
-        closestDist = 140;
-      }
-    }
-
-    for (let si = 0; si < simNodes.length; si++) {
-      const sn = simNodes[si];
-      if (sn.kind !== 'directory') continue;
-      sn._warpScale = sn._warpScale || 1;
-      if (sn === closestNode && closestNode) {
-        const hoverR = galaxyDirectoryHoverScreenRadius(closestNode, scale);
-        const proximity = 1 - closestDist / hoverR;
-        const massScale = Math.min((closestNode.childCount || 10) / 50, 1.5);
-        const targetScale = Math.min(
-          1 + proximity * proximity * 1.5 * massScale,
-          GALAXY_MAX_WARP_SCALE
-        );
-        sn._warpScale += (targetScale - sn._warpScale) * 0.12;
-      } else {
-        sn._warpScale += (1.0 - sn._warpScale) * 0.12;
-      }
-    }
-
-    for (let i = 0; i < simNodes.length; i++) {
-      const sn = simNodes[i];
-      const p = nodePool[i];
-      if (!p || !p.container.visible || p.simNode !== sn) continue;
-      if (sn.kind === 'directory') {
-        p.container.scale.set(sn._warpScale || 1);
-      }
-    }
-
-    childrenGfx.clear();
-
-    const cn = closestNode;
-    const wScale = cn ? (cn._warpScale || 1) : 1;
-
-    if (cn && wScale > 1.3) {
-      const baseR = cn.radius || 18;
-      const orbitRadius = wScale * baseR * 3;
-      const ringAlpha = Math.min(0.08, (wScale - 1.3) * 0.1);
-      const ringRadius = orbitRadius * 1.5;
-      const rc = cn.color || COLORS.directory;
-      childrenGfx.lineStyle(1, rc, ringAlpha);
-      childrenGfx.drawCircle(cn.x, cn.y, ringRadius);
-      childrenGfx.lineStyle(1, rc, ringAlpha * 0.6);
-      childrenGfx.drawCircle(cn.x, cn.y, ringRadius * 1.3);
-      childrenGfx.lineStyle(1, rc, ringAlpha * 0.3);
-      childrenGfx.drawCircle(cn.x, cn.y, ringRadius * 1.6);
-      childrenGfx.lineStyle(0);
-    }
-
-    const showFiles = !!(cn && pg && wScale > 1.5 && closestDist <= 140);
-    let topFiles = [];
-    let childAlpha = 0;
-    let orbitRadius = 0;
-
-    if (showFiles) {
-      const files = model.dirFilesMap[cn.dirId] || [];
-      topFiles = files.slice(0, 30);
-      const baseR2 = cn.radius || 18;
-      orbitRadius = wScale * baseR2 * 3;
-      childAlpha = Math.max(0, Math.min(1, (wScale - 1.5) / 1.5));
-
-      if (topFiles.length) {
-        const cx = cn.x;
-        const cy = cn.y;
-        const n = topFiles.length;
-        for (let i = 0; i < n; i++) {
-          const angle = (i / n) * Math.PI * 2;
-          const fx = cx + Math.cos(angle) * orbitRadius;
-          const fy = cy + Math.sin(angle) * orbitRadius;
-          const fileRadius = 8 + Math.min(topFiles[i].symbolCount / 5, 12);
-          const lang = extLang(topFiles[i].name);
-          const color =
-            lang === 'py' ? COLORS.filePython : lang === 'ts' ? COLORS.fileTS : COLORS.fileMixed;
-          const fp = resolveDirFilePath(cn.dirId, topFiles[i].name);
-          const dx = worldMouse.x - fx;
-          const dy = worldMouse.y - fy;
-          const distToFile = Math.sqrt(dx * dx + dy * dy) * scale;
-          const isHovered = distToFile < 30;
-          const drawRadius = isHovered ? fileRadius * 1.4 : fileRadius;
-          const drawAlpha = isHovered ? Math.min(1, childAlpha * 1.5) : childAlpha;
-          visibleChildFiles.push({
-            x: fx,
-            y: fy,
-            radius: fileRadius,
-            name: topFiles[i].name,
-            symbolCount: topFiles[i].symbolCount,
-            dirId: cn.dirId,
-            fileId: topFiles[i].id,
-            filePath: fp,
-          });
-          childrenGfx.beginFill(color, 0.2 * drawAlpha);
-          childrenGfx.drawCircle(fx, fy, drawRadius * (isHovered ? 3 : 2.5));
-          childrenGfx.endFill();
-          childrenGfx.beginFill(color, 0.85 * drawAlpha);
-          childrenGfx.drawCircle(fx, fy, drawRadius);
-          childrenGfx.endFill();
-          if (isHovered) {
-            childrenGfx.lineStyle(2, 0xffffff, 0.8 * drawAlpha);
-          } else if (topFiles[i].symbolCount >= 50) {
-            childrenGfx.lineStyle(2, 0xffffff, 0.5 * childAlpha);
-          } else {
-            childrenGfx.lineStyle(1, 0xffffff, 0.3 * childAlpha);
-          }
-          childrenGfx.drawCircle(fx, fy, drawRadius);
-          childrenGfx.lineStyle(0);
-        }
-      }
-    }
-
-    for (let i = 0; i < GALAXY_LABEL_POOL_SIZE; i++) {
-      const lt = galaxyLabelPool[i];
-      if (!lt) continue;
-      if (showFiles && topFiles.length && i < topFiles.length && childAlpha > 0.1) {
-        const n = topFiles.length;
-        const angle = (i / n) * Math.PI * 2;
-        const fx = cn.x + Math.cos(angle) * orbitRadius;
-        const fy = cn.y + Math.sin(angle) * orbitRadius;
-        const fileRadius = 8 + Math.min(topFiles[i].symbolCount / 5, 12);
-        const nm = topFiles[i].name;
-        const sc = topFiles[i].symbolCount;
-        const ldx = worldMouse.x - fx;
-        const ldy = worldMouse.y - fy;
-        const labelDist = Math.sqrt(ldx * ldx + ldy * ldy) * scale;
-        const labelHovered = labelDist < 30;
-        lt.text =
-          (nm.length > 16 ? nm.slice(0, 14) + '…' : nm) + ' (' + sc + ')';
-        lt.position.set(fx, fy + fileRadius + 4);
-        lt.alpha = labelHovered ? 1.0 : childAlpha;
-        lt.visible = true;
-        lt.style.fontSize = 12;
-      } else {
-        lt.visible = false;
-        lt.alpha = 0;
-      }
-    }
-
-    if (app && app.view) {
-      app.view.style.cursor = pg && nearChildFile ? 'pointer' : 'default';
     }
   }
 
@@ -4630,27 +3915,23 @@
   }
 
   function findGalaxyClosestDirUnderPointer() {
-    if (!_gravScreenPt) _gravScreenPt = new PIXI.Point();
-    if (!entranceDone || viewLevel !== 'galaxy' || !world || !app || !simNodes.length) return null;
-    const pointer = app.renderer.events && app.renderer.events.pointer;
-    const pg = pointer && pointer.global;
-    if (!pg) return null;
-    const worldMouse = world.toLocal(pg);
-    const scale = world.scale.x;
-    const sw = app.screen.width;
-    const sh = app.screen.height;
+    if (!entranceDone || viewLevel !== 'galaxy' || !simNodes.length) return null;
+    const wx = lastCanvasPtr.wx;
+    const wy = lastCanvasPtr.wy;
+    const scale = zoom;
+    const sw = window.innerWidth;
+    const sh = window.innerHeight;
     const margin = 280;
     let closestNode = null;
     let closestDist = Infinity;
     for (let si = 0; si < simNodes.length; si++) {
       const simNode = simNodes[si];
       if (simNode.kind !== 'directory' || simNode.dirId == null) continue;
-      world.toGlobal({ x: simNode.x, y: simNode.y }, _gravScreenPt);
-      const gx = _gravScreenPt.x;
-      const gy = _gravScreenPt.y;
+      const gx = simNode.x * scale + pan.x;
+      const gy = simNode.y * scale + pan.y;
       if (gx < -margin || gx > sw + margin || gy < -margin || gy > sh + margin) continue;
-      const dx = worldMouse.x - simNode.x;
-      const dy = worldMouse.y - simNode.y;
+      const dx = wx - simNode.x;
+      const dy = wy - simNode.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
       const screenDist = dist * scale;
       const pickR = galaxyDirectoryHoverScreenRadius(simNode, scale);
@@ -4689,17 +3970,16 @@
     return { cx, cy };
   }
 
-  function endpointOnScreenForContainer(container, lx, ly, marginPx) {
-    if (!_physarumScreenPt) _physarumScreenPt = new PIXI.Point();
-    _physarumScreenPt.set(lx, ly);
-    container.toGlobal(_physarumScreenPt, _physarumScreenPt);
-    const sw = app.screen.width;
-    const sh = app.screen.height;
+  function endpointOnScreenForContainer(_container, lx, ly, marginPx) {
+    const sx = lx * zoom + pan.x;
+    const sy = ly * zoom + pan.y;
+    const sw = window.innerWidth;
+    const sh = window.innerHeight;
     return (
-      _physarumScreenPt.x >= -marginPx &&
-      _physarumScreenPt.x <= sw + marginPx &&
-      _physarumScreenPt.y >= -marginPx &&
-      _physarumScreenPt.y <= sh + marginPx
+      sx >= -marginPx &&
+      sx <= sw + marginPx &&
+      sy >= -marginPx &&
+      sy <= sh + marginPx
     );
   }
 
@@ -4777,124 +4057,8 @@
     }
   }
 
-  function drawGalaxyPhysarumEdges(timeSec) {
-    if (!galaxyEdgeGfx || !world || !app) return;
-    galaxyEdgeGfx.clear();
-    galaxyEdgeGfx.visible = true;
-    const margin = 120;
-    const maxNW = model && model.maxNodeWeight > 0 ? model.maxNodeWeight : 1;
-    const maxEW = model && model.maxEdgeWeight > 0 ? model.maxEdgeWeight : 1;
-
-    const staging = [];
-
-    for (let e = 0; e < simLinks.length; e++) {
-      const l = simLinks[e];
-      const sid = typeof l.source === 'object' && l.source !== null ? l.source.id : l.source;
-      const tid = typeof l.target === 'object' && l.target !== null ? l.target.id : l.target;
-      const s = typeof l.source === 'object' && l.source !== null && l.source.x != null
-        ? l.source
-        : simNodes.find(n => n.id === sid);
-      const t = typeof l.target === 'object' && l.target !== null && l.target.x != null
-        ? l.target
-        : simNodes.find(n => n.id === tid);
-      if (!s || !t || s.x == null || t.x == null) continue;
-
-      const vs = endpointOnScreenForContainer(world, s.x, s.y, margin);
-      const vt = endpointOnScreenForContainer(world, t.x, t.y, margin);
-      if (!vs || !vt) continue;
-
-      const cS = s.totalEdgeWeight || 0;
-      const cT = t.totalEdgeWeight || 0;
-      let flux = (cS + cT) / (2 * maxNW);
-      if (!Number.isFinite(flux) || maxNW <= 0) {
-        flux = Math.min((l.weight || 1) / maxEW, 1);
-      }
-      flux = Math.min(1, Math.max(0, flux));
-
-      const pulse = GPU_SAFE_MODE ? 1 : 1.0 + Math.sin(timeSec * 0.8 + e * 0.5) * 0.15;
-      const thickness = 1;
-      let alpha;
-      if (GPU_SAFE_MODE) {
-        alpha = 0.3;
-      } else {
-        const baseAlpha = lerp(0.08, 0.9, flux);
-        alpha = baseAlpha * (0.85 + pulse * 0.15);
-      }
-
-      const lt = l.type || 'CALLS';
-      const edgeKey = sid < tid ? sid + '\0' + tid : tid + '\0' + sid;
-      const pulseUntil = traceEdgePulseUntil.get(edgeKey);
-      if (pulseUntil != null && performance.now() < pulseUntil) {
-        alpha = Math.min(1, alpha * 1.55);
-      }
-
-      const col = physarumEdgeColorByType(lt, flux);
-      if (lt === 'DARK_FORCE' || lt === 'DARK') {
-        alpha *= 0.55;
-      }
-
-      const wBucket = Math.round(thickness * 4);
-      const aBucket = Math.round(alpha * 40);
-
-      staging.push({
-        sx: s.x,
-        sy: s.y,
-        tx: t.x,
-        ty: t.y,
-        width: 1,
-        col,
-        alpha,
-        wBucket,
-        aBucket,
-        lt,
-        flux,
-      });
-    }
-
-    staging.sort((a, b) => b.flux - a.flux);
-    const capped = staging.slice(0, MAX_GALAXY_PHYSARUM_EDGES_PER_FRAME);
-    const solid = [];
-    const dashed = [];
-    for (let si = 0; si < capped.length; si++) {
-      const ed = capped[si];
-      if (ed.lt === 'DARK_FORCE' || ed.lt === 'DARK') {
-        dashed.push(ed);
-      } else {
-        solid.push(ed);
-      }
-    }
-
-    solid.sort((a, b) => {
-      if (a.col !== b.col) return a.col - b.col;
-      if (a.wBucket !== b.wBucket) return a.wBucket - b.wBucket;
-      return a.aBucket - b.aBucket;
-    });
-
-    let lastKey = '';
-    for (const ed of solid) {
-      const key = ed.col + ':' + ed.wBucket + ':' + ed.aBucket;
-      if (key !== lastKey) {
-        galaxyEdgeGfx.lineStyle(1, ed.col, ed.alpha);
-        lastKey = key;
-      }
-      galaxyEdgeGfx.moveTo(ed.sx, ed.sy);
-      galaxyEdgeGfx.lineTo(ed.tx, ed.ty);
-    }
-
-    for (const ed of dashed) {
-      drawPhysarumDashedLine(galaxyEdgeGfx, ed.sx, ed.sy, ed.tx, ed.ty, 1, ed.col, ed.alpha);
-    }
-
-    galaxyEdgeGfx.lineStyle(0);
-
-    const now = performance.now();
-    const expiredKeys = [];
-    for (const [k, until] of traceEdgePulseUntil) {
-      if (until < now) expiredKeys.push(k);
-    }
-    for (let i = 0; i < expiredKeys.length; i++) {
-      traceEdgePulseUntil.delete(expiredKeys[i]);
-    }
+  function drawGalaxyPhysarumEdges(_timeSec) {
+    return;
   }
 
   function drawSubviewPhysarumEdges(edgeGfx, coordContainer, edges, timeSec) {
@@ -4994,92 +4158,24 @@
   }
 
   function tickAndRenderStarView() {
-    if (viewLevel !== 'star' || !world) return;
-    const sc = world.children.find(c => c._omnixType === 'star');
-    if (!sc || !sc._edges || !sc._edgeGfx || !sc._nodes) return;
-    if (sc._growthPhaseComplete && sc._sim && sc._sim.alpha() > 0.002) sc._sim.tick();
-
+    const sc = activeStarView;
+    if (viewLevel !== 'star' || !sc || !sc._nodes) return;
+    if (sc._sim && sc._sim.alpha() > 0.002) sc._sim.tick();
     const time = performance.now() / 1000;
     const nodes = sc._nodes;
-    const edges = sc._edges;
-    const edgeGfx = sc._edgeGfx;
-    const growthGfx = sc._growthGfx;
-    const signalGfx = sc._signalGfx;
-    const particles = sc._signalParticles;
-
-    if (!sc._growthPhaseComplete && growthGfx) {
-      drawStarGrowthEdges(growthGfx, sc);
-      edgeGfx.clear();
-      edgeGfx.lineStyle(0);
-    } else {
-      drawSubviewPhysarumEdges(edgeGfx, sc, edges, time);
-      if (growthGfx) {
-        growthGfx.clear();
-        growthGfx.lineStyle(0);
-      }
-    }
-
-    signalGfx.clear();
-    if (!sc._growthPhaseComplete) {
-      return;
-    }
-    for (const p of particles) {
-      p.progress += p.speed;
-      if (p.progress > 1) p.progress = 0;
-      const edge = p.edge;
-      if (!edge) continue;
-      const s = edge.source;
-      const t = edge.target;
-      if (!s || !t) continue;
-      const ei = edges.indexOf(edge);
-      let pos;
-      let tpos;
-      const tp = Math.max(0, p.progress - 0.06);
-      if (GPU_SAFE_MODE) {
-        pos = {
-          x: s.x + (t.x - s.x) * p.progress,
-          y: s.y + (t.y - s.y) * p.progress,
-        };
-        tpos = {
-          x: s.x + (t.x - s.x) * tp,
-          y: s.y + (t.y - s.y) * tp,
-        };
-        signalGfx.beginFill(p.color, 0.65);
-        signalGfx.drawRect(Math.floor(pos.x), Math.floor(pos.y), 1, 1);
-        signalGfx.endFill();
-        signalGfx.beginFill(p.color, 0.2);
-        signalGfx.drawRect(Math.floor(tpos.x), Math.floor(tpos.y), 1, 1);
-        signalGfx.endFill();
-      } else {
-        const { cx, cy } = physarumOrganicControl(s.x, s.y, t.x, t.y, ei >= 0 ? ei : 0, time);
-        pos = quadBezierPoint(s.x, s.y, cx, cy, t.x, t.y, p.progress);
-        tpos = quadBezierPoint(s.x, s.y, cx, cy, t.x, t.y, tp);
-        signalGfx.beginFill(p.color, 0.7);
-        signalGfx.drawRect(pos.x - 1, pos.y - 1, 2, 2);
-        signalGfx.endFill();
-        signalGfx.beginFill(p.color, 0.25);
-        signalGfx.drawRect(tpos.x - 1, tpos.y - 1, 2, 2);
-        signalGfx.endFill();
-      }
-    }
-
     for (const node of nodes) {
       if (node._heartbeatPhase == null) node._heartbeatPhase = Math.random() * Math.PI * 2;
       const beat = 1 + 0.04 * Math.sin(time * 1.5 + node._heartbeatPhase);
-      node.glow.scale.set(beat);
-      const baseA = 0.5 + 0.3 * Math.sin(time * 1.5 + node._heartbeatPhase);
-      node.glow.alpha = node._hover ? Math.min(1, baseA * 1.35) : baseA;
+      node._glowBeat = beat;
     }
   }
 
   function tickAndRenderPlanetView() {
-    if (viewLevel !== 'planet' || !world) return;
-    const pc = world.children.find(c => c._omnixType === 'planet');
-    if (!pc || !pc._edges || !pc._edgeGfx || !pc._nodes) return;
+    const pc = activePlanetView;
+    if (viewLevel !== 'planet' || !pc || !pc._nodes) return;
     if (pc._sim && pc._sim.alpha() > 0.002) pc._sim.tick();
-
-    const pcx = pc._planetCenterX != null ? pc._planetCenterX : app.screen.width / 2;
-    const pcy = pc._planetCenterY != null ? pc._planetCenterY : app.screen.height / 2;
+    const pcx = pc._planetCenterX != null ? pc._planetCenterX : window.innerWidth / 2;
+    const pcy = pc._planetCenterY != null ? pc._planetCenterY : window.innerHeight / 2;
     const pbr = pc._planetBoundaryR;
     const nodes = pc._nodes;
     if (pbr > 0 && nodes && nodes.length) {
@@ -5094,197 +4190,34 @@
           pn.y = pcy + dy * f;
         }
       }
-      for (let nj = 0; nj < nodes.length; nj++) {
-        const pn2 = nodes[nj];
-        if (pn2.container) pn2.container.position.set(pn2.x, pn2.y);
-      }
     }
-
     const time = performance.now() / 1000;
-    const edges = pc._edges;
-    const edgeGfx = pc._edgeGfx;
-    const signalGfx = pc._signalGfx;
-    const particles = pc._signalParticles;
-
-    drawSubviewPhysarumEdges(edgeGfx, pc, edges, time);
-
-    signalGfx.clear();
-    for (const p of particles) {
-      p.progress += p.speed;
-      if (p.progress > 1) p.progress = 0;
-      const edge = p.edge;
-      if (!edge) continue;
-      const s = edge.source;
-      const t = edge.target;
-      if (!s || !t) continue;
-      const ei = edges.indexOf(edge);
-      let pos;
-      let tpos;
-      const tp = Math.max(0, p.progress - 0.06);
-      if (GPU_SAFE_MODE) {
-        pos = {
-          x: s.x + (t.x - s.x) * p.progress,
-          y: s.y + (t.y - s.y) * p.progress,
-        };
-        tpos = {
-          x: s.x + (t.x - s.x) * tp,
-          y: s.y + (t.y - s.y) * tp,
-        };
-        signalGfx.beginFill(p.color, 0.65);
-        signalGfx.drawRect(Math.floor(pos.x), Math.floor(pos.y), 1, 1);
-        signalGfx.endFill();
-        signalGfx.beginFill(p.color, 0.2);
-        signalGfx.drawRect(Math.floor(tpos.x), Math.floor(tpos.y), 1, 1);
-        signalGfx.endFill();
-      } else {
-        const { cx, cy } = physarumOrganicControl(s.x, s.y, t.x, t.y, ei >= 0 ? ei : 0, time);
-        pos = quadBezierPoint(s.x, s.y, cx, cy, t.x, t.y, p.progress);
-        tpos = quadBezierPoint(s.x, s.y, cx, cy, t.x, t.y, tp);
-        signalGfx.beginFill(p.color, 0.7);
-        signalGfx.drawRect(pos.x - 1, pos.y - 1, 2, 2);
-        signalGfx.endFill();
-        signalGfx.beginFill(p.color, 0.25);
-        signalGfx.drawRect(tpos.x - 1, tpos.y - 1, 2, 2);
-        signalGfx.endFill();
-      }
-    }
-
     for (const node of nodes) {
       if (node._heartbeatPhase == null) node._heartbeatPhase = Math.random() * Math.PI * 2;
       const beat = 1 + 0.04 * Math.sin(time * 1.5 + node._heartbeatPhase);
-      node.glow.scale.set(beat);
-      const baseA = 0.5 + 0.3 * Math.sin(time * 1.5 + node._heartbeatPhase);
-      node.glow.alpha = node._hover ? Math.min(1, baseA * 1.35) : baseA;
-
-      const mem = node.membraneGfx;
-      const cls = node.classification;
-      if (mem && cls) {
-        const wobble = 1 + Math.sin(time * 1.2 + node.index * 0.7) * 0.03;
-        const r = node.radius * wobble;
-        mem.clear();
-        mem.lineStyle(1.5, cls.color, 0.7);
-        mem.drawCircle(0, 0, r);
-      }
+      node._glowBeat = beat;
     }
   }
 
   function drawSignalFlow() {
-    if (!signalFlowGfx) return;
-    signalFlowGfx.clear();
-    if (viewLevel !== 'galaxy') return;
-    if (!entranceDone || !simNodes.length || !simLinks.length) return;
-
-    const timeSec = performance.now() / 1000;
-    const boostIds = galaxyFlowBoostNodeIdSet();
-    const nL = simLinks.length;
-    const edgeMeta = new Array(nL);
-    for (let e = 0; e < nL; e++) {
-      edgeMeta[e] = galaxyLinkFluxAndEndpoints(simLinks[e]);
-    }
-
-    for (let pi = 0; pi < MYCELIUM_POOL_SIZE; pi++) {
-      const p = myceliumParticlePool[pi];
-      if (!p.active) continue;
-
-      const ei = p.edgeIndex;
-      if (ei < 0 || ei >= nL) {
-        p.active = false;
-        continue;
-      }
-
-      const { flux, s, t, sid, tid, lt } = edgeMeta[ei];
-      if (!s || !t || s.x == null || t.x == null) {
-        p.active = false;
-        continue;
-      }
-
-      const isDarkEdge = lt === 'DARK_FORCE' || lt === 'DARK';
-
-      const edgeBoost =
-        boostIds.size > 0 && (boostIds.has(sid) || boostIds.has(tid));
-      const spdMul = edgeBoost ? 2 : 1;
-      const alphaMul = edgeBoost ? 1.5 : 1;
-
-      const sp = p.speed * spdMul;
-      p.t += sp;
-      while (p.t >= 1) p.t -= 1;
-
-      if (isDarkEdge && !darkMatterVisible) continue;
-
-      const u = p.reverse ? 1 - p.t : p.t;
-      const pos = {
-        x: s.x + (t.x - s.x) * u,
-        y: s.y + (t.y - s.y) * u,
-      };
-      const col = physarumEdgeColorByType(lt, flux);
-      if (GPU_SAFE_MODE) {
-        const baseA = Math.min(1, p.alpha * alphaMul * 0.95);
-        signalFlowGfx.beginFill(col, baseA);
-        signalFlowGfx.drawRect(Math.floor(pos.x), Math.floor(pos.y), 1, 1);
-        signalFlowGfx.endFill();
-      } else {
-        const pulse = 0.7 + Math.sin(timeSec * 3 + p.t * Math.PI * 2) * 0.3;
-        const baseA = Math.min(1, p.alpha * alphaMul);
-        const coreA = Math.min(1, baseA * pulse);
-        signalFlowGfx.beginFill(col, coreA);
-        signalFlowGfx.drawRect(pos.x - 1, pos.y - 1, 2, 2);
-        signalFlowGfx.endFill();
-      }
-    }
+    return;
   }
 
   function findGalaxyGravClosestForRipple() {
-    if (!_gravScreenPt) _gravScreenPt = new PIXI.Point();
-    if (!entranceDone || viewLevel !== 'galaxy' || !world || !app || !simNodes.length) return null;
-
-    const pointer = app.renderer.events && app.renderer.events.pointer;
-    const pg = pointer && pointer.global;
-    if (!pg) return null;
-
-    const worldMouse = world.toLocal(pg);
-    const scale = world.scale.x;
-    const sw = app.screen.width;
-    const sh = app.screen.height;
-    const margin = 280;
-
-    let closestNode = null;
-    let closestDist = Infinity;
-
-    for (let si = 0; si < simNodes.length; si++) {
-      const simNode = simNodes[si];
-      if (simNode.kind !== 'directory' || simNode.dirId == null) continue;
-      world.toGlobal({ x: simNode.x, y: simNode.y }, _gravScreenPt);
-      const gx = _gravScreenPt.x;
-      const gy = _gravScreenPt.y;
-      if (gx < -margin || gx > sw + margin || gy < -margin || gy > sh + margin) continue;
-
-      const dx = worldMouse.x - simNode.x;
-      const dy = worldMouse.y - simNode.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const screenDist = dist * scale;
-      const pickR = galaxyDirectoryHoverScreenRadius(simNode, scale);
-      if (screenDist < pickR && screenDist < closestDist) {
-        closestDist = screenDist;
-        closestNode = simNode;
-      }
-    }
-    return closestNode;
+    if (!entranceDone || viewLevel !== 'galaxy') return null;
+    const h = hoveredNode;
+    if (h && h.kind === 'directory') return h;
+    return null;
   }
 
   function drawRippleImpact() {
-    if (!rippleGfx) return;
-    rippleGfx.clear();
-    if (viewLevel !== 'galaxy') return;
-    if (!entranceDone) return;
-
+    if (viewLevel !== 'galaxy' || !entranceDone) return;
     const cn = findGalaxyGravClosestForRipple();
     if (!cn || (cn._warpScale || 1) < 1.3) return;
-
-    const time = performance.now() / 1000;
+    const nowMs = performance.now();
     const cx = cn.x;
     const cy = cn.y;
-    const nowMs = performance.now();
-
+    const time = performance.now() / 1000;
     const nbrIds = new Set();
     const cid = cn.id;
     currentLinks.forEach(l => {
@@ -5293,14 +4226,9 @@
       if (s === cid) nbrIds.add(t);
       if (t === cid) nbrIds.add(s);
     });
-
     for (let ring = 0; ring < 3; ring++) {
       const phase = (time * 0.8 + ring * 0.33) % 1;
       const radius = 20 + phase * 200;
-      const alpha = (1 - phase) * 0.12;
-      rippleGfx.lineStyle(1.5, 0x6366f1, alpha);
-      rippleGfx.drawCircle(cx, cy, radius);
-
       for (let ni = 0; ni < simNodes.length; ni++) {
         const sn = simNodes[ni];
         if (!nbrIds.has(sn.id) || sn === cn) continue;
@@ -5310,7 +4238,6 @@
         }
       }
     }
-    rippleGfx.lineStyle(0);
   }
 
   function applyDirectoryHeartbeatAndGlow() {
@@ -5318,23 +4245,12 @@
     if (!entranceDone || !simNodes.length) return;
     const time = performance.now() / 1000;
     const nowMs = performance.now();
-
     for (let i = 0; i < simNodes.length; i++) {
       const sn = simNodes[i];
       if (sn.kind !== 'directory') continue;
-      const pool = nodePool[i];
-      if (!pool || !pool.container.visible || pool.simNode !== sn) continue;
-
-      const warp = sn._warpScale || 1;
-      const timeMul =
-        timelineVisible && timelineData && sn._timelineScale !== undefined ? sn._timelineScale : 1;
-      const beat = 1 + 0.03 * Math.sin(time * sn._heartbeatSpeed * Math.PI * 2 + sn._heartbeatPhase);
-      pool.container.scale.set(warp * timeMul * beat);
-
-      const isHover = hoveredSimNode === sn;
-      const flash = sn._rippleFlashUntil && nowMs < sn._rippleFlashUntil ? 1.25 : 1;
-      const glowRhythm = 1 + 0.12 * Math.sin(time * sn._heartbeatSpeed * Math.PI * 2 + sn._heartbeatPhase);
-      pool.glow.alpha = (isHover ? 1.05 : 1) * (0.94 + 0.06 * glowRhythm) * flash;
+      sn._heartbeatVisual = 1 + 0.03 * Math.sin(time * sn._heartbeatSpeed * Math.PI * 2 + sn._heartbeatPhase);
+      const flash = sn._rippleFlashUntil && nowMs < sn._rippleFlashUntil ? 1.12 : 1;
+      sn._heartbeatFlash = flash;
     }
   }
 
@@ -5408,16 +4324,9 @@
     for (let i = 0; i < simNodes.length; i++) {
       const simNode = simNodes[i];
       if (simNode.kind !== 'directory') continue;
-      const pool = nodePool[i];
-      if (!pool || !pool.container || !pool.container.visible || pool.simNode !== simNode) continue;
       if (simNode._timelineScale === undefined) continue;
-      const baseScale = simNode._warpScale || 1;
-      const timeScale = simNode._timelineScale || 1;
-      pool.container.scale.set(baseScale * timeScale);
-      const searchDim = searchQuery && !nodeMatchesSearch(simNode) ? 0.25 : 1;
-      const ta = simNode._timelineAlpha != null ? simNode._timelineAlpha : 1;
-      pool.container.alpha = searchDim * ta;
     }
+    edgesNodesDirty = true;
   }
 
   function loadLevelGalaxy() {
@@ -5430,11 +4339,11 @@
     selectedFile = null;
     currentNodes = model.galaxy.nodes;
     currentLinks = model.galaxy.links;
-    world.alpha = 1;
     killTweens();
     startSimulation(currentNodes, currentLinks);
     restoreGalaxyView();
-    gsap.fromTo(world, { alpha: 0.3 }, { alpha: 1, duration: 0.45, ease: 'power2.out' });
+    const cc = document.getElementById('canvas-container');
+    if (cc) gsap.fromTo(cc, { opacity: 0.35 }, { opacity: 1, duration: 0.45, ease: 'power2.out' });
     if (timelineVisible && timelineData) {
       const s = document.getElementById('timeline-slider');
       applyTimelineSnapshot(parseInt(s.value, 10) || 0);
@@ -5446,29 +4355,37 @@
   }
 
   function relayoutOmnixViews() {
-    if (!app || !world || !model) return;
-    const cx = app.screen.width / 2;
-    const cy = app.screen.height / 2;
+    if (!model) return;
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
     if (viewLevel === 'star' && selectedDir && starNodes.length) {
-      if (starViewTitle) starViewTitle.position.set(cx, cy);
-      const sc = world.children.find(c => c._omnixType === 'star');
-      if (sc && sc._sim && sc._growthPhaseComplete) {
-        sc._sim.force('center', d3.forceCenter(cx, cy));
-        sc._sim.force('x', d3.forceX(cx).strength(0.05));
-        sc._sim.force('y', d3.forceY(cy).strength(0.05));
+      if (starViewTitle) {
+        starViewTitle.x = cx;
+        starViewTitle.y = cy;
+      }
+      const sc = activeStarView;
+      if (sc && sc._sim) {
+        const d3f = typeof d3 !== 'undefined' ? d3 : window.d3;
+        sc._sim.force('center', d3f.forceCenter(cx, cy));
+        sc._sim.force('x', d3f.forceX(cx).strength(0.05));
+        sc._sim.force('y', d3f.forceY(cy).strength(0.05));
         sc._sim.alpha(0.28).restart();
       }
     } else if (viewLevel === 'planet' && selectedFile && planetNodes.length && selectedDir) {
-      if (planetViewTitle) planetViewTitle.position.set(cx, cy);
-      const pc = world.children.find(c => c._omnixType === 'planet');
+      if (planetViewTitle) {
+        planetViewTitle.x = cx;
+        planetViewTitle.y = cy;
+      }
+      const pc = activePlanetView;
       if (pc) {
         pc._planetCenterX = cx;
         pc._planetCenterY = cy;
-        pc._planetBoundaryR = Math.min(app.screen.width, app.screen.height) * 0.36;
+        pc._planetBoundaryR = Math.min(window.innerWidth, window.innerHeight) * 0.36;
         if (pc._sim) {
-          pc._sim.force('center', d3.forceCenter(cx, cy));
-          pc._sim.force('x', d3.forceX(cx).strength(0.06));
-          pc._sim.force('y', d3.forceY(cy).strength(0.06));
+          const d3f = typeof d3 !== 'undefined' ? d3 : window.d3;
+          pc._sim.force('center', d3f.forceCenter(cx, cy));
+          pc._sim.force('x', d3f.forceX(cx).strength(0.06));
+          pc._sim.force('y', d3f.forceY(cy).strength(0.06));
           pc._sim.alpha(0.28).restart();
         }
       }
@@ -5525,319 +4442,235 @@
     gsap.fromTo(bc, { opacity: 0.5 }, { opacity: 1, duration: 0.35 });
   }
 
-  function drawBackground() {
-    const w = app.screen.width;
-    const h = app.screen.height;
-    bgGraphics.clear();
-    const steps = 12;
-    for (let i = 0; i < steps; i++) {
-      const t = i / (steps - 1);
-      const c = lerpColor(COLORS.bg, COLORS.bgGradientEnd, t);
-      bgGraphics.beginFill(c, 1);
-      bgGraphics.drawRect(0, (h / steps) * i, w, h / steps + 1);
-      bgGraphics.endFill();
-    }
-  }
-
-  let starfieldTwinkle = null;
-  function buildStarfield() {
-    if (starfieldTwinkle) {
-      starfieldTwinkle.kill();
-      starfieldTwinkle = null;
-    }
-    starGraphics.clear();
-    const n = 200;
-    for (let i = 0; i < n; i++) {
-      const x = Math.random() * app.screen.width;
-      const y = Math.random() * app.screen.height;
-      const s = 0.4 + Math.random() * 1.2;
-      starGraphics.beginFill(0xffffff, 0.15 + Math.random() * 0.35);
-      starGraphics.drawCircle(x, y, s);
-      starGraphics.endFill();
-    }
-    starGraphics.alpha = 0.85;
-    starfieldTwinkle = gsap.to(starGraphics, {
-      alpha: 1,
-      duration: 2.4,
-      repeat: -1,
-      yoyo: true,
-      ease: 'sine.inOut',
-    });
-  }
-
-  function drawHexGrid() {
-    gridGraphics.clear();
-    const h = 40;
-    const w = app.screen.width;
-    const ht = app.screen.height;
-    gridGraphics.lineStyle(1, 0x6366f1, 0.06);
-    for (let y = -h; y < ht + h; y += h * 0.866) {
-      let row = 0;
-      for (let x = -w; x < w + w; x += h * 1.5) {
-        const ox = (row % 2) * h * 0.75;
-        const cx = x + ox;
-        const pts = [];
-        for (let i = 0; i < 6; i++) {
-          const a = (Math.PI / 3) * i - Math.PI / 6;
-          pts.push(cx + Math.cos(a) * h * 0.45, y + Math.sin(a) * h * 0.45);
-        }
-        gridGraphics.moveTo(pts[0], pts[1]);
-        for (let k = 2; k < pts.length; k += 2) gridGraphics.lineTo(pts[k], pts[k + 1]);
-        gridGraphics.closePath();
-        row++;
-      }
-    }
-  }
-
-  function initPixi() {
-    const host = document.getElementById('graph-container');
-    app = new PIXI.Application({
-      width: window.innerWidth,
-      height: window.innerHeight,
-      backgroundColor: COLORS.bg,
-      antialias: false,
-      resolution: 1,
-      autoDensity: true,
-      powerPreference: 'low-power',
-      preserveDrawingBuffer: false,
-    });
-    host.appendChild(app.view);
-    const _omnixGlCanvas = app.view;
-    if (_omnixGlCanvas && _omnixGlCanvas.addEventListener) {
-      _omnixGlCanvas.addEventListener('webglcontextlost', (e) => {
-        e.preventDefault();
-        console.warn('WebGL context lost — attempting recovery');
-      });
-      _omnixGlCanvas.addEventListener('webglcontextrestored', () => {
-        console.log('WebGL context restored');
-      });
-    }
-
-    bgGraphics = new PIXI.Graphics();
-    starGraphics = new PIXI.Graphics();
-    gridGraphics = new PIXI.Graphics();
-    world = new PIXI.Container();
-    darkMatterGfx = new PIXI.Graphics();
-    darkMatterGfx.eventMode = 'none';
-    layerEdges = new PIXI.Container();
-    galaxyEdgeGfx = new PIXI.Graphics();
-    galaxyEdgeGfx.eventMode = 'none';
-    layerEdges.addChild(galaxyEdgeGfx);
-    entanglementGfx = new PIXI.Graphics();
-    entanglementGfx.eventMode = 'none';
-    layerNodes = new PIXI.Container();
-    signalFlowGfx = new PIXI.Graphics();
-    signalFlowGfx.eventMode = 'none';
-    childrenGfx = new PIXI.Graphics();
-    childrenGfx.eventMode = 'none';
-    rippleGfx = new PIXI.Graphics();
-    rippleGfx.eventMode = 'none';
-    window._aiTraceGfx = new PIXI.Graphics();
-    window._aiTraceGfx.eventMode = 'none';
-    world.addChild(darkMatterGfx);
-    world.addChild(layerEdges);
-    world.addChild(signalFlowGfx);
-    world.addChild(entanglementGfx);
-    world.addChild(childrenGfx);
-    world.addChild(rippleGfx);
-    world.addChild(window._aiTraceGfx);
-    world.addChild(layerNodes);
-    layerEdges.eventMode = 'none';
-
-    app.stage.addChild(bgGraphics);
-    app.stage.addChild(starGraphics);
-    app.stage.addChild(gridGraphics);
-    app.stage.addChild(world);
+  function initCanvasRenderer() {
+    canvasBg = document.getElementById('canvas-bg');
+    canvasEdges = document.getElementById('canvas-edges');
+    canvasNodes = document.getElementById('canvas-nodes');
+    canvasParticles = document.getElementById('canvas-particles');
+    canvasUI = document.getElementById('canvas-ui');
+    if (!canvasBg || !canvasEdges || !canvasNodes || !canvasParticles || !canvasUI) return;
+    ctxBg = canvasBg.getContext('2d');
+    ctxEdges = canvasEdges.getContext('2d');
+    ctxNodes = canvasNodes.getContext('2d');
+    ctxParticles = canvasParticles.getContext('2d');
+    ctxUI = canvasUI.getContext('2d');
 
     galaxyLabelPool = [];
     for (let i = 0; i < GALAXY_LABEL_POOL_SIZE; i++) {
-      const t = new PIXI.Text('', {
-        fontFamily: 'Outfit, sans-serif',
-        fontSize: 12,
-        fill: 0xe2e8f0,
-        align: 'center',
-      });
-      t.anchor.set(0.5, 0);
-      t.visible = false;
-      t.alpha = 0;
-      t.eventMode = 'none';
-      world.addChild(t);
-      galaxyLabelPool.push(t);
+      galaxyLabelPool.push({ text: '', x: 0, y: 0, visible: false, alpha: 0, fontSize: 12 });
     }
 
-    app.stage.eventMode = 'static';
-    app.stage.hitArea = app.screen;
-    app.stage.on('pointerdown', onStageDown);
-    app.stage.on('pointermove', onStageMove);
-    app.stage.on('pointerup', onStageUp);
-    app.stage.on('pointerupoutside', onStageUp);
-    app.view.addEventListener('wheel', onWheel, { passive: false });
-    app.view.addEventListener('contextmenu', ev => ev.preventDefault());
-    app.view.addEventListener('mousemove', ev => {
-      if (!hoveredSimNode) return;
-      const t = document.getElementById('tooltip');
-      if (t.style.display !== 'block') return;
-      showTooltip(hoveredSimNode, ev.clientX, ev.clientY);
+    resizeCanvases();
+
+    let uiDragStart = { x: 0, y: 0 };
+    let uiPanStart = { x: 0, y: 0 };
+    let isDragging = false;
+    let dragCheck = null;
+
+    function toWorld(sx, sy) {
+      return { x: (sx - pan.x) / zoom, y: (sy - pan.y) / zoom };
+    }
+
+    function findNodeAt(wx, wy) {
+      let best = null;
+      let bestD = Infinity;
+      for (const n of simNodes) {
+        const dx = wx - n.x;
+        const dy = wy - n.y;
+        const r = (n.radius || 12) * (n._warpScale || 1) * 2.5;
+        const d = dx * dx + dy * dy;
+        if (d < r * r && d < bestD) {
+          bestD = d;
+          best = n;
+        }
+      }
+      return best;
+    }
+
+    function findStarFileAt(wx, wy) {
+      for (let i = starNodes.length - 1; i >= 0; i--) {
+        const sn = starNodes[i];
+        if (!sn) continue;
+        const r = (sn.radius || 12) * (sn._scale != null ? sn._scale : 1) * 2.6;
+        const dx = wx - sn.x;
+        const dy = wy - sn.y;
+        if (dx * dx + dy * dy < r * r) return sn;
+      }
+      return null;
+    }
+
+    function findPlanetSymbolAt(wx, wy) {
+      for (let i = planetNodes.length - 1; i >= 0; i--) {
+        const pn = planetNodes[i];
+        if (!pn) continue;
+        const r = (pn.radius || 10) * 2.6;
+        const dx = wx - pn.x;
+        const dy = wy - pn.y;
+        if (dx * dx + dy * dy < r * r) return pn;
+      }
+      return null;
+    }
+
+    function updateGravitationalHover(wx, wy) {
+      const R = 250 / zoom;
+      let closest = null;
+      let closestD = Infinity;
+      for (const n of simNodes) {
+        const d = Math.sqrt((wx - n.x) ** 2 + (wy - n.y) ** 2);
+        if (d < R && d < closestD) {
+          closestD = d;
+          closest = n;
+        }
+      }
+      for (const n of simNodes) {
+        const target =
+          n === closest
+            ? 1 + Math.pow(1 - closestD / R, 2) * 2.0 * Math.min((n.childCount || 10) / 50, 1.5)
+            : 1.0;
+        n._warpScale = (n._warpScale || 1) + (target - (n._warpScale || 1)) * 0.12;
+      }
+      edgesNodesDirty = true;
+    }
+
+    canvasUI.addEventListener('mousemove', e => {
+      lastCanvasPtr.ox = e.offsetX;
+      lastCanvasPtr.oy = e.offsetY;
+      const w = toWorld(e.offsetX, e.offsetY);
+      lastCanvasPtr.wx = w.x;
+      lastCanvasPtr.wy = w.y;
+
+      if (viewLevel === 'galaxy') {
+        if (isDragging) {
+          pan.x = uiPanStart.x + (e.clientX - uiDragStart.x);
+          pan.y = uiPanStart.y + (e.clientY - uiDragStart.y);
+          syncPanZoomAliases();
+          edgesNodesDirty = true;
+          bgDrawn = false;
+          drawBackground();
+          return;
+        }
+        const found = findNodeAt(w.x, w.y);
+        if (found !== hoveredNode) {
+          hoveredNode = found;
+          edgesNodesDirty = true;
+          uiDirty = true;
+          canvasUI.style.cursor = found ? 'pointer' : 'default';
+        }
+        updateGravitationalHover(w.x, w.y);
+        if (hoveredSimNode) {
+          const tt = document.getElementById('tooltip');
+          if (tt && tt.style.display === 'block') showTooltip(hoveredSimNode, e.clientX, e.clientY);
+        }
+        return;
+      }
+      if (viewLevel === 'star') {
+        const sn = findStarFileAt(w.x, w.y);
+        canvasUI.style.cursor = sn ? 'pointer' : 'default';
+        return;
+      }
+      if (viewLevel === 'planet') {
+        const pn = findPlanetSymbolAt(w.x, w.y);
+        canvasUI.style.cursor = pn ? 'pointer' : 'default';
+      }
     });
 
-    drawBackground();
-    drawHexGrid();
-    buildStarfield();
+    canvasUI.addEventListener('mousedown', e => {
+      uiDragStart = { x: e.clientX, y: e.clientY };
+      uiPanStart = { x: pan.x, y: pan.y };
+      isDragging = false;
+      dragCheck = e2 => {
+        if (Math.hypot(e2.clientX - uiDragStart.x, e2.clientY - uiDragStart.y) > 4) {
+          isDragging = true;
+          canvasUI.removeEventListener('mousemove', dragCheck);
+          dragCheck = null;
+        }
+      };
+      canvasUI.addEventListener('mousemove', dragCheck);
+    });
 
-    world.position.set(0, 0);
-    world.scale.set(1);
-    worldScale = 1;
-    worldTx = 0;
-    worldTy = 0;
-    targetWorldScale = 1;
-    targetWorldTx = 0;
-    targetWorldTy = 0;
-
-    let lastFps = performance.now();
-    let frames = 0;
-    app.ticker.add(() => {
-      frames++;
-      const now = performance.now();
-      if (now - lastFps >= 500) {
-        const fps = Math.round((frames * 1000) / (now - lastFps));
-        document.getElementById('fps-counter').textContent = fps + ' FPS';
-        frames = 0;
-        lastFps = now;
+    canvasUI.addEventListener('mouseup', e => {
+      if (dragCheck) {
+        canvasUI.removeEventListener('mousemove', dragCheck);
+        dragCheck = null;
       }
       if (viewLevel === 'galaxy') {
-        if (simulation && simulation.alpha() > 0.002) {
-          simulation.tick();
-        }
-        syncPixiFromSim();
-      } else if (viewLevel === 'star') {
-        tickAndRenderStarView();
-      } else if (viewLevel === 'planet') {
-        tickAndRenderPlanetView();
-      }
-      updateGalaxyGravitationalHover();
-      applyTimelineToPixiContainers();
-      applyDirectoryHeartbeatAndGlow();
-      drawSignalFlow();
-      drawRippleImpact();
-      drawEntanglementOverlay();
-      drawDarkMatterOverlay();
-      if (aiTraceActive && viewLevel === 'galaxy' && window._aiTraceGfx) {
-        const gfx = window._aiTraceGfx;
-        gfx.clear();
-        const targetSimNode = simNodes.find(sn => {
-          if (sn.kind !== 'directory') return false;
-          const id = sn.dirId || (sn.raw && sn.raw.id) || '';
-          return id === aiTraceTarget || (aiTraceTarget && aiTraceTarget.startsWith(id + '/'));
-        });
-        if (targetSimNode && targetSimNode.x != null) {
-          const time = performance.now() / 1000;
-          for (let ring = 0; ring < 4; ring++) {
-            const phase = (time * 0.6 + ring * 0.25) % 1;
-            const radius = 20 + phase * 300;
-            const alpha = (1 - phase) * 0.15;
-            gfx.lineStyle(2, 0xa855f7, alpha);
-            gfx.drawCircle(targetSimNode.x, targetSimNode.y, radius);
+        if (!isDragging) {
+          const w = toWorld(e.offsetX, e.offsetY);
+          const node = findNodeAt(w.x, w.y);
+          if (e.button === 0 && node) onNodeLeftClick(node);
+          if (e.button === 2) {
+            e.preventDefault();
+            if (node) openXray(node);
+            else if (xrayOpen) closeXray();
+            else goBack();
           }
-          gfx.lineStyle(0);
-          const pulse = 0.5 + 0.5 * Math.sin(time * 4);
-          gfx.beginFill(0xa855f7, pulse * 0.4);
-          gfx.drawCircle(targetSimNode.x, targetSimNode.y, 8);
-          gfx.endFill();
+        }
+        isDragging = false;
+        return;
+      }
+      if (viewLevel === 'star') {
+        if (e.button === 2) {
+          e.preventDefault();
+          if (selectedDir) openXrayForDir(selectedDir);
+        } else if (!isDragging && e.button === 0) {
+          const w = toWorld(e.offsetX, e.offsetY);
+          const sn = findStarFileAt(w.x, w.y);
+          if (sn && sn.fileData) {
+            hideSymbolPopup();
+            transitionToPlanet(sn.fileData);
+          }
+        }
+        isDragging = false;
+        return;
+      }
+      if (viewLevel === 'planet') {
+        if (e.button === 2) {
+          e.preventDefault();
+          const w = toWorld(e.offsetX, e.offsetY);
+          const pn = findPlanetSymbolAt(w.x, w.y);
+          if (pn && selectedFile) {
+            void openXrayForPlanetFunction(selectedFile, pn.symbol, pn.classification, selectedFile.filePath || '');
+          }
+        } else if (!isDragging && e.button === 0) {
+          const w = toWorld(e.offsetX, e.offsetY);
+          const pn = findPlanetSymbolAt(w.x, w.y);
+          if (pn && selectedFile) showSymbolDetailPopup(pn.symbol, selectedFile);
         }
       }
+      isDragging = false;
     });
-  }
 
-  let dragStart = null;
-  let worldStart = null;
-  let didDrag = false;
+    canvasUI.addEventListener('contextmenu', e => e.preventDefault());
 
-  function isStageBackgroundTarget(t) {
-    return (
-      t === app.stage ||
-      t === world ||
-      t === layerEdges ||
-      t === layerNodes ||
-      t === gridGraphics ||
-      t === bgGraphics ||
-      t === starGraphics ||
-      t === darkMatterGfx ||
-      t === signalFlowGfx ||
-      t === entanglementGfx ||
-      t === childrenGfx ||
-      t === rippleGfx ||
-      t === window._aiTraceGfx
+    canvasUI.addEventListener(
+      'wheel',
+      e => {
+        if (viewLevel !== 'galaxy') return;
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.12 : 0.88;
+        const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom * factor));
+        pan.x = e.offsetX - (e.offsetX - pan.x) * (newZoom / zoom);
+        pan.y = e.offsetY - (e.offsetY - pan.y) * (newZoom / zoom);
+        zoom = newZoom;
+        syncPanZoomAliases();
+        edgesNodesDirty = true;
+        bgDrawn = false;
+        drawBackground();
+      },
+      { passive: false }
     );
-  }
 
-  function onStageDown(e) {
-    if (pointerEventButton(e) === 2) return;
-    if (isStageBackgroundTarget(e.target)) {
-      dragStart = { x: e.global.x, y: e.global.y };
-      worldStart = { x: world.position.x, y: world.position.y };
-      didDrag = false;
+    if (!renderLoopStarted) {
+      renderLoopStarted = true;
+      requestAnimationFrame(renderLoop);
     }
-  }
-
-  function onStageMove(e) {
-    if (!dragStart) return;
-    const dx = e.global.x - dragStart.x;
-    const dy = e.global.y - dragStart.y;
-    if (Math.hypot(dx, dy) > 4) didDrag = true;
-    world.position.set(worldStart.x + dx, worldStart.y + dy);
-    worldTx = world.position.x;
-    worldTy = world.position.y;
-    targetWorldTx = worldTx;
-    targetWorldTy = worldTy;
-  }
-
-  function onStageUp(e) {
-    const btn = pointerEventButton(e);
-    if (btn === 2) {
-      if (isStageBackgroundTarget(e.target)) {
-        if (viewLevel !== 'galaxy') goBack();
-        else if (xrayOpen) closeXray();
-      }
-      dragStart = null;
-      return;
-    }
-    if (dragStart && !didDrag) {
-      if (isStageBackgroundTarget(e.target)) {
-        if (xrayOpen) closeXray();
-      }
-    }
-    dragStart = null;
-  }
-
-  function onWheel(ev) {
-    ev.preventDefault();
-    const delta = ev.deltaY > 0 ? 0.92 : 1.08;
-    const ns = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, world.scale.x * delta));
-    const rect = app.view.getBoundingClientRect();
-    const lx = ev.clientX - rect.left;
-    const ly = ev.clientY - rect.top;
-    const wx = (lx - world.position.x) / world.scale.x;
-    const wy = (ly - world.position.y) / world.scale.y;
-    world.scale.set(ns);
-    world.position.set(lx - wx * ns, ly - wy * ns);
-    worldScale = ns;
-    targetWorldScale = ns;
-    worldTx = world.position.x;
-    worldTy = world.position.y;
-    targetWorldTx = worldTx;
-    targetWorldTy = worldTy;
   }
 
   function resizePixi() {
-    if (!app) return;
-    app.renderer.resize(window.innerWidth, window.innerHeight);
-    app.stage.hitArea = app.screen;
-    drawBackground();
-    drawHexGrid();
-    buildStarfield();
+    resizeCanvases();
     if (viewLevel === 'galaxy' && simNodes.length) {
       fitWorldToNodes(false);
-      syncPixiFromSim();
+      syncCanvasFromSim();
     }
     relayoutOmnixViews();
   }
@@ -5850,7 +4683,7 @@
     if (!q) {
       document.getElementById('search-count').textContent = '';
       document.getElementById('search-hint').style.display = 'none';
-      syncPixiFromSim();
+      syncCanvasFromSim();
       return;
     }
     model.raw.nodes.forEach(n => {
@@ -5868,7 +4701,7 @@
     } else {
       hint.style.display = 'none';
     }
-    syncPixiFromSim();
+    syncCanvasFromSim();
   }
 
   function zoomToRawNode(n) {
@@ -5954,34 +4787,12 @@
       },
     }, 0.5);
     tl.add(() => {
-      buildStarfield();
-      starGraphics.alpha = 0;
-      gsap.to(starGraphics, { alpha: 1, duration: 0.5 });
+      const cc = document.getElementById('canvas-container');
+      if (cc) {
+        cc.style.opacity = '0';
+        gsap.to(cc, { opacity: 1, duration: 0.55, ease: 'power2.out' });
+      }
     }, 1);
-    tl.add(() => {
-      if (model && simNodes.length) {
-        nodePool.forEach((p, i) => {
-          if (i >= simNodes.length) return;
-          p.container.visible = true;
-          p.simNode = simNodes[i];
-          p.container.x = simNodes[i].x;
-          p.container.y = simNodes[i].y;
-          gsap.fromTo(p.container.scale, { x: 0, y: 0 }, {
-            x: 1,
-            y: 1,
-            duration: 0.45,
-            ease: 'back.out(1.4)',
-            delay: i * 0.03,
-          });
-        });
-      }
-    }, 1.5);
-    tl.add(() => {
-      if (galaxyEdgeGfx) {
-        galaxyEdgeGfx.alpha = 0;
-        gsap.to(galaxyEdgeGfx, { alpha: 1, duration: 0.45, ease: 'sine.out' });
-      }
-    }, 2.5);
     tl.add(() => {
       const files = stats.files || 0;
       const funcs = (stats.functions || 0) + (stats.methods || 0);
@@ -6034,7 +4845,7 @@
         delete simNodes[i]._timelineScale;
         delete simNodes[i]._timelineAlpha;
       }
-      syncPixiFromSim();
+      syncCanvasFromSim();
     }
   });
   document.getElementById('timeline-slider').addEventListener('input', (e) => {
@@ -6100,14 +4911,7 @@
       if (viewLevel === 'galaxy' && selectedDir) {
         selectedDir = null;
         killTweens();
-        gsap.set(layerEdges, { alpha: 1 });
-        nodePool.forEach(p => {
-          if (!p.container) return;
-          gsap.killTweensOf(p.container);
-          gsap.killTweensOf(p.container.scale);
-          p.container.alpha = searchQuery && p.simNode && !nodeMatchesSearch(p.simNode) ? 0.25 : 1;
-        });
-        syncPixiFromSim();
+        syncCanvasFromSim();
         updateBreadcrumb();
         return;
       }
@@ -6122,10 +4926,6 @@
   (async function boot() {
     if (!GRAPH_API_URL) {
       showLoadError('Open this UI from the OMNIX server (http://…), not as a local file.');
-      return;
-    }
-    if (typeof PIXI === 'undefined') {
-      showLoadError('PixiJS failed to load from CDN.');
       return;
     }
     try {
@@ -6158,8 +4958,12 @@
       document.getElementById('stat-dark').textContent = data.nodes.filter(n => n.type === 'dark_matter').length;
       document.getElementById('stat-entangled').textContent = data.links.filter(l => l.type === 'ENTANGLED').length;
 
-      initPixi();
+      initCanvasRenderer();
       loadLevelGalaxy();
+      resizeCanvases();
+      drawBackground();
+      initParticles();
+      fitWorldToNodes(false);
 
       if (TIMELINE_API_URL) {
         fetch(TIMELINE_API_URL, { cache: 'no-store' })
