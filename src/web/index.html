@@ -500,7 +500,6 @@
   const MAX_STAR_FILES = 50;
   const MAX_PLANET_SYMBOLS = 30;
   const MAX_POOL_NODES = 200;
-  const MAX_POOL_EDGES = 500;
   const MAX_DARK_MATTER_DRAW = 50;
   const MAX_DARK_FORCE_DRAW = 120;
   const MAX_ENTANGLED_DRAW = 100;
@@ -610,6 +609,10 @@
     const g = Math.round(A.g + (B.g - A.g) * t);
     const b = Math.round(A.b + (B.b - A.b) * t);
     return (r << 16) | (g << 8) | b;
+  }
+
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
   }
 
   function directoryColor(types) {
@@ -933,12 +936,27 @@
   let app = null;
   let world = null;
   let layerEdges = null;
+  /** Single batched Graphics for all galaxy-level directory edges (Physarum). */
+  let galaxyEdgeGfx = null;
   let layerNodes = null;
   let childrenGfx = null;
   let signalFlowGfx = null;
   let rippleGfx = null;
-  const SIGNAL_PARTICLES = [];
-  let signalParticleCap = 40;
+  /** Mycelium flow: fixed pool, galaxy view only (single batched Graphics). */
+  const MYCELIUM_POOL_SIZE = 4000;
+  const MYCELIUM_TOP_EDGES = 500;
+  const myceliumParticlePool = [];
+  for (let _mi = 0; _mi < MYCELIUM_POOL_SIZE; _mi++) {
+    myceliumParticlePool.push({
+      edgeIndex: 0,
+      t: 0,
+      speed: 0.003,
+      size: 1.5,
+      alpha: 0.6,
+      active: false,
+      reverse: false,
+    });
+  }
   let galaxyLabelPool = [];
   /** Rebuilt each frame in galaxy gravitational hover (world-space hit targets for file orbit dots). */
   let visibleChildFiles = [];
@@ -946,6 +964,7 @@
   let stickyDir = null;
   let stickyTimeout = null;
   let _gravScreenPt = null;
+  let _physarumScreenPt = null;
   let bgGraphics = null;
   let starGraphics = null;
   let gridGraphics = null;
@@ -979,7 +998,8 @@
   let aiTraceRunId = 0;
 
   const nodePool = [];
-  const edgePool = [];
+  /** AI trace: edge keys `idA\\0idB` (sorted) -> expiry timestamp (performance.now()). */
+  const traceEdgePulseUntil = new Map();
 
   let worldScale = 1;
   let worldTx = 0;
@@ -1118,16 +1138,6 @@
       layerNodes.addChild(c);
     }
     return nodePool[i];
-  }
-
-  function acquireEdgePool(i) {
-    while (edgePool.length <= i) {
-      const g = new PIXI.Graphics();
-      g.visible = false;
-      edgePool.push(g);
-      layerEdges.addChild(g);
-    }
-    return edgePool[i];
   }
 
   function clientFromPixiEvent(e) {
@@ -2164,12 +2174,12 @@
     const d3f = typeof d3 !== 'undefined' ? d3 : window.d3;
     if (!d3f || !d3f.forceSimulation) {
       console.error('d3-force not available');
-      SIGNAL_PARTICLES.length = 0;
+      for (let _zi = 0; _zi < MYCELIUM_POOL_SIZE; _zi++) myceliumParticlePool[_zi].active = false;
       return;
     }
 
     if (!simNodes.length) {
-      SIGNAL_PARTICLES.length = 0;
+      for (let _zi = 0; _zi < MYCELIUM_POOL_SIZE; _zi++) myceliumParticlePool[_zi].active = false;
       syncPixiFromSim();
       return;
     }
@@ -2217,7 +2227,8 @@
       sn._heartbeatPhase = Math.random() * Math.PI * 2;
       sn._heartbeatSpeed = 0.8 + Math.random() * 0.4;
     }
-    initSignalParticles();
+    if (isGalaxyView) rebuildMyceliumFlowPool();
+    else for (let _zi = 0; _zi < MYCELIUM_POOL_SIZE; _zi++) myceliumParticlePool[_zi].active = false;
 
     syncPixiFromSim();
   }
@@ -2892,30 +2903,8 @@
     if (!fromSn || !toSn || fromSn === toSn) return;
     const idA = fromSn.id;
     const idB = toSn.id;
-    const n = Math.min(simLinks.length, edgePool.length);
-    for (let ei = 0; ei < n; ei++) {
-      const l = simLinks[ei];
-      const sid = typeof l.source === 'object' && l.source !== null ? l.source.id : l.source;
-      const tid = typeof l.target === 'object' && l.target !== null ? l.target.id : l.target;
-      if ((sid === idA && tid === idB) || (sid === idB && tid === idA)) {
-        const g = edgePool[ei];
-        if (!g || !g.visible) break;
-        gsap.killTweensOf(g);
-        const prev = g.alpha;
-        g.alpha = Math.max(prev, 0.35);
-        gsap.to(g, {
-          alpha: 1,
-          duration: 0.2,
-          yoyo: true,
-          repeat: 2,
-          ease: 'sine.inOut',
-          onComplete: () => {
-            g.alpha = prev;
-          },
-        });
-        break;
-      }
-    }
+    const key = idA < idB ? idA + '\0' + idB : idB + '\0' + idA;
+    traceEdgePulseUntil.set(key, performance.now() + 900);
   }
 
   function animateAITrace(traceData) {
@@ -3400,8 +3389,9 @@
         p.simNode = null;
         if (p.label) p.label.visible = false;
       }
-      for (let k = 0; k < edgePool.length; k++) {
-        if (edgePool[k]) edgePool[k].visible = false;
+      if (galaxyEdgeGfx) {
+        galaxyEdgeGfx.clear();
+        galaxyEdgeGfx.visible = false;
       }
       return;
     }
@@ -3444,60 +3434,7 @@
       if (nodePool[j].label) nodePool[j].label.visible = false;
     }
 
-    const maxE = Math.min(simLinks.length, MAX_POOL_EDGES);
-    let maxWeightNorm = 1;
-    if (model && model.maxEdgeWeight > 0) {
-      maxWeightNorm = model.maxEdgeWeight;
-    } else {
-      for (let ei = 0; ei < maxE; ei++) {
-        const w = simLinks[ei].weight || 1;
-        if (w > maxWeightNorm) maxWeightNorm = w;
-      }
-    }
-    for (let e = 0; e < maxE; e++) {
-      const g = acquireEdgePool(e);
-      const l = simLinks[e];
-      const sid = typeof l.source === 'object' && l.source !== null ? l.source.id : l.source;
-      const tid = typeof l.target === 'object' && l.target !== null ? l.target.id : l.target;
-      const s = typeof l.source === 'object' && l.source !== null && l.source.x != null
-        ? l.source
-        : simNodes.find(n => n.id === sid);
-      const t = typeof l.target === 'object' && l.target !== null && l.target.x != null
-        ? l.target
-        : simNodes.find(n => n.id === tid);
-      if (!s || !t || s.x == null || t.x == null) {
-        g.visible = false;
-        continue;
-      }
-      g.visible = true;
-      const weight = l.weight || 1;
-      const normalizedWeight = Math.min(weight / maxWeightNorm, 1);
-      const edgeWidth = 0.5 + normalizedWeight * 3;
-      const edgeAlphaGalaxy = 0.08 + normalizedWeight * 0.25;
-      const lt = l.type || 'CALLS';
-      const col =
-        lt === 'ENTANGLED'
-          ? 0xf59e0b
-          : lt === 'DARK_FORCE'
-            ? 0x8b5cf6
-            : normalizedWeight > 0.5
-              ? lerpColor(0x1a4a2e, 0x4ade80, normalizedWeight)
-              : lerpColor(0x1a1a2e, 0x3b4a6b, normalizedWeight);
-      const mx = (s.x + t.x) / 2 + (l._curveOffset || 0);
-      const my = (s.y + t.y) / 2 + (l._curveOffset2 || 0);
-      const dx = t.x - s.x;
-      const dy = t.y - s.y;
-      const len = Math.sqrt(dx * dx + dy * dy) || 1;
-      const ox = (-dy / len) * 24;
-      const oy = (dx / len) * 24;
-      const cx = mx + ox;
-      const cy = my + oy;
-      g.clear();
-      g.lineStyle(edgeWidth, col, edgeAlphaGalaxy);
-      g.moveTo(s.x, s.y);
-      g.bezierCurveTo(cx, cy, cx, cy, t.x, t.y);
-    }
-    for (let k = maxE; k < edgePool.length; k++) edgePool[k].visible = false;
+    drawGalaxyPhysarumEdges(performance.now() / 1000);
   }
 
   /** True if pointer is within `screenThresholdPx` (screen space) of any file orbit dot for this directory. */
@@ -3782,39 +3719,104 @@
     }
   }
 
-  function initSignalParticles() {
-    SIGNAL_PARTICLES.length = 0;
-    if (!model || viewLevel !== 'galaxy' || !simNodes.length) return;
-    const idToIdx = new Map();
-    simNodes.forEach((n, i) => idToIdx.set(n.id, i));
-    const topEdges = [...currentLinks]
-      .sort((a, b) => (b.weight || 1) - (a.weight || 1))
-      .slice(0, signalParticleCap);
-    for (const edge of topEdges) {
-      const sid = typeof edge.source === 'object' && edge.source !== null ? edge.source.id : edge.source;
-      const tid = typeof edge.target === 'object' && edge.target !== null ? edge.target.id : edge.target;
-      const si = idToIdx.get(sid);
-      const ti = idToIdx.get(tid);
-      if (si === undefined || ti === undefined) continue;
-      SIGNAL_PARTICLES.push({
-        sourceIdx: si,
-        targetIdx: ti,
-        linkType: edge.type || 'CALLS',
-        progress: Math.random(),
-        speed: 0.002 + Math.random() * 0.003,
-      });
+  function galaxyLinkFluxAndEndpoints(l) {
+    const maxNW = model && model.maxNodeWeight > 0 ? model.maxNodeWeight : 1;
+    const maxEW = model && model.maxEdgeWeight > 0 ? model.maxEdgeWeight : 1;
+    const sid = typeof l.source === 'object' && l.source !== null ? l.source.id : l.source;
+    const tid = typeof l.target === 'object' && l.target !== null ? l.target.id : l.target;
+    const s =
+      typeof l.source === 'object' && l.source !== null && l.source.x != null
+        ? l.source
+        : simNodes.find(n => n.id === sid);
+    const t =
+      typeof l.target === 'object' && l.target !== null && l.target.x != null
+        ? l.target
+        : simNodes.find(n => n.id === tid);
+    if (!s || !t) return { flux: 0, s: null, t: null, sid, tid, lt: l.type || 'CALLS' };
+    const cS = s.totalEdgeWeight || 0;
+    const cT = t.totalEdgeWeight || 0;
+    let flux = (cS + cT) / (2 * maxNW);
+    if (!Number.isFinite(flux) || maxNW <= 0) {
+      flux = Math.min((l.weight || 1) / maxEW, 1);
+    }
+    flux = Math.min(1, Math.max(0, flux));
+    return { flux, s, t, sid, tid, lt: l.type || 'CALLS' };
+  }
+
+  function rebuildMyceliumFlowPool() {
+    for (let i = 0; i < MYCELIUM_POOL_SIZE; i++) myceliumParticlePool[i].active = false;
+    if (!model || viewLevel !== 'galaxy' || !simNodes.length || !simLinks.length) return;
+
+    const ranked = [];
+    for (let e = 0; e < simLinks.length; e++) {
+      const l = simLinks[e];
+      const { flux } = galaxyLinkFluxAndEndpoints(l);
+      ranked.push({ e, flux });
+    }
+    ranked.sort((a, b) => b.flux - a.flux);
+    const top = ranked.slice(0, MYCELIUM_TOP_EDGES);
+
+    let pi = 0;
+    for (let ri = 0; ri < top.length; ri++) {
+      const { e, flux } = top[ri];
+      if (pi >= MYCELIUM_POOL_SIZE) break;
+      let want = Math.floor(flux * 8) + 1;
+      want = Math.min(want, 9, MYCELIUM_POOL_SIZE - pi);
+      const l = simLinks[e];
+      const lt = l.type || 'CALLS';
+      for (let k = 0; k < want && pi < MYCELIUM_POOL_SIZE; k++) {
+        const p = myceliumParticlePool[pi];
+        p.edgeIndex = e;
+        p.t = Math.random();
+        p.speed = lerp(0.001, 0.008, flux) * (0.85 + Math.random() * 0.3);
+        p.size = lerp(1.0, 2.5, flux);
+        p.alpha = lerp(0.3, 0.9, flux);
+        p.reverse = lt === 'IMPORTS' && k % 2 === 1;
+        p.active = true;
+        pi++;
+      }
     }
   }
 
-  function signalEdgeControl(s, t) {
-    const mx = (s.x + t.x) / 2;
-    const my = (s.y + t.y) / 2;
-    const dx = t.x - s.x;
-    const dy = t.y - s.y;
-    const len = Math.sqrt(dx * dx + dy * dy) || 1;
-    const ox = (-dy / len) * 24;
-    const oy = (dx / len) * 24;
-    return { cx: mx + ox, cy: my + oy };
+  function findGalaxyClosestDirUnderPointer() {
+    if (!_gravScreenPt) _gravScreenPt = new PIXI.Point();
+    if (!entranceDone || viewLevel !== 'galaxy' || !world || !app || !simNodes.length) return null;
+    const pointer = app.renderer.events && app.renderer.events.pointer;
+    const pg = pointer && pointer.global;
+    if (!pg) return null;
+    const worldMouse = world.toLocal(pg);
+    const scale = world.scale.x;
+    const sw = app.screen.width;
+    const sh = app.screen.height;
+    const margin = 280;
+    let closestNode = null;
+    let closestDist = Infinity;
+    for (let si = 0; si < simNodes.length; si++) {
+      const simNode = simNodes[si];
+      if (simNode.kind !== 'directory' || simNode.dirId == null) continue;
+      world.toGlobal({ x: simNode.x, y: simNode.y }, _gravScreenPt);
+      const gx = _gravScreenPt.x;
+      const gy = _gravScreenPt.y;
+      if (gx < -margin || gx > sw + margin || gy < -margin || gy > sh + margin) continue;
+      const dx = worldMouse.x - simNode.x;
+      const dy = worldMouse.y - simNode.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const screenDist = dist * scale;
+      const pickR = galaxyDirectoryHoverScreenRadius(simNode, scale);
+      if (screenDist < pickR && screenDist < closestDist) {
+        closestDist = screenDist;
+        closestNode = simNode;
+      }
+    }
+    return closestNode;
+  }
+
+  function galaxyFlowBoostNodeIdSet() {
+    const set = new Set();
+    if (hoveredSimNode && hoveredSimNode.id != null) set.add(hoveredSimNode.id);
+    const cn = findGalaxyClosestDirUnderPointer();
+    if (cn && cn.id != null) set.add(cn.id);
+    return set;
   }
 
   function quadBezierPoint(sx, sy, cx, cy, tx, ty, u) {
@@ -3822,6 +3824,309 @@
     const x = omu * omu * sx + 2 * omu * u * cx + u * u * tx;
     const y = omu * omu * sy + 2 * omu * u * cy + u * u * ty;
     return { x, y };
+  }
+
+  function physarumOrganicControl(sx, sy, tx, ty, edgeIndex, timeSec) {
+    const mx = (sx + tx) / 2;
+    const my = (sy + ty) / 2;
+    const perpX = -(ty - sy);
+    const perpY = tx - sx;
+    const len = Math.sqrt(perpX * perpX + perpY * perpY) || 1;
+    const noiseOffset = (Math.sin(edgeIndex * 0.7 + timeSec * 0.3) * 15) / len;
+    const cx = mx + perpX * noiseOffset;
+    const cy = my + perpY * noiseOffset;
+    return { cx, cy };
+  }
+
+  function endpointOnScreenForContainer(container, lx, ly, marginPx) {
+    if (!_physarumScreenPt) _physarumScreenPt = new PIXI.Point();
+    _physarumScreenPt.set(lx, ly);
+    container.toGlobal(_physarumScreenPt, _physarumScreenPt);
+    const sw = app.screen.width;
+    const sh = app.screen.height;
+    return (
+      _physarumScreenPt.x >= -marginPx &&
+      _physarumScreenPt.x <= sw + marginPx &&
+      _physarumScreenPt.y >= -marginPx &&
+      _physarumScreenPt.y <= sh + marginPx
+    );
+  }
+
+  function physarumEdgeColorByType(linkType, flux) {
+    const lt = linkType || 'CALLS';
+    if (lt === 'DARK_FORCE' || lt === 'DARK') return 0xf59e0b;
+    if (lt === 'IMPORTS') return COLORS.edgeImports;
+    if (lt === 'INHERITS') return COLORS.edgeInherits;
+    if (lt === 'ENTANGLED') return 0xf59e0b;
+    if (lt === 'DECORATES') return COLORS.edgeDecorates;
+    if (lt === 'DEFINES') return COLORS.edgeDefines;
+    return lerpColor(0x22d3ee, 0xffffff, flux);
+  }
+
+  function drawPhysarumDashedQuadratic(gfx, sx, sy, cx, cy, tx, ty, width, color, alpha) {
+    const steps = 20;
+    let prev = quadBezierPoint(sx, sy, cx, cy, tx, ty, 0);
+    const dash = 6;
+    const gap = 5;
+    let drawn = true;
+    let inDash = 0;
+    for (let i = 1; i <= steps; i++) {
+      const u = i / steps;
+      const pt = quadBezierPoint(sx, sy, cx, cy, tx, ty, u);
+      const seg = Math.hypot(pt.x - prev.x, pt.y - prev.y);
+      let t0 = 0;
+      while (t0 < seg - 1e-6) {
+        const cap = drawn ? dash : gap;
+        const need = cap - inDash;
+        const step = Math.min(need, seg - t0);
+        const f1 = t0 / seg;
+        const f2 = (t0 + step) / seg;
+        const ax = prev.x + (pt.x - prev.x) * f1;
+        const ay = prev.y + (pt.y - prev.y) * f1;
+        const bx = prev.x + (pt.x - prev.x) * f2;
+        const by = prev.y + (pt.y - prev.y) * f2;
+        if (drawn) {
+          gfx.lineStyle(width, color, alpha);
+          gfx.moveTo(ax, ay);
+          gfx.lineTo(bx, by);
+        }
+        t0 += step;
+        inDash += step;
+        if (inDash >= cap - 1e-6) {
+          drawn = !drawn;
+          inDash = 0;
+        }
+      }
+      prev = pt;
+    }
+  }
+
+  function drawGalaxyPhysarumEdges(timeSec) {
+    if (!galaxyEdgeGfx || !world || !app) return;
+    galaxyEdgeGfx.clear();
+    galaxyEdgeGfx.visible = true;
+    const margin = 120;
+    const maxNW = model && model.maxNodeWeight > 0 ? model.maxNodeWeight : 1;
+    const maxEW = model && model.maxEdgeWeight > 0 ? model.maxEdgeWeight : 1;
+
+    const solid = [];
+    const dashed = [];
+
+    for (let e = 0; e < simLinks.length; e++) {
+      const l = simLinks[e];
+      const sid = typeof l.source === 'object' && l.source !== null ? l.source.id : l.source;
+      const tid = typeof l.target === 'object' && l.target !== null ? l.target.id : l.target;
+      const s = typeof l.source === 'object' && l.source !== null && l.source.x != null
+        ? l.source
+        : simNodes.find(n => n.id === sid);
+      const t = typeof l.target === 'object' && l.target !== null && l.target.x != null
+        ? l.target
+        : simNodes.find(n => n.id === tid);
+      if (!s || !t || s.x == null || t.x == null) continue;
+
+      const vs = endpointOnScreenForContainer(world, s.x, s.y, margin);
+      const vt = endpointOnScreenForContainer(world, t.x, t.y, margin);
+      if (!vs && !vt) continue;
+
+      const cS = s.totalEdgeWeight || 0;
+      const cT = t.totalEdgeWeight || 0;
+      let flux = (cS + cT) / (2 * maxNW);
+      if (!Number.isFinite(flux) || maxNW <= 0) {
+        flux = Math.min((l.weight || 1) / maxEW, 1);
+      }
+      flux = Math.min(1, Math.max(0, flux));
+
+      const pulse = 1.0 + Math.sin(timeSec * 0.8 + e * 0.5) * 0.15;
+      const baseThickness = lerp(0.5, 6.0, flux);
+      const thickness = baseThickness * pulse;
+      const baseAlpha = lerp(0.08, 0.9, flux);
+      let alpha = baseAlpha * (0.85 + pulse * 0.15);
+
+      const lt = l.type || 'CALLS';
+      const edgeKey = sid < tid ? sid + '\0' + tid : tid + '\0' + sid;
+      const pulseUntil = traceEdgePulseUntil.get(edgeKey);
+      if (pulseUntil != null && performance.now() < pulseUntil) {
+        alpha = Math.min(1, alpha * 1.55);
+      }
+
+      const { cx, cy } = physarumOrganicControl(s.x, s.y, t.x, t.y, e, timeSec);
+      const col = physarumEdgeColorByType(lt, flux);
+      if (lt === 'DARK_FORCE' || lt === 'DARK') {
+        alpha *= 0.55;
+      }
+
+      const wBucket = Math.round(thickness * 4);
+      const aBucket = Math.round(alpha * 40);
+
+      const entry = {
+        sx: s.x,
+        sy: s.y,
+        cx,
+        cy,
+        tx: t.x,
+        ty: t.y,
+        width: Math.max(0.5, wBucket / 4),
+        col,
+        alpha,
+        wBucket,
+        aBucket,
+        lt,
+      };
+      if (lt === 'DARK_FORCE' || lt === 'DARK') {
+        dashed.push(entry);
+      } else {
+        solid.push(entry);
+      }
+    }
+
+    solid.sort((a, b) => {
+      if (a.col !== b.col) return a.col - b.col;
+      if (a.wBucket !== b.wBucket) return a.wBucket - b.wBucket;
+      return a.aBucket - b.aBucket;
+    });
+
+    let lastKey = '';
+    for (const ed of solid) {
+      const key = ed.col + ':' + ed.wBucket + ':' + ed.aBucket;
+      if (key !== lastKey) {
+        galaxyEdgeGfx.lineStyle(ed.width, ed.col, ed.alpha);
+        lastKey = key;
+      }
+      galaxyEdgeGfx.moveTo(ed.sx, ed.sy);
+      galaxyEdgeGfx.quadraticCurveTo(ed.cx, ed.cy, ed.tx, ed.ty);
+    }
+
+    for (const ed of dashed) {
+      drawPhysarumDashedQuadratic(
+        galaxyEdgeGfx,
+        ed.sx,
+        ed.sy,
+        ed.cx,
+        ed.cy,
+        ed.tx,
+        ed.ty,
+        Math.max(0.5, ed.width * 0.9),
+        ed.col,
+        ed.alpha
+      );
+    }
+
+    galaxyEdgeGfx.lineStyle(0);
+
+    const now = performance.now();
+    const expiredKeys = [];
+    for (const [k, until] of traceEdgePulseUntil) {
+      if (until < now) expiredKeys.push(k);
+    }
+    for (let i = 0; i < expiredKeys.length; i++) {
+      traceEdgePulseUntil.delete(expiredKeys[i]);
+    }
+  }
+
+  function drawSubviewPhysarumEdges(edgeGfx, coordContainer, edges, timeSec) {
+    if (!edgeGfx) return;
+    edgeGfx.clear();
+    if (!coordContainer || !edges || !edges.length) {
+      edgeGfx.lineStyle(0);
+      return;
+    }
+    const margin = 100;
+    const deg = new Map();
+    for (const edge of edges) {
+      const s = edge.source;
+      const t = edge.target;
+      if (!s || !t) continue;
+      deg.set(s, (deg.get(s) || 0) + 1);
+      deg.set(t, (deg.get(t) || 0) + 1);
+    }
+    let maxD = 1;
+    for (const v of deg.values()) maxD = Math.max(maxD, v);
+
+    const solid = [];
+    const dashed = [];
+
+    for (let ei = 0; ei < edges.length; ei++) {
+      const edge = edges[ei];
+      const s = edge.source;
+      const t = edge.target;
+      if (!s || !t || s.x == null || t.x == null) continue;
+
+      const vs = endpointOnScreenForContainer(coordContainer, s.x, s.y, margin);
+      const vt = endpointOnScreenForContainer(coordContainer, t.x, t.y, margin);
+      if (!vs && !vt) continue;
+
+      const dS = deg.get(s) || 1;
+      const dT = deg.get(t) || 1;
+      let flux = (dS + dT) / (2 * maxD);
+      flux = Math.min(1, Math.max(0, flux));
+
+      const pulse = 1.0 + Math.sin(timeSec * 0.8 + ei * 0.5) * 0.15;
+      const thickness = lerp(0.5, 6.0, flux) * pulse;
+      const baseAlpha = lerp(0.08, 0.9, flux);
+      const alpha = baseAlpha * (0.85 + pulse * 0.15);
+      const lt = edge.type || 'CALLS';
+      const col = physarumEdgeColorByType(lt, flux);
+      let useAlpha = alpha;
+      if (lt === 'DARK_FORCE' || lt === 'DARK') {
+        useAlpha *= 0.55;
+      }
+      const { cx, cy } = physarumOrganicControl(s.x, s.y, t.x, t.y, ei, timeSec);
+      const wBucket = Math.round(thickness * 4);
+      const aBucket = Math.round(useAlpha * 40);
+      const entry = {
+        sx: s.x,
+        sy: s.y,
+        cx,
+        cy,
+        tx: t.x,
+        ty: t.y,
+        width: Math.max(0.5, wBucket / 4),
+        col,
+        alpha: useAlpha,
+        wBucket,
+        aBucket,
+        lt,
+      };
+      if (lt === 'DARK_FORCE' || lt === 'DARK') {
+        dashed.push(entry);
+      } else {
+        solid.push(entry);
+      }
+    }
+
+    solid.sort((a, b) => {
+      if (a.col !== b.col) return a.col - b.col;
+      if (a.wBucket !== b.wBucket) return a.wBucket - b.wBucket;
+      return a.aBucket - b.aBucket;
+    });
+
+    let lastKey = '';
+    for (const ed of solid) {
+      const key = ed.col + ':' + ed.wBucket + ':' + ed.aBucket;
+      if (key !== lastKey) {
+        edgeGfx.lineStyle(ed.width, ed.col, ed.alpha);
+        lastKey = key;
+      }
+      edgeGfx.moveTo(ed.sx, ed.sy);
+      edgeGfx.quadraticCurveTo(ed.cx, ed.cy, ed.tx, ed.ty);
+    }
+
+    for (const ed of dashed) {
+      drawPhysarumDashedQuadratic(
+        edgeGfx,
+        ed.sx,
+        ed.sy,
+        ed.cx,
+        ed.cy,
+        ed.tx,
+        ed.ty,
+        Math.max(0.5, ed.width * 0.9),
+        ed.col,
+        ed.alpha
+      );
+    }
+
+    edgeGfx.lineStyle(0);
   }
 
   function tickAndRenderStarView() {
@@ -3837,19 +4142,7 @@
     const signalGfx = sc._signalGfx;
     const particles = sc._signalParticles;
 
-    edgeGfx.clear();
-    for (const edge of edges) {
-      const s = edge.source;
-      const t = edge.target;
-      if (!s || !t || s.x == null || t.x == null) continue;
-      const pulse = 0.15 + 0.1 * Math.sin(time * 2 + (s.index || 0));
-      edgeGfx.lineStyle(1.5, edge.color, pulse);
-      const midX = (s.x + t.x) / 2 + edge._curveOffset;
-      const midY = (s.y + t.y) / 2 - 20;
-      edgeGfx.moveTo(s.x, s.y);
-      edgeGfx.quadraticCurveTo(midX, midY, t.x, t.y);
-    }
-    edgeGfx.lineStyle(0);
+    drawSubviewPhysarumEdges(edgeGfx, sc, edges, time);
 
     signalGfx.clear();
     for (const p of particles) {
@@ -3860,14 +4153,14 @@
       const s = edge.source;
       const t = edge.target;
       if (!s || !t) continue;
-      const midX = (s.x + t.x) / 2 + edge._curveOffset;
-      const midY = (s.y + t.y) / 2 - 20;
-      const pos = quadBezierPoint(s.x, s.y, midX, midY, t.x, t.y, p.progress);
+      const ei = edges.indexOf(edge);
+      const { cx, cy } = physarumOrganicControl(s.x, s.y, t.x, t.y, ei >= 0 ? ei : 0, time);
+      const pos = quadBezierPoint(s.x, s.y, cx, cy, t.x, t.y, p.progress);
       signalGfx.beginFill(p.color, 0.7);
       signalGfx.drawCircle(pos.x, pos.y, 2.5);
       signalGfx.endFill();
       const tp = Math.max(0, p.progress - 0.06);
-      const tpos = quadBezierPoint(s.x, s.y, midX, midY, t.x, t.y, tp);
+      const tpos = quadBezierPoint(s.x, s.y, cx, cy, t.x, t.y, tp);
       signalGfx.beginFill(p.color, 0.25);
       signalGfx.drawCircle(tpos.x, tpos.y, 1.5);
       signalGfx.endFill();
@@ -3895,19 +4188,7 @@
     const signalGfx = pc._signalGfx;
     const particles = pc._signalParticles;
 
-    edgeGfx.clear();
-    for (const edge of edges) {
-      const s = edge.source;
-      const t = edge.target;
-      if (!s || !t || s.x == null || t.x == null) continue;
-      const pulse = 0.15 + 0.1 * Math.sin(time * 2 + (s.index || 0));
-      edgeGfx.lineStyle(1.5, edge.color, pulse);
-      const midX = (s.x + t.x) / 2 + edge._curveOffset;
-      const midY = (s.y + t.y) / 2 - 15;
-      edgeGfx.moveTo(s.x, s.y);
-      edgeGfx.quadraticCurveTo(midX, midY, t.x, t.y);
-    }
-    edgeGfx.lineStyle(0);
+    drawSubviewPhysarumEdges(edgeGfx, pc, edges, time);
 
     signalGfx.clear();
     for (const p of particles) {
@@ -3918,14 +4199,14 @@
       const s = edge.source;
       const t = edge.target;
       if (!s || !t) continue;
-      const midX = (s.x + t.x) / 2 + edge._curveOffset;
-      const midY = (s.y + t.y) / 2 - 15;
-      const pos = quadBezierPoint(s.x, s.y, midX, midY, t.x, t.y, p.progress);
+      const ei = edges.indexOf(edge);
+      const { cx, cy } = physarumOrganicControl(s.x, s.y, t.x, t.y, ei >= 0 ? ei : 0, time);
+      const pos = quadBezierPoint(s.x, s.y, cx, cy, t.x, t.y, p.progress);
       signalGfx.beginFill(p.color, 0.7);
       signalGfx.drawCircle(pos.x, pos.y, 2.5);
       signalGfx.endFill();
       const tp = Math.max(0, p.progress - 0.06);
-      const tpos = quadBezierPoint(s.x, s.y, midX, midY, t.x, t.y, tp);
+      const tpos = quadBezierPoint(s.x, s.y, cx, cy, t.x, t.y, tp);
       signalGfx.beginFill(p.color, 0.25);
       signalGfx.drawCircle(tpos.x, tpos.y, 1.5);
       signalGfx.endFill();
@@ -3944,28 +4225,60 @@
     if (!signalFlowGfx) return;
     signalFlowGfx.clear();
     if (viewLevel !== 'galaxy') return;
-    if (!entranceDone || !simNodes.length) return;
+    if (!entranceDone || !simNodes.length || !simLinks.length) return;
 
-    for (let pi = 0; pi < SIGNAL_PARTICLES.length; pi++) {
-      const p = SIGNAL_PARTICLES[pi];
-      const source = simNodes[p.sourceIdx];
-      const target = simNodes[p.targetIdx];
-      if (!source || !target || source.x == null || target.x == null) continue;
+    const timeSec = performance.now() / 1000;
+    const boostIds = galaxyFlowBoostNodeIdSet();
+    const nL = simLinks.length;
+    const edgeMeta = new Array(nL);
+    for (let e = 0; e < nL; e++) {
+      edgeMeta[e] = galaxyLinkFluxAndEndpoints(simLinks[e]);
+    }
 
-      p.progress += p.speed;
-      if (p.progress > 1) p.progress = 0;
+    for (let pi = 0; pi < MYCELIUM_POOL_SIZE; pi++) {
+      const p = myceliumParticlePool[pi];
+      if (!p.active) continue;
 
-      const { cx, cy } = signalEdgeControl(source, target);
-      const pos = quadBezierPoint(source.x, source.y, cx, cy, target.x, target.y, p.progress);
-      const col = edgeColor(p.linkType);
-      signalFlowGfx.beginFill(col, 0.6);
-      signalFlowGfx.drawCircle(pos.x, pos.y, 2);
+      const ei = p.edgeIndex;
+      if (ei < 0 || ei >= nL) {
+        p.active = false;
+        continue;
+      }
+
+      const { flux, s, t, sid, tid, lt } = edgeMeta[ei];
+      if (!s || !t || s.x == null || t.x == null) {
+        p.active = false;
+        continue;
+      }
+
+      const isDarkEdge = lt === 'DARK_FORCE' || lt === 'DARK';
+
+      const edgeBoost =
+        boostIds.size > 0 && (boostIds.has(sid) || boostIds.has(tid));
+      const spdMul = edgeBoost ? 2 : 1;
+      const alphaMul = edgeBoost ? 1.5 : 1;
+
+      const sp = p.speed * spdMul;
+      p.t += sp;
+      while (p.t >= 1) p.t -= 1;
+
+      if (isDarkEdge && !darkMatterVisible) continue;
+
+      const e = p.edgeIndex;
+      const { cx, cy } = physarumOrganicControl(s.x, s.y, t.x, t.y, e, timeSec);
+      const u = p.reverse ? 1 - p.t : p.t;
+      const pos = quadBezierPoint(s.x, s.y, cx, cy, t.x, t.y, u);
+      const col = physarumEdgeColorByType(lt, flux);
+      const pulse = 0.7 + Math.sin(timeSec * 3 + p.t * Math.PI * 2) * 0.3;
+      const baseA = Math.min(1, p.alpha * alphaMul);
+      const haloA = Math.min(1, baseA * pulse * 0.32);
+      const coreA = Math.min(1, baseA * pulse);
+
+      signalFlowGfx.beginFill(col, haloA);
+      signalFlowGfx.drawCircle(pos.x, pos.y, p.size * 2.15);
       signalFlowGfx.endFill();
-
-      const trailProgress = Math.max(0, p.progress - 0.05);
-      const tpos = quadBezierPoint(source.x, source.y, cx, cy, target.x, target.y, trailProgress);
-      signalFlowGfx.beginFill(col, 0.2);
-      signalFlowGfx.drawCircle(tpos.x, tpos.y, 1.5);
+      signalFlowGfx.beginFill(col, coreA);
+      signalFlowGfx.drawCircle(pos.x, pos.y, p.size);
       signalFlowGfx.endFill();
     }
   }
@@ -4340,6 +4653,9 @@
     darkMatterGfx = new PIXI.Graphics();
     darkMatterGfx.eventMode = 'none';
     layerEdges = new PIXI.Container();
+    galaxyEdgeGfx = new PIXI.Graphics();
+    galaxyEdgeGfx.eventMode = 'none';
+    layerEdges.addChild(galaxyEdgeGfx);
     entanglementGfx = new PIXI.Graphics();
     entanglementGfx.eventMode = 'none';
     layerNodes = new PIXI.Container();
@@ -4420,13 +4736,6 @@
         document.getElementById('fps-counter').textContent = fps + ' FPS';
         frames = 0;
         lastFps = now;
-        if (fps < 50 && signalParticleCap > 20) {
-          signalParticleCap = 20;
-          initSignalParticles();
-        } else if (fps >= 55 && signalParticleCap < 40) {
-          signalParticleCap = 40;
-          initSignalParticles();
-        }
       }
       if (viewLevel === 'galaxy') {
         if (simulation && simulation.alpha() > 0.002) {
@@ -4701,11 +5010,10 @@
       }
     }, 1.5);
     tl.add(() => {
-      edgePool.forEach((g, i) => {
-        if (!g.visible) return;
-        g.alpha = 0;
-        gsap.to(g, { alpha: 1, duration: 0.35, delay: i * 0.008 });
-      });
+      if (galaxyEdgeGfx) {
+        galaxyEdgeGfx.alpha = 0;
+        gsap.to(galaxyEdgeGfx, { alpha: 1, duration: 0.45, ease: 'sine.out' });
+      }
     }, 2.5);
     tl.add(() => {
       const files = stats.files || 0;
