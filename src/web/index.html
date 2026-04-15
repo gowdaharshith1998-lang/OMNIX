@@ -26,12 +26,13 @@
       50% { opacity: 0.35; }
     }
 
-    #graph-container {
+    #canvas-container {
       position: fixed;
       inset: 0;
       z-index: 1;
+      overflow: hidden;
     }
-    #graph-container canvas {
+    #canvas-container canvas {
       display: block;
       outline: none;
     }
@@ -355,7 +356,13 @@
   </div>
 
   <div id="ui-fade">
-    <div id="graph-container"></div>
+    <div id="canvas-container">
+      <canvas id="canvas-bg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;"></canvas>
+      <canvas id="canvas-edges" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;"></canvas>
+      <canvas id="canvas-nodes" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;"></canvas>
+      <canvas id="canvas-particles" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;"></canvas>
+      <canvas id="canvas-ui" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:all;cursor:default;"></canvas>
+    </div>
 
     <div class="hud glass" id="search-panel-wrap">
       <div id="search-panel" style="display:flex;align-items:center;gap:10px;width:100%;">
