@@ -27,6 +27,13 @@ No open failures at completion; the main correctness bug was `modpm` for even mo
 - **Skipped on purpose (broader auto-detection):** OS keychain (macOS Keychain, KWallet, Secret Service, Windows Credential Manager), 1Password/Bitwarden CLI, and browser extension bridges — all require different permissions, user consent flows, and often native bindings; the localhost-only, pattern-based scan is the minimal consistent threat model. Recursive directory search and git history were also excluded by spec to avoid exfiltrating large surfaces.
 - **Reflexion (iter 3):** None required; scanner and tests passed after untangling a truncated `run_scan` and fixing project-root `.env` to use the analyze target (not CWD after `chdir` to `src/web`).
 
+## Integration #3 — Provider Fabric (2026-04-24)
+
+- **What shipped:** Python package `fabric` under `src/fabric/`: routing policy (`~/.omnix/fabric_config.json` with defaults on first run), provider health (last success within 60s), per-provider UTC daily budgets (check before call, commit cost after), transient retries and failover chains, idempotent in-flight dedup, in-memory telemetry ring (1000) + `GET /api/fabric/telemetry` + `GET /api/fabric/spend` (aggregated today/month per provider from telemetry + budget caps). Provider calls use **stdlib only** (`urllib.request`, `ThreadPoolExecutor`). HTTP routes on the analyze server: `POST /api/fabric/dispatch`, `GET /api/fabric/status`, `GET /api/fabric/telemetry`, `GET /api/fabric/spend`. Each dispatch writes a **metadata-only** ML-DSA-65 receipt (`call_*.json` + `.sig` when `secret.pem` exists); stderr warning if unsigned. Localhost-only enforcement uses `scan.handler.is_localhost_request` (peer IP + Host + Origin).
+- **Vault bridge (spec C4):** The browser passes `provider_key` and optional `provider_keys` (for failover); nothing is persisted server-side; API keys are cleared after the HTTP call. No new runtime dependencies (`pyproject.toml` still `click` only); `setuptools` packages extended with `fabric`.
+- **Deferred (Month 2+):** Streaming responses, token pre-estimation / reserved budget, trust scoring, dedicated agent-routing UI, Integration #3.5 localhost protocol to push keys without embedding in JSON.
+- **Regression:** `pytest tests/fabric/` (25), `pytest tests/axiom/ tests/scan/` (48), `npx vitest run tests/vault` (40/40).
+
 ---
 
 ## Day 2 close (2026-04-24, ~01:00 local)

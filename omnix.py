@@ -168,6 +168,22 @@ def main() -> None:
                 self._send_json(data)
                 return
 
+            if path == "/api/fabric/status":
+                from src.fabric.handler import handle_fabric_status_get
+
+                handle_fabric_status_get(self)
+                return
+            if path == "/api/fabric/telemetry":
+                from src.fabric.handler import handle_fabric_telemetry_get
+
+                handle_fabric_telemetry_get(self)
+                return
+            if path == "/api/fabric/spend":
+                from src.fabric.handler import handle_fabric_spend_get
+
+                handle_fabric_spend_get(self)
+                return
+
             if path == "/api/timeline":
                 try:
                     with open(timeline_json, "rb") as f:
@@ -218,6 +234,12 @@ def main() -> None:
 
             if not isinstance(data, dict):
                 data = {}
+
+            if path == "/api/fabric/dispatch":
+                from src.fabric.handler import handle_fabric_dispatch_post
+
+                handle_fabric_dispatch_post(self, data)
+                return
 
             if path == "/api/vault/scan":
                 from pathlib import Path
