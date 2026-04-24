@@ -66,3 +66,41 @@ No open failures at completion; the main correctness bug was `modpm` for even mo
 - Layer between agents (future Integration #7) and vault keys (shipped)
 - Responsibilities: policy-driven routing, failover, trust scoring, cost governance, telemetry, rate limit coordination
 - Do NOT conflate with auto-detection (that was #2C, already done)
+
+---
+
+## Day 2 close (2026-04-24, ~01:00 local)
+
+### Shipped
+- Integration #1: AXIOM ML-DSA-65 pure-Python signing (24 pytests, 10/10 NIST KAT)
+- Integration #2: Browser vault (PBKDF2 600K + AES-256-GCM, 36 vitest)
+- Integration #2B: Provider-first UI redesign (hid crypto vocabulary)
+- Integration #2C: Server-side API key auto-detection with signed receipts (24 pytest + 4 vitest)
+- Integration #2C-fix: Scan button visibility bug (state gate spec miss)
+- MIME fix in omnix.py (HEAD + GET + favicon 204)
+
+### Proven in production
+- omnix axiom verify succeeded on a live scan receipt → full sign/verify chain closed on real runtime data
+- Plaintext grep returns 0 on live receipts → P11 holds outside unit tests
+- Localhost-only enforcement confirmed via curl (evil.com Host → 403)
+
+### Known open items carried to Day 3
+- None blocking. Scan button fix verified in browser at Day 2 close.
+
+### Velocity notes
+- ~9 hours total elapsed for Integrations #1, #2, #2B, #2C
+- At this pace the 30-day bet finishes in ~5-10 real days
+- Checkpoint rule revised: every 3 integrations (not every 10 days) because work outpaces days
+- Human-witnessed smoke tests are mandatory before stamping integrations "done"
+
+### Strategic context (Apr 24 2026 landscape)
+- Graphify released Apr 3 2026, 22k stars in 10 days — commoditized graph-of-codebase layer
+- ZERO competitors sign code intelligence events with ML-DSA-65
+- OMNIX moat: everything ABOVE the graph (vault, signed receipts, legacy migration)
+- Positioning: "The only code intelligence IDE where every AI-generated change is cryptographically signed"
+
+### Day 3 target
+- Integration #3: Provider Fabric — governance + routing + failover layer between agents and vault
+- NOT auto-detection (that was #2C)
+- Responsibilities: policy routing, failover, cost governance, telemetry, signed call receipts
+- ~2-3 hours expected at current pace

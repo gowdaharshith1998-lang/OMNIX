@@ -1101,7 +1101,16 @@ export function createVaultUI(_vault, triggerButton) {
       body.className = 'body';
       const initOk = await vault.isInitialized();
       const unlOk = vault.isUnlocked();
-      if (initOk && unlOk) {
+      /*
+       * Root cause (2C): mountScanSection was gated on initOk && unlOk only. On a fresh
+       * device, isInitialized() and isUnlocked() are both false, so the scan block never
+       * ran despite view === 'grid'. Spec: show scan for STATE_SETUP_FIRST_KEY (no vault
+       * yet) and STATE_GRID_UNLOCKED (vault exists and unlocked) — i.e. !initOk || unlOk.
+       * Manual QA: open app (e.g. http://localhost:7777), open AI Keys modal, confirm
+       * "Scan for existing keys" appears above the provider grid on a fresh vault; click
+       * and confirm detections list renders.
+       */
+      if (!initOk || unlOk) {
         mountScanSection(body, vault, {
           requestRender: () => {
             void render();
