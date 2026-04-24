@@ -111,3 +111,245 @@ No open failures at completion; the main correctness bug was `modpm` for even mo
 - NOT auto-detection (that was #2C)
 - Responsibilities: policy routing, failover, cost governance, telemetry, signed call receipts
 - ~2-3 hours expected at current pace
+
+---
+
+## Agent architecture + product vision synthesis — April 24 2026
+
+### The primary reframe
+
+Everyone else is building smarter brains (LLMs).
+We build the body and the thinking patterns that let an average brain
+outperform a genius one.
+
+LLM = commodity. Body = infrastructure. Reasoning modes = training.
+Together = agent operating 2-3 std dev above underlying model.
+Path from 46% SWE-Bench Pro to 90%+.
+
+Use as primary positioning. Replaces "graph-native code intelligence."
+
+One-liner for landing / deck / investor emails:
+"Everyone else is building smarter AIs.
+ We're building the body and the thinking patterns
+ they need to actually use their intelligence."
+
+### Layer 1 — The body (organs the LLM needs)
+
+Eyes           = graph (sees structure, not text)                    [#6, #8]
+Hands          = graph-mutation edits (proposed, applied atomically) [#7]
+Ears           = structured event streams from runtime sandbox       [#7 EXECUTE]
+Memory         = episodic tasks + skill library, signed chain        [post-30-day]
+Nervous system = multi-provider fabric routing by organ/task type    [#3 done, wiring in #7]
+Muscles        = containerized execution with capability gates       [#7]
+Proprioception = confidence + budget tracking per step               [#7]
+Spine          = AXIOM receipts on every organ's action              [#1 done]
+
+### Layer 2 — Reasoning modes (how the brain uses the body)
+
+1. Multi-hypothesis parallel reasoning
+   Enumerate 5-10 hypotheses with cost-to-verify + prior.
+   Verify cheapest first, not most likely.
+   Research: BAVT (arXiv 2603.12634), ToT, GoT.
+
+2. Bidirectional reasoning (forward + backward)
+   Forward from entry point + backward from symptom.
+   Cause = where chains converge.
+   Research: AlphaProof-style convergent proof search.
+
+3. Confidence-gated halting (metacognition)
+   Agent tracks own confidence; <0.6 triggers clarify/consult/defer.
+   Research: Metacognitive LLM Agents 2026, Self-Evolving Agents survey 2026.
+
+4. Analogy retrieval from past episodes
+   Query similar-shape past solves. Top-3 as context.
+   Research: Memory-R1 2026, SimpleMem 2026, HiMeS 2026.
+
+5. Abstraction ladder (explicit zoom primitives)
+   ZOOM_OUT / ZOOM_IN / ZOOM_LATERAL as first-class tools.
+   Backed by graph queries.
+   Research: Hierarchical Planning in LLM Agents 2025-26.
+
+6. Contrastive reasoning
+   Propose 3 approaches, compare on axes, sign justification for pick.
+   Signed justification = part of audit trail (unique to OMNIX).
+   Research: Contrastive CoT (+10-15% code accuracy).
+
+7. Programmatic reasoning
+   Reason by writing + running code in sandbox, not prose, when task is
+   verifiable.
+   Research: PAL 2023 + PAL 2026 variants (+20-30% on verifiable tasks).
+
+### Layer 3 — Verification loops (convergence architecture)
+
+Single-shot ceiling: ~50%. Loop-to-convergence ceiling: 88-93%.
+
+Integration #7 six-gate state machine:
+  PROPOSE → EXTRACT → GENERATE_TESTS → EXECUTE →
+    fail: FEEDBACK → loop
+    pass: CONSENSUS (multi-provider, quadratic voting) →
+      disagree: ADVERSARIAL_ATTACK → loop
+      agree: GRAPH_CHECK (impact on callers/types/tests) →
+        impact: REVIEW → loop
+        clean: CONSISTENCY_CHECK (5 representations) →
+          inconsistent: CLARIFY → loop
+          consistent: SIGN → COMMIT
+
+Cannot exit without passing all 6 gates.
+Failing is cheap. Convergence is robust.
+
+Stacked accuracy estimates:
+  Baseline Claude SWE-Bench Pro:            46%
+  + PBT verification (#5):                  57%
+  + Execution feedback:                     72%
+  + Multi-provider consensus:               81%
+  + Graph-grounded verification (moat):     88%
+  + Multi-representation consistency:       92%
+
+### Integration #4 — Drill-down editor vision
+
+Galaxy = navigation surface (home view).
+Click node → Monaco editor opens for that function.
+Inside editor: two modes, seamless:
+  - Manual: user types, Monaco LSP features, familiar Cursor-like feel
+  - AI: prompt box, agent writes, user reviews diff, approves or edits
+Save → re-index graph → sign receipt → back to galaxy.
+
+Monaco chosen over CodeMirror because once user drills in, familiar beats
+differentiated. Galaxy already provided the differentiation. Inside
+editor, muscle memory wins.
+
+No mode picker. No "graph-first-ops cards." Standard text editor,
+reached via galaxy, fed graph context to the AI, signed receipts on
+save.
+
+### Integration #4.25 — Progressive disclosure + visual hierarchy  [NEW]
+
+Addresses the cluttered-feeling problem. Not a rebuild — improvements.
+
+Progressive disclosure via zoom levels:
+  Galaxy view    → ~20 constellations (modules/top folders)
+  Constellation  → ~50 files within
+  File view      → functions within
+  Node           → drill down opens editor
+
+Visual hierarchy:
+  Node size      = centrality (PageRank on graph)
+  Node brightness= recency of change
+  Node color     = health (tests passing, errors, etc.)
+  Edge thickness = call frequency or hotness
+
+Estimate: 4-5 days of work. Between #4 and #4.5.
+Do NOT rebuild rendering layer. Rendering (WebGL in Chromium,
+AMD-driver-workaround known) is working. Add layers, don't replace.
+
+### Integration #4.5 — Presence substrate  [NEW]
+
+Lightweight real-time layer. Enables collaboration layers later.
+
+Ships in 30-day bet:
+  - WebSocket connection per user
+  - Cursor position broadcasting
+  - Galaxy presence (who's viewing which region)
+  - Node-level presence (who's editing which function)
+
+Uses Yjs or Automerge as CRDT foundation.
+Estimate: ~3 days.
+
+### Collaboration architecture — four scales
+
+1. Human + AI in editor         → in 30-day scope via #4 + #7
+2. Human + Human real-time      → presence only in 30-day (#4.5);
+                                  full co-editing Month 2+
+3. Agent + Agent                → in 30-day scope via #7 multi-agent loop
+4. Team + Team workflows        → stubs in 30-day (data model only);
+                                  full UI Month 2+
+
+Decision split (2) and (4) full scope: defer until 30-day bet state at
+Day 20 checkpoint.
+
+Result = "multiplayer graph-native IDE where humans and AIs work
+together with cryptographic provenance." Intersection no competitor
+occupies.
+
+### Design tooling choices
+
+Figma          → sidebar, editor chrome, panels, onboarding
+                 Hand off to Claude Code for implementation.
+                 NOT Framer (React export pollutes codebase).
+
+Gephi          → offline graph layout exploration against AXIOM v2 data.
+                 Try force-directed, hierarchical, modularity.
+                 Pick what reveals structure, then implement in PixiJS.
+
+Shadertoy      → shader experiments for visual effects.
+                 Port GLSL into PixiJS filters.
+
+Spector.js     → WebGL debugging / performance profiling.
+                 Browser extension.
+
+PixiJS Playground → PixiJS-specific effect prototyping.
+
+DO NOT:
+  - Switch to Three.js, Cosmograph, Sigma.js mid-bet (rebuild trap)
+  - Use Framer React export
+  - Redo the galaxy rendering layer
+
+### Updated integration roadmap (13 total, +1 = 14 with #4.25)
+
+✅ #1  AXIOM ML-DSA-65 signing
+✅ #2  Vault + Multi-Key API Manager
+✅ #2B UI redesign "Connect your AI"
+✅ #2C Scan + auto-detection
+✅ #3  Provider Fabric
+🔄 #3.5 Sidebar shell + Providers tab          ← TODAY
+⏳ #4   Drill-down editor (Monaco + AI mode)
+⏳ #4.25 Progressive disclosure + visual hierarchy  [NEW]
+⏳ #4.5 Presence substrate (Yjs/WebSocket)          [NEW]
+⏳ #5   PBT loop (Hypothesis + fast-check)
+⏳ #6   Tree-Sitter 8 languages
+⏳ #7   Multi-agent PEV (body + reasoning + loops)
+⏳ #8   Graph→LLM bridge (CGBridge pattern)
+⏳ #9   Active Inference planner (pymdp)    [KEEP — 5000x moat]
+⏳ #10  OpenEvolve loop (OMNIX's own kernel) [drop-order 2]
+⏳ #11  LFM2 edge deployment
+⏳ #12  NCA self-healing visualization       [drop-order 1]
+
+Drop order at Day 10 checkpoint if behind:
+  1. #12 NCA viz (visual only)
+  2. #10 OpenEvolve
+  KEEP #9 Active Inference — only 5000x cost layer in world
+
+Post-Day-30 roadmap:
+  - Episodic memory store with signed chain
+  - CPG with DFG + taint edges (security organ upgrade)
+  - Analogy retrieval vector store
+  - Hypothesis-tree + zoom + contrastive + programmatic reasoning
+    modes wired into #7's agent prompts
+  - Full real-time co-editing via CRDTs (collaboration scale 2)
+  - Team review workflows (collaboration scale 4)
+  - FHE + Confidential Computing enterprise path
+  - Open AXIOM-Receipt-Format standard
+  - SBIR/DARPA/DIU/AFWERX government channel
+
+### Narrative anchor (for pitch/landing/investor emails)
+
+The 100-Year Mirror frame:
+  In 2126, engineers will find it absurd that:
+    - AI wrote code without graph context
+    - Code changes had no cryptographic provenance
+    - Every codebase was re-parsed from scratch per LLM call
+    - Dev tools competed instead of composing through a standard substrate
+    - Fault localization waited for prod failures instead of graph prediction
+
+OMNIX is building what 2126 takes for granted.
+
+Narrative only. Not roadmap. Use in external surfaces.
+
+### Decisions owed by Day 30
+
+1. AXIOM name collision (current default: Option 1 — internal only)
+2. Distribution model: closed-source SaaS vs open kernel vs standards-first
+   (current default: closed product + open receipt format + free binary tier)
+3. Demo reel / landing page timing (current: Day 30)
+4. Collaboration scale 2+4 full scope (decide at Day 20 checkpoint)
+
