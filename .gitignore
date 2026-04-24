@@ -38,3 +38,9 @@ public.pem
 coverage/
 .coverage
 htmlcov/
+
+# Cursor Playwright debug artifacts
+.playwright-mcp/
+
+# Generated Gephi export (regenerate with scripts/export_gephi.py)
+graph.gexf
