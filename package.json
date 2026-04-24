@@ -1,0 +1,14 @@
+{
+  "name": "omnix-vault",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "vitest run tests/vault",
+    "test:watch": "vitest tests/vault"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^5.0.0",
+    "happy-dom": "^12.0.0",
+    "vitest": "^1.0.0"
+  }
+}

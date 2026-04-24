@@ -5,8 +5,29 @@ from __future__ import annotations
 
 import argparse
 import json
+import mimetypes
 import os
 import sys
+
+
+def _static_content_type(rel: str) -> str:
+    ext = os.path.splitext(rel)[1].lower()
+    overrides = {
+        ".js": "application/javascript",
+        ".mjs": "application/javascript",
+        ".css": "text/css",
+        ".json": "application/json",
+        ".html": "text/html",
+        ".svg": "image/svg+xml",
+        ".wasm": "application/wasm",
+    }
+    if ext in overrides:
+        base = overrides[ext]
+        if ext == ".html":
+            return f"{base}; charset=utf-8"
+        return base
+    guessed, _ = mimetypes.guess_type(rel)
+    return guessed or "application/octet-stream"
 
 
 def main() -> None:
@@ -93,6 +114,10 @@ def main() -> None:
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
     class OmnixHandler(BaseHTTPRequestHandler):
+        def _write_body(self, data: bytes) -> None:
+            if not getattr(self, "_omit_response_body", False):
+                self.wfile.write(data)
+
         def _send_json(self, data: object) -> None:
             response = json.dumps(data).encode("utf-8")
             self.send_response(200)
@@ -100,12 +125,23 @@ def main() -> None:
             self.send_header("Content-Length", str(len(response)))
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-            self.wfile.write(response)
+            self._write_body(response)
+
+        def do_HEAD(self) -> None:
+            self._omit_response_body = True
+            try:
+                self.do_GET()
+            finally:
+                self._omit_response_body = False
 
         def do_GET(self) -> None:
             from urllib.parse import urlparse
 
             path = urlparse(self.path).path
+            if path == "/favicon.ico":
+                self.send_response(204)
+                self.end_headers()
+                return
             if path == "/api/graph":
                 try:
                     with open(graph_json, "rb") as f:
@@ -118,7 +154,7 @@ def main() -> None:
                 self.send_header("Content-Length", str(len(data)))
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
-                self.wfile.write(data)
+                self._write_body(data)
                 return
 
             if path == "/api/ai/status":
@@ -146,7 +182,7 @@ def main() -> None:
                 self.send_header("Content-Length", str(len(data)))
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
-                self.wfile.write(data)
+                self._write_body(data)
                 return
 
             if path == "/" or path == "":
@@ -161,12 +197,12 @@ def main() -> None:
                 return
             with open(fp, "rb") as f:
                 body = f.read()
-            ctype = "text/html; charset=utf-8" if rel.endswith(".html") else "application/octet-stream"
+            ctype = _static_content_type(rel)
             self.send_response(200)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            self._write_body(body)
 
         def do_POST(self) -> None:
             from urllib.parse import urlparse
@@ -182,6 +218,19 @@ def main() -> None:
 
             if not isinstance(data, dict):
                 data = {}
+
+            if path == "/api/vault/scan":
+                from pathlib import Path
+
+                from src.scan.handler import handle_vault_scan_post
+
+                handle_vault_scan_post(self, project_root=Path(target))
+                return
+            if path == "/api/vault/scan/consume":
+                from src.scan.handler import handle_vault_scan_consume_post
+
+                handle_vault_scan_consume_post(self, data)
+                return
 
             if path == "/api/ai/diagnose":
                 dir_path = str(data.get("directory", ""))

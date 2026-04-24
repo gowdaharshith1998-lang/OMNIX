@@ -1,7 +1,40 @@
-__pycache__/
-*.pyc
+# runtime state — regenerated on analyze, must not be tracked
+omnix.db
 *.db
+*.db-journal
 src/web/graph_data.json
 src/web/timeline_data.json
-.DS_Store
+
+# python build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# node
 node_modules/
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# secrets — never commit under any circumstance
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secret.pem
+public.pem
+~/.omnix/
+
+# test artifacts
+/tmp/
+coverage/
+.coverage
+htmlcov/
