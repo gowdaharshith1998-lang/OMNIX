@@ -353,3 +353,28 @@ Narrative only. Not roadmap. Use in external surfaces.
 3. Demo reel / landing page timing (current: Day 30)
 4. Collaboration scale 2+4 full scope (decide at Day 20 checkpoint)
 
+
+---
+
+## Day 5 — research day, no ship (2026-04-24)
+
+**Attempted:** Galaxy visual upgrade matching docs/design-references/galaxy_reference.png
+- #4.1: cluster overlay on existing renderer (visual delta insufficient)
+- #4.1.5: full hub+leaf rebuild (over-clustered, only one cluster interactive)
+- #4.1.6: cluster merge + idle drift + d3-force drop (still didn't land cleanly in browser)
+
+**Outcome:** All three iterations stashed (`git stash list` → galaxy-4.1-4.1.5-4.1.6-incomplete-day5-revert).
+Working tree reverted to `d6d2bcd`. Reference images backed up to ~/omnix-references/.
+
+**What's preserved in the stash:**
+- Pure data layer: Mulberry32-seeded Louvain + cluster merge (15→6 clusters), PageRank, FNV-1a cache key, 8-color palette, sunflower centroid layout, perpendicular Bezier control
+- 127 passing vitest tests (clustering, pagerank, layout, regression, super_graph, interactivity)
+- Test fixture: 684-node.json snapshot of OMNIX self-analysis
+- Renderer scaffolding: nebula/filament/sparkle/hub-glow PIXI containers, perf-mode auto-downgrade ladder, runtime-injected #gx-perf-mode badge
+- NOTES.md sections for #4.1 and #4.1.5
+
+**Lesson:** Visual polish on a complex existing renderer carries 3-5x the time risk of greenfield work. The data layer was clean and shipped to test green on first try. The renderer integration with d3-force, existing pool, and AI trace overlay was where time disappeared. Future visual integrations: build the renderer in isolation first, integrate into existing app last.
+
+**Bet status:** 50% shipped, ~16% time elapsed (Day 5 of 30). Still well ahead.
+
+**Day 6 plan:** Integration #5 — PBT verification engine. Core product, not visual polish.
