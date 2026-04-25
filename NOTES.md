@@ -506,3 +506,40 @@ Pick one: (a) Provider Fabric port from AXIOM v2 (the original Day 3),
           (b) Monaco IDE shell (the 'proper UI' question that started this session),
           (c) Demo recording — find-bugs end-to-end on src/axiom with signed bundle
 Recommendation: (c) first — 30 min, gives you a shippable artifact for landing/pitch.
+
+---
+
+## Day 4 close (2026-04-25, evening)
+
+### #11-MEGA SHIPPED
+Commit at <fill in after push>. 201 pytest green. Universal language
+code intelligence + signed self-evolution + sandbox-isolated auto-fix.
+
+Real production artifacts on AXIOM-V2:
+- 10 ML-DSA-65 signed evolution receipts
+- decorated_definition pattern promoted with +0.34 quality delta
+- Receipt example fields: kind, grammar, mutation, node_type, evidence,
+  key_fp (sha256 of pubkey), schema_version, observed_at
+
+### Polish-pass list (file as integrations #11-MEGA-A through D + #11.6)
+- A: TS universal-pathway quality calibration (0.42 in production)
+- B: subprocess.Popen getattr trick → # nosec annotation
+- C: NOTES.md threat model section for Layer 6/7
+- D: Add explicit added_by field to evolution receipt schema
+- #11.6: Implement actual cargo fuzz / go test -fuzz / JQwik runners
+
+### Bet status (Day 4 close)
+Day 4 of 30. ~80% of 12 integrations shipped. Down to:
+- #4 Monaco IDE shell (5-7 days, the "proper UI")
+- #7 Multi-agent PEV (3 days)
+- #8 Graph→LLM bridge (3 days, may be partly absorbed by #11-MEGA L3)
+- #11.5 LFM2 edge (1-2 days)
+
+Drop list final: #9, #10, #12.
+
+Realistic bet finish: Day 12-15 not Day 30. Slack room for polish pass.
+
+### Day 5 first decision (deferred from Day 4 close)
+Pick one: (a) Demo recording (30 min, gives shippable artifact for
+launch) → recommended. (b) #4 Monaco IDE shell. (c) #7 Multi-agent PEV.
+
