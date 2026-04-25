@@ -122,6 +122,38 @@ def test_no_receipt(
     assert code in (0, 1)
 
 
+def test_zero_arity_function_skipped(
+    tmp_path: Path, graph_db_for_runner: str
+) -> None:
+    marker = tmp_path / "invoke_marker"
+    p = tmp_path / "zarity.py"
+    p.write_text(
+        f"""MARKER = {marker.as_posix()!r}
+def f():
+    MARKER.write_text("invoked", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
+    code, out = runner.run(
+        str(p),
+        function="f",
+        examples=10,
+        sign=False,
+        output_format="json",
+        graph_db_path=graph_db_for_runner,
+        codebase_root=str(REPO),
+    )
+    assert not marker.is_file()
+    assert code == 0
+    d = json.loads(out)
+    for r in d.get("results") or []:
+        if isinstance(r, dict) and r.get("name") == "f":
+            assert r.get("status") == "skipped_zero_arity"
+            assert r.get("reason") == "PBT requires at least one parameter"
+            return
+    assert False, "function f not in results"
+
+
 def test_json_mode(graph_db_for_runner: str) -> None:
     code, out = runner.run(
         str(FIX / "sample_typed.py"),

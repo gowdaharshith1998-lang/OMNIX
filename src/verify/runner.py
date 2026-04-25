@@ -219,26 +219,6 @@ def _pbt(
     return False
 
 
-def _run_zero_arity(
-    fn: Callable[..., Any], examples: int, failures: list[dict[str, Any]]
-) -> bool:
-    for _i in range(examples):
-        try:
-            _invoke(fn, ())
-        except Exception as e:  # noqa: BLE001
-            failures.append(
-                {
-                    "input": "()",
-                    "exception_type": type(e).__name__,
-                    "exception_message": str(e) or repr(e)[:10_000],
-                    "shrunk_input": "()",
-                    "shrunk_input_size_bytes": 2,
-                }
-            )
-            return True
-    return False
-
-
 def _invariant_smoke(
     tpath: Path, pair: tuple[str, str], scope: set[str]
 ) -> bool:
@@ -403,35 +383,38 @@ def run(
             st_desc[pn] = str(st0)[:500]
         fl: list[dict[str, Any]] = []
         if not params:
-            _run_zero_arity(fn, examples, fl)
+            # Zero-arity: no parameter space for PBT; do not invoke (avoids script entrypoints).
+            pass
         else:
             _pbt(
                 tpath, fn, fn_name, params, cshape, bmap, examples, fl
             )
         all_fail.extend(fl)
-        results.append(
-            {
-                "name": fn_name,
-                "lineno": s.get("lineno"),
-                "params": [list(t) for t in s["params"]],
-                "return_hint": s.get("return_hint"),
-                "strategies": st_desc,
-                "failures": fl,
-                "graph_signals": {
-                    "caller_count": sum(
-                        sum(d.values()) for d in cshape.values()  # type: ignore[call-overload, iterator, item, operator, arg-type, attribute]
-                    )
-                    if cshape
-                    else 0,
-                    "boundary_examples_count": sum(
-                        len(v) for v in bmap.values()  # type: ignore[call-overload, item, arg-type, attribute]
-                    )
-                    if bmap
-                    else 0,
-                    "invariant_pairs_count": len(ipairs),
-                },
-            }
-        )
+        r_one: dict[str, Any] = {
+            "name": fn_name,
+            "lineno": s.get("lineno"),
+            "params": [list(t) for t in s["params"]],
+            "return_hint": s.get("return_hint"),
+            "strategies": st_desc,
+            "failures": fl,
+            "graph_signals": {
+                "caller_count": sum(
+                    sum(d.values()) for d in cshape.values()  # type: ignore[call-overload, iterator, item, operator, arg-type, attribute]
+                )
+                if cshape
+                else 0,
+                "boundary_examples_count": sum(
+                    len(v) for v in bmap.values()  # type: ignore[call-overload, item, arg-type, attribute]
+                )
+                if bmap
+                else 0,
+                "invariant_pairs_count": len(ipairs),
+            },
+        }
+        if not params:
+            r_one["status"] = "skipped_zero_arity"
+            r_one["reason"] = "PBT requires at least one parameter"
+        results.append(r_one)
     if inv_fail:
         all_fail.append(
             {

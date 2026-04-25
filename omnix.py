@@ -68,13 +68,45 @@ def main() -> None:
         "--codebase-root", default=None, help="Analyzed root for rel paths in graph (default: OMNIX repo root)"
     )
 
+    fb = subparsers.add_parser("find-bugs", help="Scan a codebase for bugs (PBT + graph ranking)")
+    fb.add_argument("path", help="Path to codebase root")
+    fb.add_argument("--examples", type=int, default=50, help="PBT examples per function (default: 50)")
+    fb.add_argument(
+        "--top", type=int, default=10, help="Max findings in text summary (default: 10)"
+    )
+    fb.add_argument("--json", action="store_true", help="Print signed bundle JSON to stdout")
+    fb.add_argument(
+        "--no-bundle",
+        action="store_true",
+        help="Do not write a bundle to ~/.omnix/receipts",
+    )
+    fb.add_argument(
+        "--include-private",
+        action="store_true",
+        help="Verify top-level names starting with underscore",
+    )
+    fb.add_argument(
+        "--max-file-size", type=int, default=1_000_000, help="Skip .py files larger than this (bytes)"
+    )
+    fb.add_argument(
+        "--graph-db", dest="graph_db", default=None, help="SQLite graph DB (optional override)"
+    )
+
     args = parser.parse_args()
 
     if args.command is None:
         parser.print_help()
         sys.exit(0)
+    root_om = os.path.dirname(os.path.abspath(__file__))
+    if args.command == "find-bugs":
+        if root_om not in sys.path:
+            sys.path.insert(0, root_om)
+        from src.find_bugs import cli as _fb
+
+        rc = int(_fb.run(args))  # type: ignore[call-arg, misc, arg-type, assignment, assignment, unused-ignore, unused-ignore]
+        sys.exit(0 if rc == 0 else 1 if rc == 1 else 2)
     if args.command == "verify":
-        root = os.path.dirname(os.path.abspath(__file__))
+        root = root_om
         if root not in sys.path:
             sys.path.insert(0, root)
         from src.verify import cli

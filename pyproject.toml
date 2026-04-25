@@ -21,7 +21,7 @@ omnix = "cli:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
-packages = ["axiom", "scan", "fabric", "verify"]
+packages = ["axiom", "scan", "fabric", "verify", "find_bugs"]
 py-modules = ["cli"]
 
 [tool.pytest.ini_options]

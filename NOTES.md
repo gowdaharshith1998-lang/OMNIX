@@ -420,3 +420,42 @@ This is the canonical demo: OMNIX found a contract gap in its own signing layer 
 **Bet status:** 7 features in 6 days (~17% time, ~50% shipped). Ahead of pace.
 
 **Day 7 plan:** #6 Bug Finder MVP — uses #5 to find real bugs in real OMNIX code, ships signed receipts, becomes the canonical product demo.
+
+---
+
+## Day 2 — Integration #6 Bug Finder MVP + recursion fix + conftest fix (2026-04-25 evening)
+
+**Shipped:** `omnix find-bugs <path>` — whole-codebase PBT scan with graph-derived severity ranking and signed bundle receipts.
+
+**Modules (src/find_bugs/):**
+- walker.py — file discovery + filtering (.gitignore, ignore dirs, size limits)
+- entry_points.py — detects `if __name__ == "__main__"` and decorator-based entry points
+- severity.py — caller_count*2 + reachable*5 + failures*1 + public*1
+- bundle.py — signed bundle receipt assembly (kind="find_bugs", schema v1)
+- runner.py — orchestrator with self-recursion guard
+- cli.py — argparse subcommand
+
+**Recursion fix during smoke run:**
+- src/verify/runner.py: zero-arity functions skipped (status="skipped_zero_arity"). Previously _run_zero_arity invoked them with no args, causing recursion when omnix.py:main was scanned.
+- src/find_bugs/runner.py: skips functions where file is omnix.py entry, OR function is named `main` in a file with `if __name__ == "__main__"`. skipped_main array in bundle for transparency.
+
+**Conftest fix:**
+- conftest.py at repo root puts project root on sys.path so legacy tests (tests/fabric, tests/test_parser) collect under `pip install -e .` setup.
+
+**Tests:**
+- 129 pytest total (was 110 after Day 1)
+  - 35 tests/verify/ (was 34, +1 zero-arity skip test)
+  - 18 tests/find_bugs/ (new)
+  - rest unchanged
+- 85 vitest unchanged
+
+**Smoke (tests/find_bugs/fixtures/sample_codebase):**
+- Scanned 3 files, 3 functions
+- Found unsafe_div (ZeroDivisionError on `/0`)
+- Severity score 2, exit 1, 0.2s wall time
+
+**Real-world `find-bugs ~/omnix` smoke:** runs without recursion now, but Hypothesis crashes on Click-decorated CLI commands. **Known limitation #6.1:** framework-decorated functions (Click, FastAPI, async routes) need to be skipped before PBT runs them. Tomorrow's first task.
+
+**Cleanup:** deleted stale `_apply_canvas2d.py` (one-shot script from galaxy attempts).
+
+**Bet status:** 8 features in 2 days. PBT engine + Bug Finder MVP shipped. First two real bugs found in own codebase (bitlen_u64 yesterday, zero-arity recursion today). **Next:** #6.1 framework-decorator skip → real-world `find-bugs ~/omnix` demo.
