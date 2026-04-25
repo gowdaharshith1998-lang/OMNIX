@@ -488,3 +488,9 @@ This is the canonical demo: OMNIX found a contract gap in its own signing layer 
 - 129 pytest unchanged
 
 **Bet status:** 9 features in 2 days. Vault is now usable by 95%+ of LLM API holders (was ~50% with 4 providers). **Next:** #6.1 framework-decorator skip → real-world `find-bugs ~/omnix` demo, then galaxy v3 reference saved for Day 7+.
+
+## Day 3 first decision (deferred from Day 2 close)
+Pick one: (a) Provider Fabric port from AXIOM v2 (the original Day 3),
+          (b) Monaco IDE shell (the 'proper UI' question that started this session),
+          (c) Demo recording — find-bugs end-to-end on src/axiom with signed bundle
+Recommendation: (c) first — 30 min, gives you a shippable artifact for landing/pitch.
