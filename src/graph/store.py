@@ -7,6 +7,8 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any
 
+import src.parser.evolution_schema as _evo_schema
+
 
 @dataclass
 class NodeRow:
@@ -32,7 +34,7 @@ class EdgeRow:
 class GraphStore:
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
-        self._conn = sqlite3.connect(db_path)
+        self._conn = sqlite3.connect(db_path, isolation_level="DEFERRED", check_same_thread=False)  # noqa: E501
         self._conn.row_factory = sqlite3.Row
         self._ensure_schema()
 
@@ -62,11 +64,16 @@ class GraphStore:
             CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id);
             """
         )
+        _evo_schema.apply_evolution_schema(self._conn)
         self._conn.commit()
 
     def reset(self) -> None:
         self._conn.executescript("DELETE FROM edges; DELETE FROM nodes;")
         self._conn.commit()
+
+    def sqlite_connection(self) -> sqlite3.Connection:
+        """Shared connection (graph + evolution tables in one file)."""
+        return self._conn
 
     def close(self) -> None:
         self._conn.close()

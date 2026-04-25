@@ -1,0 +1,4 @@
+{
+  "language": "python",
+  "extensions": [".py", ".pyi", ".pyx", ".pyw"]
+}

@@ -1,0 +1,320 @@
+"""
+Grammar query-pattern evolution (discovery, validation, decay) with ML-DSA-65 receipts.
+P16: no signed receipt → no mutation that requires a receipt. P22: one BEGIN…COMMIT for SQL.
+P13: evolution JSON is metadata only (no source code).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import os
+import secrets
+import sqlite3
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from axiom import keystore, sign
+
+_LOG = logging.getLogger("omnix.parser.evolution")
+
+TIER_TOPLEVEL = "toplevel"
+ADDED_AUTO = "auto_learned"
+BUILTIN = "builtin_hint"  # reserved for P21; decay SQL filters added_by=auto only
+
+SECRET_KEY = Path.home() / ".omnix" / "keys" / "secret.pem"
+PUB_KEY = Path.home() / ".omnix" / "keys" / "public.pem"
+_DEFAULT_RD = Path.home() / ".omnix" / "receipts"
+_TEST_RDIR: Path | None = None
+_TEST_SEC: Path | None = None
+_RUN: list[Observation] = []
+_PENDING_EXT: list[str] = []
+
+
+@dataclass(frozen=True)
+class Observation:
+    grammar: str
+    quality: float
+    top_level_types: frozenset[str]
+    known_union: frozenset[str]
+    parse_mode: str = "generic"
+
+    @property
+    def unknowns(self) -> set[str]:
+        return set(self.top_level_types) - set(self.known_union)
+
+
+def set_evolution_test_paths(
+    *, receipt_dir: Path | None = None, secret_pem: Path | None = None
+) -> None:
+    global _TEST_RDIR, _TEST_SEC
+    _TEST_RDIR = receipt_dir
+    _TEST_SEC = secret_pem
+
+
+def reset_evolution_test_paths() -> None:
+    global _TEST_RDIR, _TEST_SEC
+    _TEST_RDIR = None
+    _TEST_SEC = None
+
+
+def _rdir() -> Path:
+    return _TEST_RDIR or _DEFAULT_RD
+
+
+def _sec() -> Path:
+    return _TEST_SEC or SECRET_KEY
+
+
+def _iso_utc() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def begin_evolution_run() -> None:
+    _RUN.clear()
+    _PENDING_EXT.clear()
+
+
+def observe_parse(
+    grammar: str,
+    quality: float,
+    top_level_node_types: set[str] | frozenset[str],
+    known_type_union: set[str] | frozenset[str],
+    *,
+    parse_mode: str = "generic",
+) -> None:
+    _RUN.append(
+        Observation(
+            grammar=grammar,
+            quality=float(quality),
+            top_level_types=frozenset(top_level_node_types),
+            known_union=frozenset(known_type_union),
+            parse_mode=parse_mode,
+        )
+    )
+
+
+def queue_unknown_extension(raw_ext: str) -> None:
+    e = (raw_ext or "?").lstrip().lower() if raw_ext else "?"
+    e = e if e.startswith(".") else f".{e}" if e != "?" else e
+    _PENDING_EXT.append(e)
+
+
+def record_unknown_extension(conn: sqlite3.Connection, ext: str) -> None:
+    e = (ext or "?").lstrip().lower() if ext else "?"
+    e = e if e.startswith(".") or e == "?" else f".{e}"
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT OR IGNORE INTO unknown_extensions (extension, first_seen_at) VALUES (?, ?)",
+        (e, _iso_utc()),
+    )
+    conn.commit()
+
+
+def _fingerprint() -> str:
+    s = _sec()
+    p = s.parent / "public.pem" if s.is_file() else PUB_KEY
+    if not p.is_file():
+        return ""
+    return hashlib.sha256(keystore.public_from_pem(p.read_text(encoding="ascii"))).hexdigest()
+
+
+def _json_canonical(b: dict[str, Any]) -> bytes:
+    return json.dumps(
+        b, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+
+
+def _write_evolution_receipt(
+    body: dict[str, Any]
+) -> tuple[Path, Path] | None:
+    skp = _sec()
+    if not skp.is_file():
+        return None
+    try:
+        sk = keystore.secret_from_pem(skp.read_text(encoding="ascii"))
+    except (OSError, ValueError) as e:
+        _LOG.warning("evolution: read secret: %s", e)
+        return None
+    tflat = _iso_utc().replace(":", "-").replace(".", "-")
+    g = str(body.get("grammar", "g"))[:48]
+    pdir = _rdir()
+    pdir.mkdir(parents=True, exist_ok=True)
+    jpath = pdir / f"evolution_{tflat}_{g}.json"
+    b = {**body, "key_fp": _fingerprint()}
+    raw = _json_canonical(b)
+    try:
+        sigb = sign.sign_bytes(sk, raw, b"", secrets.token_bytes(32))
+    except ValueError as e:
+        _LOG.warning("evolution: sign: %s", e)
+        return None
+    tmpj = pdir / f".e_{jpath.name}.j"
+    tmps = pdir / f".e_{jpath.name}.s"
+    # Parallel to `omnix axiom verify R.json R.sig` (not R.json.sig)
+    spath = jpath.parent / f"{jpath.stem}.sig"
+    tmpj.write_bytes(raw)
+    tmps.write_text(keystore.signature_to_pem(sigb), encoding="ascii")
+    tmpj.replace(jpath)
+    tmps.replace(spath)
+    return jpath, spath
+
+
+def finalize_evolution_run(conn: sqlite3.Connection) -> int:
+    global _RUN
+    obs = list(_RUN)
+    c = conn.cursor()
+    n_mut = 0
+
+    if os.environ.get("OMNIX_TEST_EVOL_FAIL") == "1":
+        c.execute("BEGIN")
+        c.execute(
+            "INSERT INTO pattern_mutation(grammar_name, mutation_kind, pattern_id, reason, "
+            "observed_at, receipt_path, sig_path) VALUES(?,?,?,?,?,?,?)",
+            ("_x_", "t", None, "f", _iso_utc(), "a", "b"),
+        )
+        c.execute("ROLLBACK")
+        _RUN.clear()
+        _PENDING_EXT.clear()
+        return 0
+
+    c.execute("BEGIN")
+
+    t0 = _iso_utc()
+    for e in _PENDING_EXT:
+        c.execute(
+            "INSERT OR IGNORE INTO unknown_extensions (extension, first_seen_at) VALUES (?, ?)",  # noqa: E501
+            (e, t0),
+        )
+    if _PENDING_EXT:
+        _PENDING_EXT.clear()
+    for o in obs:
+        row = c.execute(
+            "SELECT * FROM grammar_profile WHERE grammar_name=?",
+            (o.grammar,),
+        ).fetchone()
+        if row is None:
+            c.execute(
+                "INSERT INTO grammar_profile(grammar_name, first_seen_at, total_files_parsed, "
+                "total_quality_score) VALUES (?, ?, 1, ?)",
+                (o.grammar, t0, o.quality),
+            )
+        else:
+            c.execute(
+                "UPDATE grammar_profile SET total_files_parsed = total_files_parsed + 1, "
+                "total_quality_score = total_quality_score + ? WHERE grammar_name = ?",
+                (o.quality, o.grammar),
+            )
+    ttag = _iso_utc()
+    for o in obs:
+        for u in o.unknowns:
+            c.execute(
+                """
+                INSERT OR IGNORE INTO query_pattern
+                (id, grammar_name, node_type, role, hit_count, miss_count, is_active, added_at, added_by)
+                VALUES (null, ?, ?, ?, 0, 0, 1, ?, ?)
+                """,
+                (o.grammar, u, TIER_TOPLEVEL, ttag, ADDED_AUTO),
+            )
+
+    prof = {
+        str(x[0]): (int(x[2]), float(x[3]))
+        for x in c.execute("SELECT grammar_name, first_seen_at, total_files_parsed, total_quality_score "
+                           "FROM grammar_profile")
+    }
+
+    for g in sorted({o.grammar for o in obs}):
+        tf = prof.get(g, (0, 0.0))[0]
+        if tf < 10:
+            continue
+        cands = c.execute(
+            "SELECT * FROM query_pattern WHERE grammar_name=? AND hit_count=0 AND miss_count=0 AND "
+            "is_active=1 AND added_by=?",
+            (g, ADDED_AUTO),
+        ).fetchall()
+        for r in cands:
+            if isinstance(r, sqlite3.Row):
+                pid = int(r["id"])
+                nty = str(r["node_type"])
+            else:
+                continue
+            wq = [x.quality for x in obs if x.grammar == g and nty in x.top_level_types]
+            wout = [x.quality for x in obs if x.grammar == g and nty not in x.top_level_types]
+            if not wq or not wout:
+                continue
+            a, b0 = sum(wq) / len(wq), sum(wout) / len(wout)
+            if a - b0 < 0.1:
+                continue
+            mbody: dict[str, Any] = {
+                "kind": "grammar_evolution",
+                "schema_version": 1,
+                "grammar": g,
+                "mutation": "promote_pattern",
+                "node_type": nty,
+                "evidence": {"m_with": a, "m_wo": b0, "n_files_grammar": tf},
+                "observed_at": _iso_utc(),
+            }
+            w = _write_evolution_receipt(mbody)
+            if w is None:
+                _LOG.warning("evolution: promote skipped (no key) grammar=%s", g)
+                continue
+            jp, sp = w
+            c.execute("UPDATE query_pattern SET hit_count = 1 WHERE id=?", (pid,))
+            c.execute(
+                "INSERT INTO pattern_mutation(grammar_name, mutation_kind, pattern_id, reason, "
+                "observed_at, receipt_path, sig_path) VALUES(?,?,?,?,?,?,?)",
+                (g, "promote_pattern", pid, "delta", _iso_utc(), str(jp), str(sp)),
+            )
+            n_mut += 1
+
+    decr = c.execute("SELECT * FROM query_pattern WHERE is_active=1 AND added_by=?", (ADDED_AUTO,)).fetchall()  # noqa: E501
+    for r in decr:
+        h, mi, pid = int(r[4]), int(r[5]), int(r[0])
+        g = str(r[1])
+        nty = str(r[2])
+        toti = h + mi
+        if toti < 20:
+            continue
+        p = h / toti
+        if p >= 0.3:
+            continue
+        w = _write_evolution_receipt(
+            {
+                "kind": "grammar_evolution",
+                "schema_version": 1,
+                "grammar": g,
+                "mutation": "decay_pattern",
+                "node_type": nty,
+                "evidence": {"precision": p, "n": toti},
+                "observed_at": _iso_utc(),
+            }
+        )
+        if w is None:
+            _LOG.warning("evolution: decay skipped (no key) id=%s", pid)
+            continue
+        jp, sp = w
+        c.execute("UPDATE query_pattern SET is_active=0 WHERE id=?", (pid,))
+        c.execute(
+            "INSERT INTO pattern_mutation(grammar_name, mutation_kind, pattern_id, reason, "
+            "observed_at, receipt_path, sig_path) VALUES(?,?,?,?,?,?,?)",
+            (g, "decay", pid, "pr", _iso_utc(), str(jp), str(sp)),
+        )
+        n_mut += 1
+
+    c.execute("COMMIT")
+    _RUN.clear()
+    return n_mut
+
+
+def _emit_mutation_receipt_for_test() -> str:
+    t = {
+        "kind": "grammar_evolution",
+        "schema_version": 1,
+        "grammar": "synth_test",
+        "mutation": "synthetic",
+        "observed_at": _iso_utc(),
+    }
+    p = _write_evolution_receipt(t)
+    return str(p[0]) if p else ""

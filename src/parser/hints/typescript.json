@@ -1,0 +1,4 @@
+{
+  "language": "typescript",
+  "extensions": [".ts", ".tsx", ".js", ".jsx", ".mjs"]
+}

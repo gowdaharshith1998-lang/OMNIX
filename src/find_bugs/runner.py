@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import pwd
+from dataclasses import asdict
 import getpass
 import resource
 import signal
@@ -116,6 +117,57 @@ def resolve_graph_db(
 
 def _relpos(path: Path, root: Path) -> str:
     return path.resolve().relative_to(root.resolve()).as_posix()
+
+
+def _lang_for_layer6(p: Path) -> str:
+    s = p.suffix.lower()
+    if s in (".rs",):
+        return "rust"
+    if s in (".go",):
+        return "go"
+    if s in (".java", ".kt", ".kts"):
+        return "java"
+    if s in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".c", ".h", ".cpp", ".hpp", ".cc", ".cs"):
+        return "typescript" if s in (".ts", ".tsx", ".js", ".jsx", ".mjs") else s[1:]
+    return p.suffix[1:] or "unknown"
+
+
+def _iter_layer6_targets(
+    gdb: Path, root: Path
+) -> list[tuple[Path, str, str, int, str]]:
+    """Non-``.py`` files with at least one function/method node in the graph."""
+    con = sqlite3.connect(f"file:{gdb}?mode=ro", uri=True, timeout=5.0)
+    try:
+        con.row_factory = sqlite3.Row
+        rows = con.execute(
+            "SELECT DISTINCT file_path FROM nodes "
+            "WHERE file_path IS NOT NULL AND LOWER(file_path) NOT LIKE '%.py'",
+        ).fetchall()
+    finally:
+        con.close()
+    out: list[tuple[Path, str, str, int, str]] = []
+    for r in rows:
+        rel = str(r[0] or "")
+        if not rel or rel.lower().endswith(".py"):
+            continue
+        p = (root / rel)
+        if not p.is_file():
+            continue
+        con2 = sqlite3.connect(f"file:{gdb}?mode=ro", uri=True, timeout=5.0)
+        try:
+            con2.row_factory = sqlite3.Row
+            fns = con2.execute(
+                "SELECT name, start_line FROM nodes "
+                "WHERE file_path = ? AND type IN ('function', 'method')",
+                (rel,),
+            ).fetchall()
+        finally:
+            con2.close()
+        for row in fns:
+            out.append(
+                (p, rel, str(row["name"]), int(row["start_line"] or 0), _lang_for_layer6(p))
+            )
+    return out
 
 
 def _omnix_py_path() -> Path:
@@ -412,6 +464,18 @@ def _failures_for_name(j: dict[str, Any], fn: str) -> list[dict[str, Any]]:
     return top if isinstance(top, list) else []  # type: ignore[return-value]
 
 
+def _layer7_python_fixable(finding: dict[str, Any]) -> bool:
+    if finding.get("kind") == "memory_pathology":
+        return False
+    rel = str(finding.get("file", ""))
+    if not rel.lower().endswith(".py"):
+        return False
+    lang = (finding.get("language") or "") or ""
+    if str(lang) and str(lang).lower() not in ("python", "py", ""):
+        return False
+    return bool(finding.get("function"))
+
+
 def _summary_text(
     top_n: int,
     findings: list[dict[str, Any]],
@@ -420,6 +484,7 @@ def _summary_text(
     ex_total: int,
     wall: float,
     bundle_path: str | None,
+    code_fix_note: str | None = None,
 ) -> str:
     lines: list[str] = [
         "OMNIX Bug Finder",
@@ -446,6 +511,8 @@ def _summary_text(
                 lines.append(f"    {x0.get('exception_type', 'Error')}: {msg!s}")
     if bundle_path:
         lines.append(f"Signed bundle: {bundle_path}")
+    if code_fix_note:
+        lines.append(code_fix_note)
     if findings:
         lines.append("Exit 1 (findings present).")
     else:
@@ -463,6 +530,7 @@ def run_find_bugs(
     max_file_size: int = 1_000_000,
     graph_db: str | None = None,
     no_sign: bool = False,
+    enable_fix: bool = False,
 ) -> tuple[int, str, dict[str, Any] | None]:
     t0 = time.perf_counter()
     root = Path(codebase_path).resolve()
@@ -473,9 +541,22 @@ def run_find_bugs(
     if not gdb or not gdb.is_file():
         return (
             2,
-            "run omnix analyze first (graph DB missing: ~/.omnix/omnix.db or <codebase>/omnix.db)\n",
+            "run omnix analyze first (graph DB missing: <codebase>/omnix.db, or set OMNIX_GRAPH_DB; optional fallback ~/.omnix/omnix.db or repo omnix.db)\n",
             None,
         )
+    from src.graph.store import GraphStore
+    from src.parser import evolution as _evo
+    from src.parser.ingest_dispatch import run_evolution_ingest_on_store
+
+    _evo.begin_evolution_run()
+    st = GraphStore(str(gdb))
+    try:
+        _ = run_evolution_ingest_on_store(
+            st, root, max_file_size, parse_mode=None
+        )
+        _evo.finalize_evolution_run(st.sqlite_connection())
+    finally:
+        st.close()
     paths, n_parse_skip, n_too_big = scan_codebase_sources(
         root, max_size=max_file_size
     )
@@ -723,8 +804,108 @@ def run_find_bugs(
                     "failures": sub,
                 }
                 findings.append(fd0)
+    if os.environ.get("OMNIX_DISABLE_LAYER6", "").lower() not in (
+        "1",
+        "true",
+        "yes",
+    ):
+        from src.verify.runners import cargo_fuzz as _cargo
+        from src.verify.runners import go_fuzz as _gof
+        from src.verify.runners import jqwik as _jqw
+        from src.verify.runners.detect import detect_universal_backend
+        from src.verify.runners.subprocess_llm import run_layer6_subprocess_limited
+
+        for abs_p, relp, fn, lineno, lang in _iter_layer6_targets(gdb, root):
+            fcount += 1
+            det = detect_universal_backend(root, relp, abs_p, lang)
+            if det.backend == "cargo_fuzz":
+                _ = _cargo.try_run_cargo_fuzz(root)
+            elif det.backend == "go_fuzz":
+                _ = _gof.try_run_go_fuzz(root)
+            elif det.backend == "jqwik":
+                _ = _jqw.try_run_jqwik(root)
+            sig0 = ""
+            try:
+                lines0 = abs_p.read_text(encoding="utf-8", errors="replace").splitlines()  # noqa: E501, SIM115
+            except OSError:  # pragma: no cover
+                lines0 = []
+            for ln in lines0[:3]:
+                if (lang == "rust" and "fn " in ln) or (lang == "go" and "func " in ln):
+                    sig0 = ln
+                    break
+            r6 = run_layer6_subprocess_limited(
+                root, relp, lang, fn, sig0, agent_id=root.name, timeout_s=12.0
+            )
+            ex_total += r6.ex_total
+            dmeta = {**r6.extra_metadata, "layer6_detection": asdict(det)}
+            for it0 in r6.findings or []:
+                ffs = it0.get("failures")
+                if not isinstance(ffs, list) or not ffs:
+                    continue
+                sc2 = compute_severity(
+                    {"file": relp, "function": fn, "failures": ffs},
+                    gctx,
+                )
+                gfk = graph_id_for(relp, fn)
+                findings.append(
+                    {
+                        "file": relp,
+                        "function": fn,
+                        "lineno": max(lineno, 1),
+                        "language": lang,
+                        "runner_used": r6.runner_used,
+                        "metadata": dmeta,
+                        "severity_score": sc2,
+                        "caller_count": in_cnt.get(gfk, 0),
+                        "reachable_from_entries": bool(
+                            entry_reach_map.get(gfk, False)
+                        ),
+                        "cluster_id": cc.get(gfk),
+                        "failures": _first_three(
+                            ffs
+                            if all(isinstance(x, dict) for x in ffs)
+                            else []
+                        )
+                        or ffs,
+                    }
+                )
     wall = round(time.perf_counter() - t0, 3)
     ranked = rank_findings([dict(x) for x in findings])
+    code_fix_out: str | None = None
+    code_fix_detail: dict[str, Any] | None = None
+    if enable_fix and ranked:
+        from . import fixer
+
+        for fd0 in ranked:
+            if not _layer7_python_fixable(fd0):
+                continue
+            ores = fixer.orchestrate_code_fix(
+                repo_root=root,
+                rel_failing=str(fd0["file"]),
+                function_name=str(fd0["function"]),
+                language=str(fd0.get("language") or "python"),
+                original_failure=dict(fd0),
+                graph_db=gdb,
+                agent_id=root.name,
+            )
+            code_fix_detail = {
+                "success": ores.success,
+                "message": ores.message,
+                "receipt_path": ores.receipt_path,
+                "body": ores.body,
+            }
+            rp = ores.receipt_path or "none (keys missing)"
+            if ores.success:
+                code_fix_out = (
+                    "Code fix (sandbox, P27): a proposed change is in the signed receipt. "
+                    f"Receipt: {rp}  — review and apply with git apply from the repo root."
+                )
+            else:
+                code_fix_out = (
+                    f"Code fix (sandbox) did not produce a patch: {ores.message}.  "
+                    f"Receipt/audit: {rp}"
+                )
+            break
     finger = bundle_mod.codebase_fingerprint(sorted(rel_sizes))
     target_meta = {
         "codebase_path": str(root),
@@ -774,7 +955,14 @@ def run_find_bugs(
     exitv = 1 if ranked else 0
     if json_mode:
         pout = json.loads(json_text)
-        return (exitv, json_text + "\n", pout)
+        if code_fix_detail is not None:
+            pout["code_fix"] = code_fix_detail
+        out0 = json_text if json_text.endswith("\n") else json_text + "\n"
+        if code_fix_detail is not None:
+            out0 += (
+                json.dumps({"code_fix": code_fix_detail}, ensure_ascii=False) + "\n"
+            )
+        return (exitv, out0, pout)
     return (
         exitv,
         _summary_text(
@@ -785,6 +973,7 @@ def run_find_bugs(
             ex_total,
             wall,
             bpath,
+            code_fix_out,
         ),
         pout,
     )

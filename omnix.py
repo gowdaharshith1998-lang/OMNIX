@@ -91,6 +91,55 @@ def main() -> None:
     fb.add_argument(
         "--graph-db", dest="graph_db", default=None, help="SQLite graph DB (optional override)"
     )
+    fb.add_argument(
+        "--fix",
+        action="store_true",
+        help="Layer 7: run sandbox-only Fabric code_fix for the top fixable finding (P28); no direct repo writes",
+    )
+
+    g0 = subparsers.add_parser("grammar", help="Tree-Sitter / grammar learning tools")
+    g0sub = g0.add_subparsers(
+        dest="grammar_sub", required=True, help="list | status | receipts | verify"
+    )
+    g0sub.add_parser("list", help="Installed tree_sitter_* language packages")
+    gstat = g0sub.add_parser(
+        "status",
+        help="Per-grammar profile from a codebase omnix.db (default: ./omnix.db)",
+    )
+    gstat.add_argument(
+        "--db",
+        dest="grammar_db",
+        default=None,
+        help="Path to graph SQLite (default: ./omnix.db in cwd)",
+    )
+    g0sub.add_parser(
+        "receipts",
+        help="List signed evolution JSON receipts in ~/.omnix/receipts",
+    )
+    gver = g0sub.add_parser(
+        "verify",
+        help="Verify ML-DSA-65 on an evolution JSON (default ~/.omnix/keys/public.pem)",
+    )
+    gver.add_argument("receipt", help="Path to evolution_*.json")
+    gver.add_argument(
+        "--pubkey",
+        type=str,
+        default=None,
+        help="public.pem (default: ~/.omnix/keys/public.pem)",
+    )
+
+    if len(sys.argv) > 1 and sys.argv[1] == "axiom":
+        root_om = os.path.dirname(os.path.abspath(__file__))
+        if root_om not in sys.path:
+            sys.path.insert(0, root_om)
+        from axiom.cli import axiom_group
+
+        sys.exit(
+            axiom_group.main(  # type: ignore[union-attr, misc, arg-type]
+                args=sys.argv[2:],
+                prog_name="omnix axiom",
+            )
+        )
 
     args = parser.parse_args()
 
@@ -98,6 +147,12 @@ def main() -> None:
         parser.print_help()
         sys.exit(0)
     root_om = os.path.dirname(os.path.abspath(__file__))
+    if args.command == "grammar":
+        if root_om not in sys.path:
+            sys.path.insert(0, root_om)
+        from src.grammar_cmd import run_grammar
+
+        sys.exit(int(run_grammar(args)))
     if args.command == "find-bugs":
         if root_om not in sys.path:
             sys.path.insert(0, root_om)
@@ -121,27 +176,30 @@ def main() -> None:
     if root not in sys.path:
         sys.path.insert(0, root)
 
-    from src.parser.python_parser import parse_python_files
-    from src.parser.typescript_parser import parse_typescript_files
     from src.parser.dark_matter_parser import parse_dark_matter
     from src.parser.entanglement_parser import parse_entanglements
     from src.parser.git_parser import parse_git_history
     from src.graph.store import GraphStore
     from src.graph.exporter import export_json
+    from src.parser import evolution
+    from src.parser.ingest_dispatch import ingest_unified_codebase
 
     target = os.path.abspath(args.path)
-    db_path = os.path.join(root, "omnix.db")
+    # Per-codebase graph + evolution: DB lives under the analyzed tree (Q2 / ITER 4).
+    db_path = os.path.join(target, "omnix.db")
     graph_json = os.path.join(root, "src", "web", "graph_data.json")
     timeline_json = os.path.join(root, "src", "web", "timeline_data.json")
     web_root = os.path.join(root, "src", "web")
 
     print(f"🔍 OMNIX analyzing {target}...")
 
+    evolution.begin_evolution_run()
     store = GraphStore(db_path)
     store.reset()
-
-    py_count = parse_python_files(target, store)
-    ts_count = parse_typescript_files(target, store)
+    _ingest_tot = ingest_unified_codebase(target, store)
+    _ = evolution.finalize_evolution_run(store.sqlite_connection())
+    py_count = int(_ingest_tot.by_grammar.get("python", 0))
+    ts_count = int(_ingest_tot.by_grammar.get("typescript", 0))
 
     dm_count = parse_dark_matter(target, store)
     ent_count = parse_entanglements(target, store)

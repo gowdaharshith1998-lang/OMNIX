@@ -159,6 +159,38 @@ def scan_codebase_sources(
     return parseable, n_unparse, n_big
 
 
+def iter_dispatch_paths(root: Path, max_size: int = 1_000_000) -> Iterator[Path]:
+    """
+    All files under *root* suitable for language dispatch (ignores, size cap).
+    TypeScript: skips ``.d.ts`` to match the dedicated TypeScript parser.
+    """
+    root = root.resolve()
+    gignore = _load_gitignore(root)
+    for dirpath, dirnames, filenames in os.walk(
+        root, topdown=True, followlinks=False
+    ):
+        dirnames[:] = [d for d in dirnames if not _skip_dir_name(d)]
+        for fname in filenames:
+            if fname.endswith(".d.ts"):
+                continue
+            full = Path(dirpath) / fname
+            try:
+                rel = full.relative_to(root)
+            except ValueError:
+                continue
+            if _path_matches_prefix(rel, gignore):
+                continue
+            try:
+                st = full.stat()
+            except OSError:
+                continue
+            if st.st_size > max_size:
+                continue
+            if not full.is_file():
+                continue
+            yield full
+
+
 def count_skipped_due_to_size(root: Path, max_size: int) -> int:
     """``.py`` candidates excluded only because of *max_size* (pre-parse)."""
     root = root.resolve()

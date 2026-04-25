@@ -1,0 +1,387 @@
+"""Universal Tree-sitter → graph extraction (Layers 1–2). P11: do not import-edit python_parser/typescript_parser modules."""
+
+from __future__ import annotations
+
+import os
+import re
+from collections import defaultdict
+from typing import Any
+
+from tree_sitter import Language, Node, Parser
+
+from src.graph.store import GraphStore
+from src.parser.hint_loader import MergedHints, load_merged_hints
+
+
+def _text(source: bytes, node: Node) -> str:
+    return source[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
+
+
+def _lines_for_node(source: bytes, node: Node) -> int:
+    return node.end_point[0] - node.start_point[0] + 1
+
+
+def _parser(lang: Language) -> Parser:
+    return Parser(lang)
+
+
+def ingest_universal_to_store(
+    store: GraphStore,
+    rel: str,
+    text: str,
+    logical_lang: str,
+    language: Language,
+    *,
+    parse_mode: str = "generic",
+    merged_hints: MergedHints | None = None,
+    is_tsx: bool = False,
+) -> None:
+    """
+    Ingest a single file. For Python/TypeScript, delegate to the existing
+    Tree-sitter passes (P11: call-site only, no file edits) so outputs match
+    ``parse_*_files`` for those languages.
+    """
+    if not language or not text:
+        return
+    m = merged_hints
+    if m is None and logical_lang in ("python", "typescript", "rust", "c", "cpp"):
+        m = load_merged_hints(logical_lang, parse_mode=parse_mode)
+
+    if logical_lang == "python":
+        from src.parser import python_parser as pp
+
+        pp._pass1_definitions(store, rel, text)  # type: ignore[attr-defined]
+        idx = pp._build_call_index(store)  # type: ignore[attr-defined]
+        pp._pass2_calls(store, rel, text, idx)  # type: ignore[attr-defined]
+        return
+
+    if logical_lang == "typescript":
+        from src.parser import typescript_parser as tp
+
+        tp._ts_pass1(store, rel, text, is_tsx)  # type: ignore[attr-defined]
+        tidx = tp._build_ts_call_index(store)  # type: ignore[attr-defined]
+        tp._ts_pass2(store, rel, text, is_tsx, tidx)  # type: ignore[attr-defined]
+        return
+
+    if logical_lang == "rust" and m is not None:
+        _ingest_rust(store, rel, text, language, m)
+        return
+
+    if m is not None:
+        _ingest_generic_ts_tree(store, rel, text, language, m)
+    return
+
+
+# --- Rust (native impl + struct + calls) ---
+
+
+def _fn_name_rust(n: Node, source: bytes) -> str | None:
+    for c in n.children:
+        if c.type == "identifier":
+            return _text(source, c)
+    return None
+
+
+def _struct_name(n: Node, source: bytes) -> str | None:
+    for c in n.children:
+        if c.type in ("type_identifier", "field_identifier", "identifier"):
+            return _text(source, c)
+    return None
+
+
+def _function_in_impl(fi: Node) -> bool:
+    p1 = fi.parent
+    p2 = p1.parent if p1 is not None else None
+    return bool(
+        p1
+        and p1.type == "declaration_list"
+        and p2
+        and p2.type == "impl_item"
+    )
+
+
+def _impl_type_name(impl: Node, source: bytes) -> str | None:
+    for c in impl.children:
+        if c.type == "type_identifier":
+            return _text(source, c)
+    return None
+
+
+def _ingest_rust(
+    store: GraphStore, rel: str, text: str, language: Language, m: MergedHints
+) -> None:
+    source = text.encode("utf-8")
+    tree = _parser(language).parse(source)
+    root = tree.root_node
+    lc = text.count("\n") + 1 if text else 1
+    file_id = rel
+    store.add_node(
+        id=file_id,
+        name=os.path.basename(rel),
+        type="file",
+        file_path=rel,
+        start_line=1,
+        end_line=lc,
+        complexity=lc,
+        metadata={"language": "rust", "parse_mode": m.parse_mode},
+    )
+    index: dict[str, list[tuple[str, str]]] = defaultdict(list)
+
+    for n in _iter_nodes(root):
+        if n.type in m.all_class_node_types and n.type == "struct_item":
+            sname = _struct_name(n, source) or "?"
+            cid = f"{rel}::{sname}"
+            sl, el = n.start_point[0] + 1, n.end_point[0] + 1
+            store.add_node(
+                id=cid,
+                name=sname,
+                type="class",
+                file_path=rel,
+                start_line=sl,
+                end_line=el,
+                complexity=_lines_for_node(source, n),
+                metadata={"parse_mode": m.parse_mode},
+            )
+            store.add_edge(file_id, cid, "DEFINES")
+
+    def _reg_fn(fid: str, display: str) -> None:
+        short = display.split(".")[-1] if "." in display else display
+        if "::" in display:
+            short = display.split("::")[-1]
+        index[short].append((fid, rel))
+        parts = re.findall(r"[\w$]+|::", display)
+        p2 = [p for p in parts if p != "::"]
+        if len(p2) >= 2 and "::" in display:
+            tail = p2[-1]
+            k = f"{p2[-2]}.{tail}" if p2 else tail
+            index[k].append((fid, rel))
+
+    for n in _iter_nodes(root):
+        if n.type != "function_item":
+            continue
+        if _function_in_impl(n):
+            continue
+        fname = _fn_name_rust(n, source)
+        if not fname:
+            continue
+        fid = f"{rel}::{fname}"
+        sl, el = n.start_point[0] + 1, n.end_point[0] + 1
+        store.add_node(
+            id=fid,
+            name=fname,
+            type="function",
+            file_path=rel,
+            start_line=sl,
+            end_line=el,
+            complexity=_lines_for_node(source, n),
+            metadata={"parse_mode": m.parse_mode},
+        )
+        store.add_edge(file_id, fid, "DEFINES")
+        _reg_fn(fid, fname)
+
+    for impl in _iter_nodes(root):
+        if impl.type != "impl_item":
+            continue
+        tname: str | None = None
+        for c in impl.children:
+            if c.type == "type_identifier":
+                tname = _text(source, c)
+                break
+        if not tname:
+            continue
+        dl: TSNode | None = None
+        for c in impl.children:
+            if c.type == "declaration_list":
+                dl = c
+                break
+        if dl is None:
+            continue
+        for ch in dl.children:
+            if ch.type != "function_item":
+                continue
+            mname = _fn_name_rust(ch, source)
+            if not mname:
+                continue
+            mid = f"{rel}::{tname}::{mname}"
+            cid = f"{rel}::{tname}"
+            sl, el = ch.start_point[0] + 1, ch.end_point[0] + 1
+            store.add_node(
+                id=mid,
+                name=f"{tname}::{mname}",
+                type="method",
+                file_path=rel,
+                start_line=sl,
+                end_line=el,
+                complexity=_lines_for_node(source, ch),
+                metadata={"parse_mode": m.parse_mode},
+            )
+            store.add_edge(cid, mid, "DEFINES")
+            _reg_fn(mid, mname)
+            _reg_fn(mid, f"{tname}::{mname}")
+
+    for n in _iter_nodes(root):
+        if n.type in m.all_import_node_types or n.type == "use_declaration":
+            iid = f"{rel}::import::{n.start_byte}"
+            sl, el = n.start_point[0] + 1, n.end_point[0] + 1
+            mod = re.sub(r"\s+", " ", _text(source, n)[:200])
+            store.add_node(
+                id=iid,
+                name=mod,
+                type="import",
+                file_path=rel,
+                start_line=sl,
+                end_line=el,
+                complexity=1,
+                metadata={"module": mod, "parse_mode": m.parse_mode},
+            )
+            store.add_edge(file_id, iid, "IMPORTS")
+
+    for n in _iter_nodes(root):
+        if n.type not in m.all_call_node_types and n.type != "call_expression":
+            continue
+        if n.type == "macro_invocation":
+            continue
+        caller = _containing_function_id(n, rel, source)
+        if not caller:
+            continue
+        tgt = _rust_call_target(rel, n, source, index)
+        if not tgt or tgt == caller:
+            continue
+        store.add_edge(caller, tgt, "CALLS", metadata=None)
+
+
+def _containing_function_id(
+    call: Node, rel: str, source: bytes
+) -> str | None:
+    n: Node | None = call
+    while n is not None:
+        if n.type == "function_item":
+            if _function_in_impl(n):
+                impl = n.parent.parent  # type: ignore[union-attr]
+                t = _impl_type_name(impl, source) if impl else None
+                mn = _fn_name_rust(n, source)
+                if t and mn:
+                    return f"{rel}::{t}::{mn}"
+            else:
+                mn2 = _fn_name_rust(n, source)
+                if mn2:
+                    return f"{rel}::{mn2}"
+        n = n.parent
+    return None
+
+
+def _iter_nodes(n: Node) -> list[Node]:
+    out: list[Node] = [n]
+    i = 0
+    while i < len(out):
+        out.extend(out[i].children)
+        i += 1
+    return out
+
+
+def _rust_call_target(
+    rel: str, call: Node, source: bytes, index: dict[str, list[tuple[str, str]]]
+) -> str | None:
+    if not call.children:
+        return None
+    fn0 = call.children[0]
+    if fn0.type == "scoped_identifier":
+        s = _text(source, fn0)
+        if "::" in s:
+            return f"{rel}::{s}"
+    if fn0.type == "field_expression":
+        last = _text(source, fn0).split(".")[-1]
+        cands = index.get(last)
+        if cands:
+            for nid, fp in cands:
+                if fp == rel:
+                    return nid
+        return cands[0][0] if cands else None
+    if fn0.type == "identifier":
+        short = _text(source, fn0)
+        c2 = index.get(short)
+        if c2:
+            for nid, fp in c2:
+                if fp == rel:
+                    return nid
+            return c2[0][0]
+    return None
+
+
+# --- Other languages: best-effort generic walk ---
+
+
+def _ingest_generic_ts_tree(
+    store: GraphStore, rel: str, text: str, language: Language, m: MergedHints
+) -> None:
+    source = text.encode("utf-8")
+    root = _parser(language).parse(source).root_node
+    lc = text.count("\n") + 1 if text else 1
+    file_id = rel
+    store.add_node(
+        id=file_id,
+        name=os.path.basename(rel),
+        type="file",
+        file_path=rel,
+        start_line=1,
+        end_line=lc,
+        complexity=lc,
+        metadata={"parse_mode": m.parse_mode},
+    )
+    n_fn = 0
+    for n in _iter_nodes(root):
+        if n.type in m.all_function_node_types:
+            name = _guess_decl_name(n, source) or f"node_{n.start_byte}"
+            fid = f"{rel}::fn_{n_fn}"
+            n_fn += 1
+            sl, el = n.start_point[0] + 1, n.end_point[0] + 1
+            store.add_node(
+                id=fid,
+                name=name,
+                type="function",
+                file_path=rel,
+                start_line=sl,
+                end_line=el,
+                complexity=_lines_for_node(source, n),
+                metadata={"parse_mode": m.parse_mode},
+            )
+            store.add_edge(file_id, fid, "DEFINES")
+    store.commit()
+
+
+def _guess_decl_name(n: Node, source: bytes) -> str | None:
+    fn = n.child_by_field_name("name")
+    if fn:
+        return _text(source, fn)
+    for c in n.children:
+        if c.type in ("identifier", "type_identifier", "field_identifier"):
+            return _text(source, c)
+    return None
+
+
+def parse_stats_for_universal_ingest(
+    store: GraphStore, rel: str, text: str
+) -> dict[str, Any]:
+    """Hook for quality / future layers — summarize nodes for *rel* in *store*."""
+    nodes = [n for n in store.get_all_nodes() if n.file_path == rel]
+    n_fn = len([1 for n in nodes if n.type in ("function", "method")])
+    n_cl = len([1 for n in nodes if n.type == "class"])
+    n_im = len([1 for n in nodes if n.type == "import"])
+    n_e = [
+        1
+        for e in store.get_all_edges()
+        if e.source_id.startswith(rel) and e.relationship == "CALLS"
+    ]
+    names = tuple(
+        n.name
+        for n in nodes
+        if n.type in ("function", "method", "class") and n.name
+    )
+    return {
+        "n_functions": n_fn,
+        "n_classes": n_cl,
+        "n_imports": n_im,
+        "n_call_edges": len(n_e),
+        "n_lines": text.count("\n") + 1 if text else 0,
+        "function_class_names": names,
+    }

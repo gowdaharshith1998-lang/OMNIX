@@ -1,5 +1,17 @@
 # AXIOM ML-DSA-65 (OMNIX)
 
+## Integration #11 (MEGA) — Evolution + database (ITER 4, 2026-04-25)
+
+- **Per-codebase DB (Q2):** `omnix analyze` writes `<analyzed_root>/omnix.db` (graph nodes/edges + evolution tables). This is the canonical store for that tree; `~/.omnix/omnix.db` remains a **fallback** for `find-bugs` only when the codebase copy is absent (see `resolve_graph_db`).
+- **Schema:** `src/parser/evolution_schema.py` is applied idempotently from `GraphStore` (same SQLite file as the graph). Tables: `grammar_profile`, `query_pattern`, `pattern_mutation`, `unknown_extensions`.
+- **Mutations:** Batched in `src/parser/evolution.py` — in-run observations only; `finalize_evolution_run(conn)` runs one `BEGIN`/`COMMIT` for SQL. Signed evolution JSON is written next to a **detached** ML-DSA-65 `.sig` file named `same_basename.sig` (so `SIG="${RECEIPT%.json}.sig"` works). If `~/.omnix/keys/secret.pem` is missing, promote/decay steps that require a receipt are **skipped** (P16); a warning is logged; no unsigned pattern changes for those steps.
+- **P21:** Builtin rows in `query_pattern` with `added_by=builtin_hint` are never auto-decayed; only `auto_learned` patterns are eligible.
+- **P13:** Evolution JSON contains only metadata (grammar, node_type, counts, scores, key fingerprint) — no source text or file paths from the repo.
+
+## Provider Fabric: `parse_extract` task (Integration #11, ITER 3)
+
+- **Task kind:** `parse_extract` is registered in `fabric` default `task_chains` with the same multi-provider order as other background tasks. It is used only by `src/parser/llm_fallback.py` to request **JSON-only** structured code facts (functions, classes, calls, imports) when universal AST quality is low. Router behavior is identical to any other `task_kind`: `chain_for_task` plus health and budget; no special Fabric code path.
+
 ## Polynomial / NTT layer
 
 - **Day 1 (shipped):** Pure Python, `list[int]` coefficients for polynomials in R_q, NTT per FIPS 204 Algorithms 41–42. Throughput is acceptable for OMNIX provenance workflows.

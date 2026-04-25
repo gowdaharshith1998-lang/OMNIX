@@ -1,0 +1,8 @@
+{
+  "language": "rust",
+  "extensions": [".rs"],
+  "extra_function_nodes": ["function_signature_item"],
+  "extra_class_nodes": ["struct_item", "impl_item", "enum_item", "trait_item"],
+  "extra_call_nodes": [],
+  "extra_import_nodes": ["use_declaration", "use_tree"]
+}

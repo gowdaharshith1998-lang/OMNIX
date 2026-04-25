@@ -52,6 +52,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="SQLite graph DB (default: <path>/omnix.db or ~/.omnix/omnix.db)",
     )
+    p.add_argument(
+        "--fix",
+        action="store_true",
+        help="Layer 7: after findings, run sandbox-only Fabric code_fix (P28); no repo writes (P27)",
+    )
     return p
 
 
@@ -77,6 +82,7 @@ def run(
             max_file_size=int(a.max_file_size),
             graph_db=g,
             no_sign=False,
+            enable_fix=bool(getattr(a, "fix", False)),
         )
     except (OSError, RuntimeError, TypeError) as e:
         print(f"omnix find-bugs: {e}", file=sys.stderr)

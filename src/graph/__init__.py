@@ -1,0 +1,1 @@
+"""OMNIX graph (SQLite) package."""

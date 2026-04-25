@@ -44,3 +44,5 @@ htmlcov/
 
 # Generated Gephi export (regenerate with scripts/export_gephi.py)
 graph.gexf
+__pycache__/
+*.pyc

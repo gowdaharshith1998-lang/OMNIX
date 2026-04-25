@@ -17,6 +17,9 @@ _DEFAULT: dict[str, Any] = {
         "code_review": ["anthropic"],
         "debug": ["anthropic", "openai"],
         "architecture": ["anthropic", "openai"],
+        "parse_extract": ["ollama", "openai", "google", "anthropic"],
+        "fuzz_inputs": ["ollama", "openai", "google", "anthropic"],
+        "code_fix": ["ollama", "openai", "google", "anthropic"],
     },
     "agent_overrides": {},
     "budgets_usd_per_day": {
