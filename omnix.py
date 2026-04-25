@@ -43,11 +43,47 @@ def main() -> None:
     )
     analyze.add_argument("--port", type=int, default=7777, help="Web UI port")
 
+    vsub = subparsers.add_parser(
+        "verify", help="Property-based test / verify a Python function"
+    )
+    vsub.add_argument("path", help="Path to a .py file")
+    vsub.add_argument(
+        "--function", default=None, help="Specific function name (else all top-level)"
+    )
+    vsub.add_argument(
+        "--examples", type=int, default=200, help="Number of test examples (default: 200)"
+    )
+    vsub.add_argument(
+        "--json", action="store_true", help="JSON output to stdout (machine-readable)"
+    )
+    vsub.add_argument(
+        "--no-receipt",
+        action="store_true",
+        help="Skip writing signed receipt to ~/.omnix/receipts",
+    )
+    vsub.add_argument(
+        "--graph-db", dest="graph_db", default=None, help="Path to graph SQLite (default: auto-detect)"
+    )
+    vsub.add_argument(
+        "--codebase-root", default=None, help="Analyzed root for rel paths in graph (default: OMNIX repo root)"
+    )
+
     args = parser.parse_args()
 
-    if args.command != "analyze":
+    if args.command is None:
         parser.print_help()
-        sys.exit(0 if args.command is None else 1)
+        sys.exit(0)
+    if args.command == "verify":
+        root = os.path.dirname(os.path.abspath(__file__))
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        from src.verify import cli
+
+        rc = int(cli.run(args))  # type: ignore[assignment, call-arg, misc, arg-type]
+        sys.exit(0 if rc == 0 else 1 if rc == 1 else 2)
+    if args.command != "analyze":
+        print(f"Unknown command: {args.command!r}", file=sys.stderr)
+        sys.exit(1)
 
     root = os.path.dirname(os.path.abspath(__file__))
     if root not in sys.path:

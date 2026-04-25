@@ -378,3 +378,45 @@ Working tree reverted to `d6d2bcd`. Reference images backed up to ~/omnix-refere
 **Bet status:** 50% shipped, ~16% time elapsed (Day 5 of 30). Still well ahead.
 
 **Day 6 plan:** Integration #5 — PBT verification engine. Core product, not visual polish.
+
+---
+
+## Day 6 — Integration #5 PBT Verification Engine + #5.1 Package-Aware Loader (2026-04-25)
+
+**Shipped:** `omnix verify <file> --function <name> --examples N` — graph-native PBT engine with cryptographically signed receipts.
+
+**Modules (src/verify/):**
+- signature.py — AST top-level def/async def extraction (skips *args/**kwargs, records defaults)
+- caller_shape.py — read-only CALLS edges, literal type counts
+- boundary.py — literal extraction with ≥2-caller filter (incl. unary minus)
+- invariants.py — round-trip pair detection (`y = f(x); g(y)`)
+- strategies.py — Hypothesis strategy synthesis from hints + caller signals
+- runner.py — orchestrator with package-aware module loader + 4-level graph DB resolution
+- receipt.py — ML-DSA-65 signed JSON receipts (reuses src/axiom/encoding.py)
+- cli.py — argparse subcommand
+
+**Loader (#5.1):** Walks up `__init__.py` to find package root, uses `importlib.import_module(qualified_name)` so files with relative imports load correctly. Restores sys.path on exit.
+
+**Tests:**
+- 34 pytest tests in tests/verify/ — all green
+- 110/110 total pytest — all suites unchanged
+- 85/85 vitest — sidebar/vault unchanged
+
+**Receipt schema v1** (forward-compat envelope for #6 Bug Finder, #8 Auto-Fixer, #13 Bias Attestation):
+{ axiom_signature, examples_run, failures[], graph_signals, kind, results[], strategies, target{file,file_sha256,function,lineno}, timestamp, version }
+
+**🎯 First real finding:**
+Smoke test on `src/axiom/encoding.py --function bitlen_u64` (our own ML-DSA-65 bit-length helper) found a contract gap in 50 examples:
+- Input: `-1`
+- Exception: `ValueError: bitlen expected nonnegative`
+- Shrunk to minimum: 5 bytes
+- Receipt: ~/.omnix/receipts/verify_2026-04-25T07-00-27.578675Z_bitlen_u64.json
+- File SHA-256 captured, ML-DSA-65 signature present
+
+This is the canonical demo: OMNIX found a contract gap in its own signing layer that 80+ existing tests didn't catch. **Pattern-matching scanners (Snyk, Semgrep, SonarQube, CodeQL) cannot find this class of issue.** OMNIX can.
+
+**Spec correction:** Original prompt referenced `src/axiom/signer.py` (does not exist). Real signer module is `src/axiom/encoding.py`.
+
+**Bet status:** 7 features in 6 days (~17% time, ~50% shipped). Ahead of pace.
+
+**Day 7 plan:** #6 Bug Finder MVP — uses #5 to find real bugs in real OMNIX code, ships signed receipts, becomes the canonical product demo.

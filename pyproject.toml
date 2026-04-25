@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.1",
+    "hypothesis>=6.100",
 ]
 
 [project.optional-dependencies]
@@ -20,7 +21,7 @@ omnix = "cli:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
-packages = ["axiom", "scan", "fabric"]
+packages = ["axiom", "scan", "fabric", "verify"]
 py-modules = ["cli"]
 
 [tool.pytest.ini_options]
