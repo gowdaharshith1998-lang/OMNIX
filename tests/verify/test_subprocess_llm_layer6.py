@@ -89,7 +89,7 @@ def test_popen_uses_preexec_and_timeout() -> None:
     p = Path(subprocess_llm.__file__ or "")
     t = p.read_text(encoding="utf-8", errors="replace")
     assert "preexec_fn=_set_rlimit_as" in t
-    assert "Popen_" in t or "getattr(subprocess" in t
+    assert "subprocess.Popen(" in t
     m = re.search(
         r"communicate\(timeout=.*timeout_s",
         t,

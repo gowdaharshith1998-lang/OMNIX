@@ -3,10 +3,36 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 from . import runner
+
+
+def _emit_fix_fabric_warning_if_needed(fix: bool) -> None:
+    if not fix or os.environ.get("OMNIX_FUZZ_DRY") == "1":
+        return
+    from src.fabric.config import load_config
+    from src.fabric.policy import chain_for_task
+
+    cfg = load_config()
+    chain = chain_for_task(cfg, "code_fix")
+    non_ollama = [p for p in chain if str(p) != "ollama"]
+    if not non_ollama:
+        return
+    bmap = cfg.get("budgets_usd_per_day") or {}
+    try:
+        cap = float(bmap.get("anthropic", 20.0))
+    except (TypeError, ValueError):
+        cap = 20.0
+    sys.stderr.write(
+        "⚠ --fix may invoke Provider Fabric (chain: "
+        f"{','.join(chain)}). API spend cap: $"
+        f"{cap:.2f}/day. "
+        "Set OMNIX_FUZZ_DRY=1 to skip Fabric, or "
+        "OMNIX_FUZZ_FABRIC_BUDGET to bound per-run calls.\n"
+    )
 
 _EXIT_OK = 0
 _EXIT_FAIL = 1
@@ -50,7 +76,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--graph-db",
         dest="graph_db",
         default=None,
-        help="SQLite graph DB (default: <path>/omnix.db or ~/.omnix/omnix.db)",
+        help="SQLite graph DB (default: use or create <path>/omnix.db; or set OMNIX_GRAPH_DB)",
     )
     p.add_argument(
         "--fix",
@@ -71,6 +97,7 @@ def run(
     g = a.graph_db
     if g:
         g = str(Path(g).resolve())
+    _emit_fix_fabric_warning_if_needed(bool(getattr(a, "fix", False)))
     try:
         ex, out, _detail = runner.run_find_bugs(
             path,

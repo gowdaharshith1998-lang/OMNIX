@@ -93,26 +93,48 @@ def _real_home_dir() -> str:
         return "/"
 
 
-def resolve_graph_db(
+def ensure_find_bugs_graph_db(
     codebase: Path, explicit: str | None = None
-) -> Path | None:
-    if explicit:
-        p = Path(explicit).expanduser()
-        if p.is_file():
-            return p
-    envp = os.environ.get("OMNIX_GRAPH_DB")
-    if envp and Path(envp).is_file():
-        return Path(envp).resolve()
+) -> tuple[Path | None, str | None]:
+    """Open or create the graph SQLite file for find-bugs (Q2: per-codebase, no home fallback)."""
+    import logging
+
+    from src.graph.store import GraphStore
+
+    _log = logging.getLogger("omnix.find_bugs")
+
+    def _open_or_bootstrap(p: Path) -> tuple[Path | None, str | None]:
+        p = p.resolve()
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as e:  # pragma: no cover — exercised via readonly test
+            return (None, f"cannot create graph database at {p} ({e})")
+        try:
+            st = GraphStore(str(p))
+            st.close()
+        except (OSError, ValueError, sqlite3.OperationalError) as e:
+            return (None, f"cannot create graph database at {p} ({e})")
+        return (p, None)
+
+    if explicit and str(explicit).strip():
+        p0 = Path(explicit).expanduser()
+        if p0.is_file():
+            return (p0.resolve(), None)
+        r, e = _open_or_bootstrap(p0)
+        return (r, e)
+    ev = (os.environ.get("OMNIX_GRAPH_DB") or "").strip()
+    if ev:
+        p1 = Path(ev).expanduser()
+        if p1.is_file():
+            return (p1.resolve(), None)
+        return _open_or_bootstrap(p1)
     c1 = (codebase / "omnix.db").resolve()
-    h = (Path.home() / ".omnix" / "omnix.db").resolve()
     if c1.is_file():
-        return c1
-    if h.is_file():
-        return h
-    o = _omnix_root() / "omnix.db"
-    if o.is_file():
-        return o
-    return None
+        return (c1, None)
+    r, e = _open_or_bootstrap(c1)
+    if e is None and r is not None:
+        _log.info("ℹ Created per-codebase DB at %s", r)
+    return (r, e)
 
 
 def _relpos(path: Path, root: Path) -> str:
@@ -537,11 +559,18 @@ def run_find_bugs(
     if not root.is_dir():
         return (2, f"not a directory: {root}\n", None)
     oroot = str(_omnix_root())
-    gdb = resolve_graph_db(root, graph_db)
-    if not gdb or not gdb.is_file():
+    gdb_t, gerr = ensure_find_bugs_graph_db(root, graph_db)
+    if gerr or gdb_t is None:
         return (
             2,
-            "run omnix analyze first (graph DB missing: <codebase>/omnix.db, or set OMNIX_GRAPH_DB; optional fallback ~/.omnix/omnix.db or repo omnix.db)\n",
+            (gerr or f"no graph database for {root} (set OMNIX_GRAPH_DB, or use --graph-db, or run omnix analyze; find-bugs creates <codebase>/omnix.db when the tree is writable)\n"),
+            None,
+        )
+    gdb = gdb_t
+    if not gdb.is_file():
+        return (
+            2,
+            f"graph database path not usable: {gdb}\n",
             None,
         )
     from src.graph.store import GraphStore

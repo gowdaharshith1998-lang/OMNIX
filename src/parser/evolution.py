@@ -24,6 +24,12 @@ _LOG = logging.getLogger("omnix.parser.evolution")
 TIER_TOPLEVEL = "toplevel"
 ADDED_AUTO = "auto_learned"
 BUILTIN = "builtin_hint"  # reserved for P21; decay SQL filters added_by=auto only
+ADDED_LLM = "llm_inferred"
+ADDED_UNKNOWN = "unknown"  # v1 receipts on disk had no top-level added_by
+RECEIPT_SCHEMA_V2 = 2
+_FORBID_MUTATION_ON_BUILTIN = frozenset(
+    {"decay", "decay_pattern", "tier_change"}
+)
 
 SECRET_KEY = Path.home() / ".omnix" / "keys" / "secret.pem"
 PUB_KEY = Path.home() / ".omnix" / "keys" / "public.pem"
@@ -126,6 +132,50 @@ def _json_canonical(b: dict[str, Any]) -> bytes:
     return json.dumps(
         b, sort_keys=True, separators=(",", ":"), ensure_ascii=False
     ).encode("utf-8")
+
+
+def resolved_added_by_from_receipt(data: dict[str, Any]) -> str:
+    """v1: missing top-level added_by is treated as unknown; v2+ includes added_by when present."""
+    if not isinstance(data, dict):
+        return ADDED_UNKNOWN
+    raw = data.get("added_by")
+    if raw is not None and str(raw).strip() != "":
+        return str(raw)
+    if int(data.get("schema_version") or 0) < 2:
+        return ADDED_UNKNOWN
+    return ADDED_UNKNOWN
+
+
+def emit_evolution_receipt(
+    body: dict[str, Any]
+) -> tuple[Path, Path] | None:
+    """Sign and write evolution JSON (v2+). P21: refuse ``builtin_hint`` with decay / tier change."""
+    b: dict[str, Any] = {**body}
+    if b.get("kind") == "grammar_evolution":
+        mut = str(b.get("mutation") or "")
+        if b.get("added_by") == BUILTIN and mut in _FORBID_MUTATION_ON_BUILTIN:
+            raise ValueError(
+                "evolution receipt refused: builtin patterns are immutable (P21); "
+                f"cannot emit mutation={mut!r} for added_by=builtin_hint"
+            )
+        b["schema_version"] = RECEIPT_SCHEMA_V2
+    w = _write_evolution_receipt(b)
+    return w
+
+
+def emit_evolution_receipt_for_test(added_by: str = ADDED_AUTO) -> Path:
+    out = emit_evolution_receipt(
+        {
+            "kind": "grammar_evolution",
+            "grammar": "synth_test",
+            "mutation": "synthetic",
+            "observed_at": _iso_utc(),
+            "added_by": added_by,
+        }
+    )
+    if not out:
+        raise RuntimeError("emit_evolution_receipt_for_test: signing failed (key missing or invalid)")
+    return out[0]
 
 
 def _write_evolution_receipt(
@@ -238,6 +288,7 @@ def finalize_evolution_run(conn: sqlite3.Connection) -> int:
             if isinstance(r, sqlite3.Row):
                 pid = int(r["id"])
                 nty = str(r["node_type"])
+                ab = str(r["added_by"] or ADDED_UNKNOWN)
             else:
                 continue
             wq = [x.quality for x in obs if x.grammar == g and nty in x.top_level_types]
@@ -249,14 +300,14 @@ def finalize_evolution_run(conn: sqlite3.Connection) -> int:
                 continue
             mbody: dict[str, Any] = {
                 "kind": "grammar_evolution",
-                "schema_version": 1,
                 "grammar": g,
                 "mutation": "promote_pattern",
                 "node_type": nty,
                 "evidence": {"m_with": a, "m_wo": b0, "n_files_grammar": tf},
                 "observed_at": _iso_utc(),
+                "added_by": ab,
             }
-            w = _write_evolution_receipt(mbody)
+            w = emit_evolution_receipt(mbody)
             if w is None:
                 _LOG.warning("evolution: promote skipped (no key) grammar=%s", g)
                 continue
@@ -274,21 +325,22 @@ def finalize_evolution_run(conn: sqlite3.Connection) -> int:
         h, mi, pid = int(r[4]), int(r[5]), int(r[0])
         g = str(r[1])
         nty = str(r[2])
+        ab = str(r["added_by"] or ADDED_UNKNOWN) if isinstance(r, sqlite3.Row) else ADDED_UNKNOWN
         toti = h + mi
         if toti < 20:
             continue
         p = h / toti
         if p >= 0.3:
             continue
-        w = _write_evolution_receipt(
+        w = emit_evolution_receipt(
             {
                 "kind": "grammar_evolution",
-                "schema_version": 1,
                 "grammar": g,
                 "mutation": "decay_pattern",
                 "node_type": nty,
                 "evidence": {"precision": p, "n": toti},
                 "observed_at": _iso_utc(),
+                "added_by": ab,
             }
         )
         if w is None:
@@ -309,12 +361,13 @@ def finalize_evolution_run(conn: sqlite3.Connection) -> int:
 
 
 def _emit_mutation_receipt_for_test() -> str:
-    t = {
-        "kind": "grammar_evolution",
-        "schema_version": 1,
-        "grammar": "synth_test",
-        "mutation": "synthetic",
-        "observed_at": _iso_utc(),
-    }
-    p = _write_evolution_receipt(t)
+    p = emit_evolution_receipt(
+        {
+            "kind": "grammar_evolution",
+            "grammar": "synth_test",
+            "mutation": "synthetic",
+            "observed_at": _iso_utc(),
+            "added_by": ADDED_AUTO,
+        }
+    )
     return str(p[0]) if p else ""

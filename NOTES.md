@@ -2,7 +2,7 @@
 
 ## Integration #11 (MEGA) — Evolution + database (ITER 4, 2026-04-25)
 
-- **Per-codebase DB (Q2):** `omnix analyze` writes `<analyzed_root>/omnix.db` (graph nodes/edges + evolution tables). This is the canonical store for that tree; `~/.omnix/omnix.db` remains a **fallback** for `find-bugs` only when the codebase copy is absent (see `resolve_graph_db`).
+- **Per-codebase DB (Q2):** `omnix analyze` writes `<analyzed_root>/omnix.db` (graph nodes/edges + evolution tables). This is the canonical store for that tree. `omnix find-bugs` uses that same file or creates `<codebase>/omnix.db` on first run; it does **not** fall back to `~/.omnix/omnix.db` unless you set `OMNIX_GRAPH_DB` to that path explicitly.
 - **Schema:** `src/parser/evolution_schema.py` is applied idempotently from `GraphStore` (same SQLite file as the graph). Tables: `grammar_profile`, `query_pattern`, `pattern_mutation`, `unknown_extensions`.
 - **Mutations:** Batched in `src/parser/evolution.py` — in-run observations only; `finalize_evolution_run(conn)` runs one `BEGIN`/`COMMIT` for SQL. Signed evolution JSON is written next to a **detached** ML-DSA-65 `.sig` file named `same_basename.sig` (so `SIG="${RECEIPT%.json}.sig"` works). If `~/.omnix/keys/secret.pem` is missing, promote/decay steps that require a receipt are **skipped** (P16); a warning is logged; no unsigned pattern changes for those steps.
 - **P21:** Builtin rows in `query_pattern` with `added_by=builtin_hint` are never auto-decayed; only `auto_learned` patterns are eligible.
@@ -76,9 +76,9 @@ No open failures at completion; the main correctness bug was `modpm` for even mo
 ### Strategic context (competitive landscape as of Apr 24 2026)
 - Graphify released Apr 3 2026, 22k stars in 10 days — commoditized the "graph-of-codebase" layer
 - GitNexus, Axon, CodeGraph, code-review-graph all in the graph lane
-- ZERO competitors sign code intelligence events with ML-DSA-65
+- To our current knowledge, no other product in this space signs graph/code-intelligence *events* with ML-DSA-65 in the same way as OMNIX; see README “Adjacent prior art” for related signing stacks (e.g. Sigstore, pqrascv-style attestation)
 - OMNIX moat: everything ABOVE the graph (vault, signed receipts, legacy migration, agent routing)
-- Revised positioning: "The only code intelligence IDE where every AI-generated change is cryptographically signed"
+- Revised positioning: "To our current knowledge, the only open-core code intelligence product that bundles universal Tree-Sitter + self-evolving query patterns + ML-DSA-65 signed audit trail + hybrid universal PBT + sandbox-isolated auto-fix in one shipping repo."
 
 ### Day 3 target
 - Integration #3: Provider Fabric port from AXIOM v2
@@ -114,9 +114,9 @@ No open failures at completion; the main correctness bug was `modpm` for even mo
 
 ### Strategic context (Apr 24 2026 landscape)
 - Graphify released Apr 3 2026, 22k stars in 10 days — commoditized graph-of-codebase layer
-- ZERO competitors sign code intelligence events with ML-DSA-65
+- To our current knowledge, no other product in this space signs graph/code-intelligence *events* with ML-DSA-65 the same way; see README “Adjacent prior art”
 - OMNIX moat: everything ABOVE the graph (vault, signed receipts, legacy migration)
-- Positioning: "The only code intelligence IDE where every AI-generated change is cryptographically signed"
+- Positioning: "To our current knowledge, the only open-core code intelligence product that bundles universal Tree-Sitter + self-evolving query patterns + ML-DSA-65 signed audit trail + hybrid universal PBT + sandbox-isolated auto-fix in one shipping repo."
 
 ### Day 3 target
 - Integration #3: Provider Fabric — governance + routing + failover layer between agents and vault
@@ -280,8 +280,8 @@ Decision split (2) and (4) full scope: defer until 30-day bet state at
 Day 20 checkpoint.
 
 Result = "multiplayer graph-native IDE where humans and AIs work
-together with cryptographic provenance." Intersection no competitor
-occupies.
+together with cryptographic provenance." That combination is not widely
+shipped elsewhere as a single product.
 
 ### Design tooling choices
 
@@ -512,8 +512,8 @@ Recommendation: (c) first — 30 min, gives you a shippable artifact for landing
 ## Day 4 close (2026-04-25, evening)
 
 ### #11-MEGA SHIPPED
-Commit at <fill in after push>. 201 pytest green. Universal language
-code intelligence + signed self-evolution + sandbox-isolated auto-fix.
+201+ pytest green. Universal language
+code intelligence + signed self-evolution + sandbox-isolated auto-fix. Each layer has prior art (see README “Adjacent prior art”); the product claim is the **combination** shipped in one repository.
 
 Real production artifacts on AXIOM-V2:
 - 10 ML-DSA-65 signed evolution receipts

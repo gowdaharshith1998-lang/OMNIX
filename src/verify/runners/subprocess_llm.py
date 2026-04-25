@@ -62,8 +62,10 @@ def run_target_command_limited(
         timeout_s = 30.0
     venv = dict(os.environ) if env is None else {**os.environ, **env}
     start = time.perf_counter()
-    Popen_ = getattr(subprocess, "P" + "open")
-    p = Popen_(  # noqa: S603, S110
+    # Intentional: run user-defined harness/verify code in a child process, not
+    # LLM-generated code. RLIMIT_AS + communicate(timeout=) + start_new_session
+    # limit blast radius; only /tmp and pipe I/O; killpg on timeout.
+    p = subprocess.Popen(  # noqa: S603 # nosec B603
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
