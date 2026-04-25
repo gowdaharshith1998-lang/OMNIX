@@ -45,8 +45,11 @@ def test_v2_receipt_includes_added_by_for_auto_learned(tmp_path: Path) -> None:
     js = list(rdir.glob("evolution_*.json"))
     assert js, "receipt file expected"
     d = json.loads(js[0].read_text(encoding="utf-8"))
-    assert d.get("schema_version") == 2
+    assert d.get("schema_version") == evo.RECEIPT_SCHEMA_V3
     assert d.get("added_by") == evo.ADDED_AUTO
+    assert d.get("quality_formula_version") == 2
+    assert d.get("profile_grammar") == "generic"
+    assert int(d.get("profile_version", 0)) >= 1
     evo.reset_evolution_test_paths()
 
 

@@ -1,0 +1,8 @@
+{
+  "has_identification_division": true,
+  "has_data_division": true,
+  "has_procedure_division": true,
+  "n_paragraphs_in_procedure": 1,
+  "n_perform_or_call": 0,
+  "has_linkage_or_copybook": false
+}

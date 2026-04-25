@@ -1,0 +1,8 @@
+{
+  "n_csect_or_rsect": 1,
+  "n_dsect_or_ltorg": 1,
+  "n_instruction_statements": 12,
+  "n_macro_invocation": 2,
+  "has_comments": true,
+  "n_using_or_drop": 1
+}

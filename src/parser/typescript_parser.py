@@ -1,6 +1,6 @@
 """Tree-sitter extraction for TypeScript / TSX sources."""
 
-from __future__ import annotations
+from __future__ import annotations  # must stay first: forward refs in helpers
 
 import os
 from collections import defaultdict
@@ -73,6 +73,38 @@ def _build_ts_call_index(store: GraphStore) -> dict[str, list[tuple[str, str]]]:
     return by_short
 
 
+def _ts_add_type_decl_for_stats(
+    ctx: _TsDefCtx, node: Node, decl_kind: str, parent_id: str
+) -> None:
+    """
+    Stats-only node for type declarations. Not in evolution mutation set (P21);
+    ``type`` is ``type_decl`` with ``metadata['node_kind'] == 'type_decl'``.
+    """
+    name_node = node.child_by_field_name("name")
+    if name_node is None:
+        return
+    if name_node.type not in ("identifier", "type_identifier"):
+        return
+    name = _text(ctx.source, name_node)
+    if not name:
+        return
+    sl = node.start_point[0] + 1
+    el = node.end_point[0] + 1
+    lines = _lines_for_node(ctx.source, node)
+    tid = f"{ctx.rel}::tdecl_{decl_kind}::{name}::{node.start_byte}"
+    ctx.store.add_node(
+        id=tid,
+        name=name,
+        type="type_decl",
+        file_path=ctx.rel,
+        start_line=sl,
+        end_line=el,
+        complexity=lines,
+        metadata={"node_kind": "type_decl", "decl_kind": decl_kind},
+    )
+    ctx.store.add_edge(parent_id, tid, "DEFINES")
+
+
 def _ts_pass1(store: GraphStore, rel: str, text: str, is_tsx: bool) -> None:
     source = text.encode("utf-8")
     parser = _parser_tsx() if is_tsx else _parser_ts()
@@ -107,8 +139,19 @@ def _ts_pass1_statement(
                 "lexical_declaration",
                 "class_declaration",
                 "interface_declaration",
+                "type_alias_declaration",
+                "enum_declaration",
             ):
                 _ts_pass1_statement(ctx, c, parent_id, class_stack)
+        return
+    if stmt.type == "interface_declaration":
+        _ts_add_type_decl_for_stats(ctx, stmt, "interface", parent_id)
+        return
+    if stmt.type == "type_alias_declaration":
+        _ts_add_type_decl_for_stats(ctx, stmt, "type_alias", parent_id)
+        return
+    if stmt.type == "enum_declaration":
+        _ts_add_type_decl_for_stats(ctx, stmt, "enum", parent_id)
         return
     if stmt.type == "function_declaration":
         _ts_define_function(ctx, stmt, parent_id, class_stack)

@@ -1,0 +1,8 @@
+{
+  "n_program_or_module_or_sub_or_function": 1,
+  "n_use": 2,
+  "n_procedure_bodies": 2,
+  "has_implicit_none": true,
+  "n_contains_or_interface": 1,
+  "n_lines": 120
+}

@@ -1,0 +1,16 @@
+{
+  "grammar": "go",
+  "_comment": "Go packages use explicit imports, free functions, methods, structs, and small interfaces. Structs and interface types are counted separately because they often live in different files in real codebases.",
+  "formula": "weighted_sum",
+  "profile_version": 1,
+  "weights": {
+    "function_declaration": 0.25,
+    "method_declaration": 0.15,
+    "struct_type": 0.15,
+    "interface_type": 0.1,
+    "import_declaration": 0.2,
+    "call_edge": 0.1,
+    "non_synthetic_names": 0.05
+  },
+  "required_minimums": {}
+}

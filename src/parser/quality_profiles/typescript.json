@@ -1,0 +1,17 @@
+{
+  "grammar": "typescript",
+  "_comment": "Core (fn/import/call/names/line) matches calibrated .ts/TSX behavior; small interface/type/enum for declaration-only. Build-output .js in .next is excluded in find_bugs/walker, not this profile.",
+  "formula": "weighted_sum",
+  "profile_version": 1,
+  "weights": {
+    "function_or_method": 0.26,
+    "import_statement": 0.24,
+    "call_edge": 0.08,
+    "non_synthetic_names": 0.2,
+    "line_density": 0.1,
+    "interface_declaration": 0.06,
+    "type_alias_declaration": 0.04,
+    "enum_declaration": 0.02
+  },
+  "required_minimums": {}
+}

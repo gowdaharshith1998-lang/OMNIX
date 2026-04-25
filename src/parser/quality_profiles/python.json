@@ -1,0 +1,14 @@
+{
+  "grammar": "python",
+  "_comment": "Matches legacy compute_score: 0.3/0.2/0.2/0.2/0.1 (function, import, call, names, line density with v1 thresholds). AXIOM-V2 aggregate tracks historical ~0.73; no class term because v1 did not reward class.",
+  "formula": "weighted_sum",
+  "profile_version": 1,
+  "weights": {
+    "function_or_method": 0.3,
+    "import_statement": 0.2,
+    "call_edge": 0.2,
+    "non_synthetic_names": 0.2,
+    "line_density": 0.1
+  },
+  "required_minimums": {}
+}

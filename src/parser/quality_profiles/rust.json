@@ -1,0 +1,16 @@
+{
+  "grammar": "rust",
+  "_comment": "Rust sources pair structs with impl blocks, traits, and use declarations. impl_item is heavily weighted as the locus of behavior; call edges and names add runtime signal.",
+  "formula": "weighted_sum",
+  "profile_version": 1,
+  "weights": {
+    "function_item": 0.25,
+    "impl_item": 0.2,
+    "struct_item": 0.15,
+    "trait_item": 0.1,
+    "use_declaration": 0.15,
+    "call_edge": 0.1,
+    "non_synthetic_names": 0.05
+  },
+  "required_minimums": {}
+}

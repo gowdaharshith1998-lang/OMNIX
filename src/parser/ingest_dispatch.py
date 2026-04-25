@@ -14,7 +14,7 @@ from src.parser import evolution
 from src.find_bugs.walker import iter_dispatch_paths
 from src.parser.grammar_detect import detect_for_path
 from src.parser.hint_loader import MergedHints, load_merged_hints
-from src.parser.quality import QualityInputs, compute_score
+from src.parser.quality import compute_score_v2, quality_inputs_from_parsed_stats
 from src.parser.universal import ingest_universal_to_store, parse_stats_for_universal_ingest
 
 _LOG = logging.getLogger("omnix.parser.ingest_dispatch")
@@ -24,6 +24,19 @@ _DEFAULT_MODE = "generic"
 
 def default_parse_mode() -> str:
     return os.environ.get("OMNIX_PARSE_MODE", _DEFAULT_MODE).strip() or _DEFAULT_MODE
+
+
+def _quality_grammar(grammar: str, full: Path, is_tsx: bool) -> str:
+    """
+    Per-file profile key. JavaScript/TSX share the TS grammar in Tree-sitter but
+    :file:`javascript.json` is used for ``.js``/``.mjs``/``.cjs`` when the grammar
+    name is still ``typescript``.
+    """
+    if grammar == "typescript" and not is_tsx:
+        ext = full.suffix.lower()
+        if ext in (".js", ".mjs", ".cjs"):
+            return "javascript"
+    return grammar
 
 
 def _known_union(m: MergedHints) -> frozenset[str]:
@@ -126,17 +139,11 @@ def ingest_one_path(
         _LOG.warning("commit %s: %s", rel, e)
         return "error"
 
-    stats = parse_stats_for_universal_ingest(store, rel, text)
-    q = compute_score(
-        QualityInputs(
-            n_functions=stats["n_functions"],
-            n_classes=stats["n_classes"],
-            n_imports=stats["n_imports"],
-            n_call_edges=stats["n_call_edges"],
-            n_lines=stats["n_lines"],
-            function_class_names=stats["function_class_names"],
-        )
+    qgram = _quality_grammar(d.grammar_name, full, d.is_tsx)
+    stats = parse_stats_for_universal_ingest(
+        store, rel, text, grammar=d.grammar_name, language=lang, is_tsx=d.is_tsx
     )
+    q = compute_score_v2(quality_inputs_from_parsed_stats(stats), qgram)
     types = top_level_syntactic_types(lang, text)
     evolution.observe_parse(
         d.grammar_name,

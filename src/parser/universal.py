@@ -189,7 +189,7 @@ def _ingest_rust(
                 break
         if not tname:
             continue
-        dl: TSNode | None = None
+        dl: Node | None = None
         for c in impl.children:
             if c.type == "declaration_list":
                 dl = c
@@ -359,10 +359,37 @@ def _guess_decl_name(n: Node, source: bytes) -> str | None:
     return None
 
 
+def _count_syntactic_node_types(
+    language: Language | None, text: str
+) -> dict[str, int]:
+    """Count Tree-sitter node `type` occurrences (full tree) for per-grammar quality."""
+    if not language or not text:
+        return {}
+    try:
+        source = text.encode("utf-8")
+        root = _parser(language).parse(source).root_node
+    except (OSError, ValueError, RuntimeError):
+        return {}
+    c: dict[str, int] = defaultdict(int)
+    for n in _iter_nodes(root):
+        c[n.type] += 1
+    return dict(c)
+
+
 def parse_stats_for_universal_ingest(
-    store: GraphStore, rel: str, text: str
+    store: GraphStore,
+    rel: str,
+    text: str,
+    *,
+    grammar: str = "",
+    language: Language | None = None,
+    is_tsx: bool = False,
 ) -> dict[str, Any]:
-    """Hook for quality / future layers — summarize nodes for *rel* in *store*."""
+    """
+    Summarize the graph + optional full-tree node counts for quality scoring
+    (``parse_mode``-agnostic; ``is_tsx`` reserved for call sites that care).
+    """
+    _ = is_tsx  # grammar + ``language`` already identify TSX vs TS parser
     nodes = [n for n in store.get_all_nodes() if n.file_path == rel]
     n_fn = len([1 for n in nodes if n.type in ("function", "method")])
     n_cl = len([1 for n in nodes if n.type == "class"])
@@ -377,6 +404,51 @@ def parse_stats_for_universal_ingest(
         for n in nodes
         if n.type in ("function", "method", "class") and n.name
     )
+    type_decl_name_list: list[str] = []
+    n_iface = n_talias = n_enum = 0
+    for n in nodes:
+        if n.type != "type_decl" or not n.metadata:
+            continue
+        meta = n.metadata
+        if meta.get("node_kind") != "type_decl":
+            continue
+        dk = str(meta.get("decl_kind", ""))
+        if dk == "interface":
+            n_iface += 1
+        elif dk == "type_alias":
+            n_talias += 1
+        elif dk == "enum":
+            n_enum += 1
+        if n.name:
+            type_decl_name_list.append(n.name)
+    n_arrow_g = 0
+    for n in nodes:
+        if n.type == "function" and n.metadata and n.metadata.get("arrow") is True:
+            n_arrow_g += 1
+    ctree = _count_syntactic_node_types(language, text) if language else {}
+    n_arrow = max(int(ctree.get("arrow_function", 0)), n_arrow_g)
+    n_iface = max(n_iface, int(ctree.get("interface_declaration", 0)))
+    n_talias = max(n_talias, int(ctree.get("type_alias_declaration", 0)))
+    n_enum = max(n_enum, int(ctree.get("enum_declaration", 0)))
+
+    n_function_item = int(ctree.get("function_item", 0))
+    n_impl_item = int(ctree.get("impl_item", 0))
+    n_struct_item = int(ctree.get("struct_item", 0))
+    n_trait_item = int(ctree.get("trait_item", 0))
+    n_use_decl = int(ctree.get("use_declaration", 0))
+    n_struct_type = int(ctree.get("struct_type", 0))
+    n_iface_type = int(ctree.get("interface_type", 0))
+    n_func_decl = int(ctree.get("function_declaration", 0))
+    n_meth_decl = int(ctree.get("method_declaration", 0))
+    n_imp_decl = int(ctree.get("import_declaration", 0))
+    n_fn = max(
+        n_fn,
+        int(ctree.get("function_declaration", 0)),
+        int(ctree.get("function_definition", 0)),
+    )
+    n_cl = max(n_cl, int(ctree.get("class_declaration", 0)))
+    n_im = max(n_im, n_imp_decl, n_use_decl)
+
     return {
         "n_functions": n_fn,
         "n_classes": n_cl,
@@ -384,4 +456,19 @@ def parse_stats_for_universal_ingest(
         "n_call_edges": len(n_e),
         "n_lines": text.count("\n") + 1 if text else 0,
         "function_class_names": names,
+        "n_interface_declaration": n_iface,
+        "n_type_alias_declaration": n_talias,
+        "n_enum_declaration": n_enum,
+        "n_arrow_function": n_arrow,
+        "n_function_declaration": n_func_decl,
+        "n_method_declaration": n_meth_decl,
+        "n_struct_type": n_struct_type,
+        "n_interface_type": n_iface_type,
+        "n_import_declaration": n_imp_decl,
+        "n_function_item": n_function_item,
+        "n_impl_item": n_impl_item,
+        "n_struct_item": n_struct_item,
+        "n_trait_item": n_trait_item,
+        "n_use_declaration": n_use_decl,
+        "type_decl_names": tuple(type_decl_name_list),
     }

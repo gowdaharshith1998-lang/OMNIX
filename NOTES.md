@@ -543,3 +543,46 @@ Realistic bet finish: Day 12-15 not Day 30. Slack room for polish pass.
 Pick one: (a) Demo recording (30 min, gives shippable artifact for
 launch) → recommended. (b) #4 Monaco IDE shell. (c) #7 Multi-agent PEV.
 
+## Historical Quality Formulas
+
+### Formula v1 (Days 1-5 of bet, schema_version 1 and 2)
+- **Active:** Days 1-5 (commits up to and including 42cc3d6)
+- **Receipts produced:** ~10 evolution receipts on AXIOM-V2 (python: 7 mutations, typescript: 3 mutations)
+- **Formula:**
+  ```
+  score = (function_count >= 1) * 0.30
+        + (call_edge_count >= 1) * 0.20
+        + (import_count >= 1) * 0.20
+        + non_synthetic_names_present * 0.20
+        + line_density * 0.10
+  ```
+- **Properties:** language-agnostic, biased toward Python-shaped code, under-counted TypeScript type-only files.
+- **AXIOM-V2 baseline q values:**
+  - **python:** 0.73 (9 patterns, 7 mutations, 371 files)
+  - **typescript:** 0.42 (6 patterns, 3 mutations, 353 files)
+
+### Formula v2 (Day 5+, schema_version 3)
+- **Active:** from the Phase 3 feature commit forward (receipts carry `quality_formula_version`, `profile_grammar`, `profile_version`)
+- **Per-grammar profiles in** `src/parser/quality_profiles/`
+- **Profiles shipped:** 7 modern (python, typescript, javascript, go, rust, java, generic), 3 legacy (cobol, hlasm, fortran) — see `docs/LEGACY_LANGUAGE_SUPPORT.md`
+- **Roadmap (Integration #15):** rpg, pl/i, jcl, vb6 — these require custom grammars not yet in the tree-sitter integration path; **not** supported today
+- **AXIOM-V2 baseline q values** (post-walker-fix excluding `.next`/`.nuxt/`.output` build dirs):
+  - **python:** 0.7266 (372 files, 270.30 total quality score)
+  - **typescript:** 0.6524 (179 files, 116.78 total quality score)
+- **TypeScript improvement:** +0.23 absolute, +55% relative (driven by `interface_declaration` / `type_alias_declaration` / `enum_declaration` nodes now contributing signal, plus build-output exclusion in the file walker)
+
+## Integration #15: Custom Grammar Pack (deferred)
+
+OMNIX does **not** ship RPG, PL/I, JCL, or VB6 parsers today. This table is a **roadmap and market** reference only. Real grammar work is a multi-week Integration #15 effort.
+
+| Language            | Traction / context                                      |
+|--------------------|-----------------------------------------------------------|
+| **RPG (IBM i)**    | $$$$ — IBM Project Bob March 2026 GA                     |
+| **PL/I**           | $$$ — banking, insurance                                  |
+| **JCL**            | $$$ — every COBOL deployment needs it                    |
+| **VB6 / Classic ASP** | $$ — older enterprise                             |
+
+**Grammar status:** not integrated in this repository; `docs/LEGACY_LANGUAGE_SUPPORT.md` describes shipping vs deferred languages.
+
+---
+

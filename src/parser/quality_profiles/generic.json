@@ -1,0 +1,14 @@
+{
+  "grammar": "generic",
+  "_comment": "Default for grammars without a dedicated profile file. Weights follow the language-agnostic legacy buckets (function/import/calls/names/density) so behavior stays conservative while allowing line_density where signal exists.",
+  "formula": "weighted_sum",
+  "profile_version": 1,
+  "weights": {
+    "function_or_method": 0.3,
+    "import_or_use": 0.2,
+    "call_edge": 0.2,
+    "non_synthetic_names": 0.2,
+    "line_density": 0.1
+  },
+  "required_minimums": {}
+}

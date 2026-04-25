@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from axiom import keystore, sign
+from src.parser.quality_profiles import load_profile
 
 _LOG = logging.getLogger("omnix.parser.evolution")
 
@@ -27,6 +28,7 @@ BUILTIN = "builtin_hint"  # reserved for P21; decay SQL filters added_by=auto on
 ADDED_LLM = "llm_inferred"
 ADDED_UNKNOWN = "unknown"  # v1 receipts on disk had no top-level added_by
 RECEIPT_SCHEMA_V2 = 2
+RECEIPT_SCHEMA_V3 = 3
 _FORBID_MUTATION_ON_BUILTIN = frozenset(
     {"decay", "decay_pattern", "tier_change"}
 )
@@ -146,10 +148,54 @@ def resolved_added_by_from_receipt(data: dict[str, Any]) -> str:
     return ADDED_UNKNOWN
 
 
+def resolved_quality_formula_version_from_receipt(data: dict[str, Any]) -> int:
+    """
+    Legacy (schema v1 and v2) evolution receipts predate *quality_formula_version*;
+    all such receipts implied formula **v1** (language-agnostic :func:`compute_score`).
+    Schema v3+ stores the explicit ``quality_formula_version`` (1=legacy, 2=per-grammar).
+    """
+    if not isinstance(data, dict):
+        return 1
+    if int(data.get("schema_version") or 0) < RECEIPT_SCHEMA_V3:
+        return 1
+    v = data.get("quality_formula_version", 1)
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _enrich_grammar_evolution_receipt_v3(b: dict[str, Any]) -> None:
+    """Set ``schema_version`` 3 and quality-profile metadata; v3 is strict on missing keys."""
+    b["schema_version"] = RECEIPT_SCHEMA_V3
+    gkey = str(b.get("grammar") or "").strip() or "generic"
+    p = load_profile(gkey)
+    if p is None:
+        raise ValueError(
+            "no quality profile for evolution receipt (expected generic.json or "
+            f"a profile for grammar={gkey!r})"
+        )
+    if b.get("quality_formula_version") is None:
+        b["quality_formula_version"] = 2
+    if b.get("profile_grammar") is None or str(b.get("profile_grammar", "")).strip() == "":
+        b["profile_grammar"] = p.grammar
+    if b.get("profile_version") is None:
+        b["profile_version"] = int(p.profile_version)
+    if b.get("quality_formula_version") is None:
+        raise ValueError("grammar evolution receipt v3 requires 'quality_formula_version'")
+    if not str(b.get("profile_grammar", "")).strip():
+        raise ValueError("grammar evolution receipt v3 requires 'profile_grammar'")
+    if b.get("profile_version") is None:
+        raise ValueError("grammar evolution receipt v3 requires 'profile_version'")
+
+
 def emit_evolution_receipt(
     body: dict[str, Any]
 ) -> tuple[Path, Path] | None:
-    """Sign and write evolution JSON (v2+). P21: refuse ``builtin_hint`` with decay / tier change."""
+    """
+    Sign and write evolution JSON. Current schema is **v3** (v1/v2 on disk are still
+    verifiable with ML-DSA-65). P21: refuse ``builtin_hint`` with decay / tier change.
+    """
     b: dict[str, Any] = {**body}
     if b.get("kind") == "grammar_evolution":
         mut = str(b.get("mutation") or "")
@@ -158,21 +204,26 @@ def emit_evolution_receipt(
                 "evolution receipt refused: builtin patterns are immutable (P21); "
                 f"cannot emit mutation={mut!r} for added_by=builtin_hint"
             )
-        b["schema_version"] = RECEIPT_SCHEMA_V2
+        _enrich_grammar_evolution_receipt_v3(b)
     w = _write_evolution_receipt(b)
     return w
 
 
-def emit_evolution_receipt_for_test(added_by: str = ADDED_AUTO) -> Path:
-    out = emit_evolution_receipt(
-        {
-            "kind": "grammar_evolution",
-            "grammar": "synth_test",
-            "mutation": "synthetic",
-            "observed_at": _iso_utc(),
-            "added_by": added_by,
-        }
-    )
+def emit_evolution_receipt_for_test(
+    added_by: str = ADDED_AUTO,
+    *,
+    grammar: str = "synth_test",
+    quality_formula_version: int = 2,
+) -> Path:
+    b: dict[str, Any] = {
+        "kind": "grammar_evolution",
+        "grammar": grammar,
+        "mutation": "synthetic",
+        "observed_at": _iso_utc(),
+        "added_by": added_by,
+        "quality_formula_version": quality_formula_version,
+    }
+    out = emit_evolution_receipt(b)
     if not out:
         raise RuntimeError("emit_evolution_receipt_for_test: signing failed (key missing or invalid)")
     return out[0]

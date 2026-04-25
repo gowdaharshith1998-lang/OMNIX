@@ -22,6 +22,10 @@ IGNORE_DIRS: frozenset[str] = frozenset(
         ".tox",
         ".pytest_cache",
         ".mypy_cache",
+        # Framework build outputs (e.g. Next .next/server/…/*.js) are not source for quality
+        ".next",
+        ".nuxt",
+        ".output",
     }
 )
 

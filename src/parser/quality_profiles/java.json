@@ -1,0 +1,15 @@
+{
+  "grammar": "java",
+  "_comment": "Java compilation units are class- and import-centric; interface declarations are less common than methods; weights follow typical single-file class plus import layout.",
+  "formula": "weighted_sum",
+  "profile_version": 1,
+  "weights": {
+    "method_declaration": 0.25,
+    "class_declaration": 0.2,
+    "interface_declaration": 0.1,
+    "import_declaration": 0.2,
+    "call_edge": 0.15,
+    "non_synthetic_names": 0.1
+  },
+  "required_minimums": {}
+}
