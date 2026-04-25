@@ -32,11 +32,17 @@ export function mountScanSection(bodyEl, vault, ctx) {
   let scanBusy = false;
 
   function iconFor(/** @type {string} */ p) {
-    if (p === 'anthropic') return 'A';
-    if (p === 'openai') return 'O';
-    if (p === 'google') return 'G';
-    if (p === 'ollama') return 'L';
-    return '\u2022';
+    const letters = /** @type {Record<string, string>} */({
+      anthropic: 'A',
+      openai: 'O',
+      google: 'G',
+      ollama: 'L',
+      xai: 'X',
+      groq: 'Q',
+      openrouter: 'R',
+      huggingface: 'H',
+    });
+    return letters[p] || p.slice(0, 1).toUpperCase() || '\u2022';
   }
 
   btn.addEventListener('click', () => {

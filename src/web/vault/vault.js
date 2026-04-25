@@ -47,6 +47,12 @@ function makeMaskedPreview(s, provider) {
     const tail = t.slice(-6);
     return `…${tail.length ? tail : '…'}`;
   }
+  if (provider === 'custom_openai') {
+    if (t.length <= 8) {
+      return `${t.slice(0, 1)}…${t.slice(-1)}`;
+    }
+    return `${t.slice(0, 4)}…${t.slice(-4)}`;
+  }
   if (t.length <= 8) {
     return `${t.slice(0, 1)}…${t.slice(-1)}`;
   }
@@ -210,20 +216,34 @@ function isKeyRec(r) {
 }
 
 /**
- * @param {{ provider: import('./validators.js').VaultProvider, label: string, key_value: string }} p
+ * @param {{ provider: import('./validators.js').VaultProvider, label: string, key_value: string, base_url?: string, skip_validation?: boolean }} p
  * @returns {Promise<{ok:true,key:object}|{ok:false,error:string}>}
  */
 async function addKey(p) {
   if (!_masterKey) {
     return { ok: false, error: 'Vault locked' };
   }
-  const { provider, label, key_value } = p;
+  const { provider, label, key_value, base_url, skip_validation } = p;
   if (!provider || !label) {
     return { ok: false, error: 'Missing provider or label' };
   }
-  const v = await validateProviderKey(provider, String(key_value));
-  if (!v.ok) {
-    return { ok: false, error: v.error };
+  const pr = String(provider);
+  const bUrl = base_url != null && String(base_url).trim() ? String(base_url).trim() : undefined;
+  if (pr === 'custom_openai' && !bUrl) {
+    return { ok: false, error: 'Base URL required' };
+  }
+  if (pr === 'custom_openai' && !String(key_value).trim()) {
+    return { ok: false, error: 'Key required' };
+  }
+  if (pr !== 'ollama' && pr !== 'custom_openai' && !String(key_value).trim()) {
+    return { ok: false, error: 'Key required' };
+  }
+  const opts = bUrl ? { base_url: bUrl } : undefined;
+  if (!skip_validation) {
+    const v = await validateProviderKey(/** @type {any} */ (pr), String(key_value), opts);
+    if (!v.ok) {
+      return { ok: false, error: v.error };
+    }
   }
   const id = crypto.randomUUID();
   const pt = new TextEncoder().encode(String(key_value));
@@ -231,13 +251,14 @@ async function addKey(p) {
   pt.fill(0);
   const rec = {
     id,
-    provider,
+    provider: pr,
     label: String(label).slice(0, 200),
     ciphertext_b64: bytesToBase64(ciphertext),
     iv_b64: bytesToBase64(iv),
     created_at: new Date().toISOString(),
     last_validated_at: new Date().toISOString(),
-    masked_preview: makeMaskedPreview(String(key_value), provider),
+    masked_preview: makeMaskedPreview(String(key_value), pr),
+    ...(bUrl && pr === 'custom_openai' ? { base_url: bUrl } : {}),
   };
   await putRecord(STORES.keys, rec);
   const { ciphertext_b64: _c, iv_b64: _i, ...pub } = rec;
@@ -280,7 +301,10 @@ async function testKey(id) {
   } catch {
     return { ok: false, error: 'Key decrypt failed' };
   }
-  const v = await validateProviderKey(/** @type {any} */ (r).provider, plain);
+  const rawB = (/** @type {any} */ (r).base_url);
+  const bUrl = rawB != null && String(rawB).trim() ? String(rawB).trim() : undefined;
+  const opts = bUrl ? { base_url: bUrl } : undefined;
+  const v = await validateProviderKey(/** @type {any} */ (r).provider, plain, opts);
   if (!v.ok) {
     return { ok: false, error: v.error };
   }
@@ -332,12 +356,12 @@ async function assignAgent(agentId, keyId) {
 async function getRoute(agentId) {
   const r = await getRecord(STORES.routing, agentId);
   if (!r || !r.key_id) return null;
-  return { key_id: r.key_id, provider: r.provider };
+  return { key_id: r.key_id, provider: String(r.provider || '') };
 }
 
 /**
  * @param {string} agentId
- * @returns {Promise<{provider:string,plaintext_key:string}|null>}
+ * @returns {Promise<{provider:string,plaintext_key:string,base_url?:string}|null>}
  */
 async function getProviderKeyForAgent(agentId) {
   if (!_masterKey) return null;
@@ -354,6 +378,14 @@ async function getProviderKeyForAgent(agentId) {
     return null;
   }
   const plaintext_key = utf8Decode(raw);
+  const rawB = (/** @type {any} */ (key).base_url);
+  const base_url =
+    rawB != null && String(rawB).trim() && String(/** @type {any} */ (key).provider) === 'custom_openai'
+      ? String(rawB).trim()
+      : undefined;
+  if (base_url) {
+    return { provider: String(r.provider), plaintext_key, base_url };
+  }
   return { provider: String(r.provider), plaintext_key };
 }
 

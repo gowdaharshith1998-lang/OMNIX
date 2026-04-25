@@ -6,45 +6,21 @@
 
 import { validateProviderKey } from './validators.js';
 import { mountScanSection } from './ui-scan.js';
+import {
+  PROVIDERS,
+  getSectionedGridOrder,
+  detectProvider,
+} from './providers.js';
 
-const UI_VER = '2c';
+const UI_VER = '3a';
 
-/** @type {const} */
-const PROVIDERS = [
-  {
-    id: 'anthropic',
-    displayName: 'Anthropic',
-    valueProp: 'Claude models',
-    letter: 'A',
-    circle: '#f97316',
-  },
-  {
-    id: 'openai',
-    displayName: 'OpenAI',
-    valueProp: 'GPT models',
-    letter: 'O',
-    circle: '#22c55e',
-  },
-  {
-    id: 'google',
-    displayName: 'Google',
-    valueProp: 'Gemini models',
-    letter: 'G',
-    circle: '#3b82f6',
-  },
-  {
-    id: 'ollama',
-    displayName: 'Ollama (local)',
-    valueProp: 'Run models on your machine',
-    letter: 'L',
-    circle: '#a855f7',
-  },
-];
+const MIN_PASTE_AUTO_SWITCH = 8;
 
 /** @param {string} p */
 function defaultLabel(p) {
   if (p === 'ollama') return 'Ollama';
-  return PROVIDERS.find((x) => x.id === p)?.displayName ?? p;
+  if (p === 'custom_openai') return 'Custom';
+  return PROVIDERS[p]?.displayName ?? p;
 }
 
 /**
@@ -91,7 +67,7 @@ export function createVaultUI(_vault, triggerButton) {
     view = v;
   }
 
-  let expanded = /** @type {null | { id: string, mode: 'first' | 'add' | 'replace', replaceKeyId: string | null }} */ (
+  let expanded = /** @type {null | { id: string, mode: 'first' | 'add' | 'replace', replaceKeyId: string | null, amb?: string | null }} */ (
     null
   );
   let menuOpen = false;
@@ -99,6 +75,17 @@ export function createVaultUI(_vault, triggerButton) {
   let successFlash = /** @type {null | { id: string, until: number }} */ (null);
   let keydownHandler = /** @type {((e: KeyboardEvent) => void) | null} */ (null);
   let confirmRemove = /** @type {null | { keyId: string, label: string }} */ (null);
+
+  /** Picked provider from key shape (for grid ordering) */
+  let lastPasteProviderId = /** @type {string | null} */ (null);
+  let moreProviderExpanded = false;
+  /** "Couldn't verify" for current connect attempt — show "Save key anyway" */
+  const connectState = { validationFailed: false };
+  let keyCarry = /** @type {null | { v: string }} */ (null);
+  /** Pasted or typed value did not match any known provider — highlight custom tile. */
+  let nudgeCustomHint = false;
+  /** Ids to show in "Did you mean" when a paste matches several providers. */
+  let lastAmbig = /** @type {null | string[]} */ (null);
 
   /** @type {Record<string, { phase: 'idle' | 'connecting' | 'ok' | 'err' }>} */
   const testUi = Object.create(null);
@@ -215,6 +202,12 @@ export function createVaultUI(_vault, triggerButton) {
     .ov-in h2 { margin: 0 0 12px; font-size: 17px; }
     .ov-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; flex-wrap: wrap; }
     .forgot { color: #7dd3fc; text-decoration: underline; cursor: pointer; font-size: 12px; margin-top: 8px; background: none; border: none; padding: 0; text-align: left; }
+    .subhead { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--omnix-muted); margin: 14px 0 6px; }
+    .p-card.nudge-custom { box-shadow: 0 0 0 1px rgba(6, 182, 212, 0.55), 0 0 18px rgba(6, 182, 212, 0.2); }
+    .more-blk { border: 1px solid rgba(99, 102, 241, 0.15); border-radius: 8px; padding: 0 8px 8px; margin-top: 4px; background: rgba(2,6,23,0.2); }
+    .more-blk > summary { cursor: pointer; padding: 8px; font-size: 13px; color: #a5b4fc; }
+    .mean-row { margin: 0 0 6px; font-size: 12px; }
+    .mean-sel { width: 100%; margin-top: 4px; padding: 6px; border-radius: 6px; background: var(--omnix-input); color: #f8fafc; border: 1px solid rgba(148, 163, 184, 0.25); }
   `;
   shadow.appendChild(style);
 
@@ -239,9 +232,17 @@ export function createVaultUI(_vault, triggerButton) {
   /**
    * @param {import('./validators.js').VaultProvider} p
    * @param {string} key
+   * @param {string} [baseUrl] custom_openai only
    */
-  async function verifyKey(p, key) {
-    return validateProviderKey(/** @type {any} */ (p), key);
+  async function verifyKey(p, key, baseUrl) {
+    if (p === 'custom_openai' && !String(baseUrl || '').trim()) {
+      return { ok: false, error: 'Base URL required' };
+    }
+    return validateProviderKey(
+      /** @type {any} */ (p),
+      key,
+      String(baseUrl || '').trim() ? { base_url: String(baseUrl).trim() } : undefined,
+    );
   }
 
   /**
@@ -283,16 +284,20 @@ export function createVaultUI(_vault, triggerButton) {
 
   /**
    * @param {import('./validators.js').VaultProvider} provId
-   * @param {typeof PROVIDERS[0]} def
+   * @param {any} def
    * @param {object[]} keyRows
    * @param {() => void} requestRender
+   * @param {boolean} [nudge] highlight custom tile
    */
-  function makeCard(/** @type {import('./validators.js').VaultProvider} */ provId, def, keyRows, requestRender) {
+  function makeCard(/** @type {import('./validators.js').VaultProvider} */ provId, def, keyRows, requestRender, nudge) {
     const row = keyRows.find((r) => r.provider === provId);
     const hasKey = !!row;
     const isExp = expanded && expanded.id === provId;
     const wrap = document.createElement('div');
-    wrap.className = 'p-card' + (isExp ? ' expanded' : '');
+    wrap.className =
+      'p-card' +
+      (isExp ? ' expanded' : '') +
+      (nudge && def.id === 'custom_openai' ? ' nudge-custom' : '');
     wrap.tabIndex = 0;
     wrap.setAttribute('data-pcard', '1');
 
@@ -345,7 +350,7 @@ export function createVaultUI(_vault, triggerButton) {
         t2.addEventListener('click', (e) => {
           e.stopPropagation();
           menuProviderId = null;
-          expanded = { id: def.id, mode: 'replace', replaceKeyId: String(row.id) };
+          expanded = { id: def.id, mode: 'replace', replaceKeyId: String(row.id), amb: null };
           void requestRender();
         });
         const t3 = document.createElement('button');
@@ -384,9 +389,9 @@ export function createVaultUI(_vault, triggerButton) {
             return;
           }
           if (!init) {
-            expanded = { id: def.id, mode: 'first', replaceKeyId: null };
+            expanded = { id: def.id, mode: 'first', replaceKeyId: null, amb: null };
           } else {
-            expanded = { id: def.id, mode: 'add', replaceKeyId: null };
+            expanded = { id: def.id, mode: 'add', replaceKeyId: null, amb: null };
           }
           void requestRender();
         })();
@@ -414,7 +419,7 @@ export function createVaultUI(_vault, triggerButton) {
             ev.stopPropagation();
             menuProviderId = null;
             if (row) {
-              expanded = { id: def.id, mode: 'replace', replaceKeyId: String(row.id) };
+              expanded = { id: def.id, mode: 'replace', replaceKeyId: String(row.id), amb: null };
             }
             testUi[def.id] = { phase: 'idle' };
             delete cardTestLine[def.id];
@@ -438,18 +443,47 @@ export function createVaultUI(_vault, triggerButton) {
     wrap.appendChild(stripe);
 
     if (isExp && expanded) {
+      const isCustom = def.id === 'custom_openai';
       const ex = document.createElement('div');
       ex.className = 'expand';
       const isFirst = expanded.mode === 'first';
+      /** @type {HTMLInputElement | null} */
+      let baseUrlIn = null;
+      if (isCustom) {
+        const buL = document.createElement('label');
+        buL.appendChild(document.createTextNode('Base URL'));
+        baseUrlIn = document.createElement('input');
+        baseUrlIn.type = 'url';
+        baseUrlIn.setAttribute('autocomplete', 'off');
+        baseUrlIn.setAttribute('placeholder', 'https://api.example.com/v1');
+        ex.appendChild(buL);
+        ex.appendChild(baseUrlIn);
+      }
       const apiL = document.createElement('label');
-      apiL.appendChild(document.createTextNode('API key'));
+      apiL.appendChild(
+        document.createTextNode(
+          isCustom ? 'API key' : 'API key',
+        ),
+      );
       const keyIn = document.createElement('input');
-      keyIn.type = 'password';
+      keyIn.type = isCustom ? 'password' : 'password';
+      if (isCustom) {
+        keyIn.setAttribute('placeholder', 'Bearer token');
+      }
       keyIn.setAttribute('autocomplete', 'off');
       keyIn.setAttribute('spellcheck', 'false');
       keyIn.setAttribute('autocapitalize', 'none');
       keyIn.setAttribute('data-lpignore', 'true');
       keyIn.setAttribute('data-1p-ignore', 'true');
+      if (keyCarry && keyCarry.v) {
+        keyIn.value = keyCarry.v;
+        keyCarry = null;
+      }
+      if (isCustom && row && (/** @type {any} */(row).base_url)) {
+        (/** @type {HTMLInputElement} */(baseUrlIn)).value = String(
+          (/** @type {any} */(row).base_url),
+        );
+      }
       const rowPaste = document.createElement('div');
       rowPaste.className = 'row';
       const pasteB = document.createElement('button');
@@ -460,6 +494,11 @@ export function createVaultUI(_vault, triggerButton) {
         try {
           const t = await navigator.clipboard.readText();
           keyIn.value = t;
+          if (!isCustom) {
+            setTimeout(function runPasteDetect() {
+              runKeyShapeDetect();
+            }, 0);
+          }
         } catch {
           /* */
         }
@@ -468,6 +507,91 @@ export function createVaultUI(_vault, triggerButton) {
       rowPaste.appendChild(pasteB);
       ex.appendChild(apiL);
       ex.appendChild(rowPaste);
+      if (!isCustom) {
+        function runKeyShapeDetect() {
+          const v0 = String(keyIn.value);
+          if (!expanded) {
+            return;
+          }
+          const d = detectProvider(v0);
+          nudgeCustomHint = d.confidence === 'none' && v0.trim().length > 0;
+          if (d.confidence === 'none') {
+            lastPasteProviderId = null;
+            lastAmbig = null;
+            void requestRender();
+            return;
+          }
+          if (d.confidence === 'ambiguous') {
+            lastAmbig = d.matches.map((m) => m.id).slice(0, 3);
+            if (expanded) {
+              const m0 = d.matches[0];
+              if (
+                m0 &&
+                (expanded.amb == null || !d.matches.some((x) => x.id === expanded.amb))
+              ) {
+                expanded = { ...expanded, amb: m0.id };
+              }
+            }
+            lastPasteProviderId = d.matches[0] ? d.matches[0].id : null;
+          } else {
+            lastAmbig = null;
+            lastPasteProviderId = d.matches[0] ? d.matches[0].id : null;
+            if (expanded) {
+              expanded = { ...expanded, amb: null };
+            }
+            if (
+              d.confidence === 'exact' &&
+              d.matches[0] &&
+              d.matches[0].id !== def.id &&
+              v0.length >= MIN_PASTE_AUTO_SWITCH
+            ) {
+              keyCarry = { v: v0 };
+              if (expanded) {
+                expanded = { ...expanded, id: d.matches[0].id, amb: null };
+              }
+            }
+          }
+          void requestRender();
+        }
+        keyIn.addEventListener('input', runKeyShapeDetect);
+        keyIn.addEventListener('paste', () => {
+          setTimeout(() => {
+            runKeyShapeDetect();
+          }, 0);
+        });
+        if (lastAmbig && lastAmbig.length > 1) {
+          const meanRow = document.createElement('div');
+          meanRow.className = 'mean-row';
+          meanRow.appendChild(
+            document.createTextNode('Multiple provider shapes match. Use: '),
+          );
+          const meanSel = document.createElement('select');
+          meanSel.className = 'mean-sel';
+          for (const am of lastAmbig) {
+            const pdef = PROVIDERS[am];
+            if (!pdef) {
+              continue;
+            }
+            const op = document.createElement('option');
+            op.value = pdef.id;
+            op.appendChild(document.createTextNode(pdef.display));
+            meanSel.appendChild(op);
+          }
+          if (expanded && expanded.amb) {
+            meanSel.value = String(expanded.amb);
+          }
+          meanSel.addEventListener('change', () => {
+            if (expanded) {
+              expanded = { ...expanded, amb: String(meanSel.value) };
+            }
+            void requestRender();
+          });
+          meanRow.appendChild(meanSel);
+          ex.appendChild(meanRow);
+        }
+      } else {
+        nudgeCustomHint = false;
+      }
       let lockIn = null;
       if (isFirst) {
         const ll = document.createElement('label');
@@ -495,50 +619,312 @@ export function createVaultUI(_vault, triggerButton) {
       cbtn.type = 'button';
       cbtn.className = 'btn';
       cbtn.appendChild(document.createTextNode('Connect'));
+      const cbtn2 = document.createElement('button');
+      cbtn2.type = 'button';
+      cbtn2.className = 'btn-ghost';
+      cbtn2.appendChild(document.createTextNode('Save key anyway'));
+      cbtn2.style.display = connectState.validationFailed ? 'inline-flex' : 'none';
+      const valBtn = document.createElement('button');
+      valBtn.type = 'button';
+      valBtn.className = 'btn-ghost';
+      valBtn.appendChild(document.createTextNode('Validate'));
+      const valMsg = document.createElement('p');
+      valMsg.className = 'msg muted';
+      valMsg.style.display = 'none';
       const spin = document.createElement('span');
       spin.className = 'spin';
       spin.style.display = 'none';
       spin.appendChild(document.createTextNode('Testing connection\u2026'));
       crow.appendChild(cbtn);
+      crow.appendChild(cbtn2);
+      crow.appendChild(valBtn);
       crow.appendChild(spin);
       ex.appendChild(cmsg);
+      ex.appendChild(valMsg);
       ex.appendChild(crow);
-
+      const buStr = () => (baseUrlIn && String(/** @type {HTMLInputElement} */(baseUrlIn).value).trim()) || '';
+      const provForSave = () => {
+        if (isCustom) {
+          return 'custom_openai';
+        }
+        if (expanded && expanded.amb) {
+          return String(expanded.amb);
+        }
+        return def.id;
+      };
+      function clearValFail() {
+        connectState.validationFailed = false;
+        cbtn2.style.display = 'none';
+      }
+      async function runConnectableValidate() {
+        const kval0 =
+          def.id === 'ollama' && !String(keyIn.value).trim()
+            ? 'http://127.0.0.1:11434'
+            : String(keyIn.value).trim();
+        const p = provForSave();
+        const v0 = await verifyKey(
+          /** @type {import('./validators.js').VaultProvider} */(p),
+          kval0,
+          isCustom ? buStr() : undefined,
+        );
+        return { v0, p, v: v0, kval: kval0 };
+      }
+      keyIn.addEventListener('input', () => {
+        clearValFail();
+      });
+      if (isCustom && baseUrlIn) {
+        baseUrlIn.addEventListener('input', () => {
+          clearValFail();
+        });
+        const runCustomBlurVal = () => {
+          void (async () => {
+            const b = buStr();
+            if (!b || !String(keyIn.value).trim()) {
+              return;
+            }
+            const r0 = await verifyKey('custom_openai', String(keyIn.value).trim(), b);
+            valMsg.replaceChildren();
+            valMsg.style.display = 'block';
+            if (r0.ok) {
+              valMsg.className = 'msg ok';
+              valMsg.textContent = '\u2713 Reachable (models)';
+            } else {
+              valMsg.className = 'msg err';
+              valMsg.appendChild(
+                document.createTextNode("Couldn't reach endpoint \u2014 check URL and key."),
+              );
+            }
+            void requestRender();
+          })();
+        };
+        keyIn.addEventListener('blur', runCustomBlurVal);
+        baseUrlIn.addEventListener('blur', runCustomBlurVal);
+      } else {
+        keyIn.addEventListener('blur', () => {
+          void (async () => {
+            valMsg.replaceChildren();
+            const { kval } = await runConnectableValidate();
+            if (!kval) {
+              return;
+            }
+            const r0 = await verifyKey(
+              /** @type {import('./validators.js').VaultProvider} */(provForSave()),
+              kval,
+              undefined,
+            );
+            valMsg.style.display = 'block';
+            if (r0.ok) {
+              valMsg.className = 'msg ok';
+              valMsg.textContent = '\u2713 Valid';
+            } else {
+              valMsg.className = 'msg err';
+              valMsg.appendChild(
+                document.createTextNode("Couldn't verify \u2014 check the key and try again."),
+              );
+            }
+            void requestRender();
+          })();
+        });
+      }
+      valBtn.addEventListener('click', () => {
+        valMsg.replaceChildren();
+        if (isCustom) {
+          void (async () => {
+            if (!baseUrlIn || !String(keyIn.value).trim() || !buStr()) {
+              return;
+            }
+            const r0 = await verifyKey('custom_openai', String(keyIn.value).trim(), buStr());
+            valMsg.style.display = 'block';
+            if (r0.ok) {
+              valMsg.className = 'msg ok';
+              valMsg.textContent = '\u2713 Valid';
+            } else {
+              valMsg.className = 'msg err';
+              valMsg.appendChild(
+                document.createTextNode("Couldn't verify \u2014 check the key and try again."),
+              );
+            }
+          })();
+        } else {
+          void (async () => {
+            const { kval } = await runConnectableValidate();
+            if (!kval) {
+              return;
+            }
+            const r0 = await verifyKey(
+              /** @type {import('./validators.js').VaultProvider} */(provForSave()),
+              kval,
+              undefined,
+            );
+            valMsg.style.display = 'block';
+            if (r0.ok) {
+              valMsg.className = 'msg ok';
+              valMsg.textContent = '\u2713 Valid';
+            } else {
+              valMsg.className = 'msg err';
+              valMsg.appendChild(
+                document.createTextNode("Couldn't verify \u2014 check the key and try again."),
+              );
+            }
+          })();
+        }
+      });
+      cbtn2.addEventListener('click', () => {
+        void (async () => {
+          cmsg.replaceChildren();
+          cmsg.style.display = 'none';
+          const kval0 =
+            def.id === 'ollama' && !String(keyIn.value).trim()
+              ? 'http://127.0.0.1:11434'
+              : String(keyIn.value).trim();
+          const pSave0 = provForSave();
+          if (isFirst) {
+            if (!lockIn || String((/** @type {HTMLInputElement} */(lockIn)).value).length < 12) {
+              cmsg.appendChild(
+                document.createTextNode('Enter a lock code of at least 12 characters.'),
+              );
+              cmsg.style.display = 'block';
+              return;
+            }
+            if (isCustom && (!buStr() || !kval0)) {
+              cmsg.appendChild(
+                document.createTextNode('Enter a base URL and your API key to continue.'),
+              );
+              cmsg.style.display = 'block';
+              return;
+            }
+            if (!isCustom && def.id !== 'ollama' && !kval0) {
+              cmsg.appendChild(
+                document.createTextNode('Enter your API key, then try again.'),
+              );
+              cmsg.style.display = 'block';
+              return;
+            }
+            const i = await vault.init(
+              String((/** @type {HTMLInputElement} */(lockIn)).value),
+            );
+            if (!i.ok) {
+              cmsg.appendChild(
+                document.createTextNode(
+                  userFacingError(
+                    (/** @type {any} */(i).error),
+                    "Couldn't finish setup. Try again.",
+                  ),
+                ),
+              );
+              cmsg.style.display = 'block';
+              return;
+            }
+          } else if (!vault.isUnlocked()) {
+            cmsg.appendChild(
+              document.createTextNode('Your keys are locked. Unlock to continue.'),
+            );
+            cmsg.style.display = 'block';
+            return;
+          }
+          if (expanded && expanded.mode === 'replace' && expanded.replaceKeyId) {
+            await vault.deleteKey(expanded.replaceKeyId);
+          }
+          const addP = /** @type {any} */({
+            provider: pSave0,
+            label: defaultLabel(/** @type {any} */(pSave0)),
+            key_value: kval0,
+            skip_validation: true,
+            ...(isCustom && buStr() ? { base_url: buStr() } : {}),
+          });
+          const addR2 = await vault.addKey(addP);
+          if (!addR2.ok) {
+            cmsg.appendChild(
+              document.createTextNode(
+                userFacingError(
+                  (/** @type {any} */(addR2).error),
+                  "Couldn't save key. Try again.",
+                ),
+              ),
+            );
+            cmsg.style.display = 'block';
+            return;
+          }
+          keyIn.value = '';
+          if (baseUrlIn) {
+            (/** @type {HTMLInputElement} */(baseUrlIn)).value = '';
+          }
+          if (lockIn) {
+            (/** @type {HTMLInputElement} */(lockIn)).value = '';
+          }
+          clearValFail();
+          lastAmbig = null;
+          expanded = null;
+          const pid0 = pSave0;
+          successFlash = { id: pid0, until: Date.now() + 1500 };
+          setTimeout(() => {
+            successFlash = null;
+            if (openFlag) {
+              void requestRender();
+            }
+          }, 1500);
+          void requestRender();
+        })();
+      });
       cbtn.addEventListener('click', () => {
         void (async () => {
           cmsg.replaceChildren();
           cmsg.style.display = 'none';
+          clearValFail();
           const raw = String(keyIn.value);
-          const kval =
+          const kval0 =
             def.id === 'ollama' && !raw.trim() ? 'http://127.0.0.1:11434' : raw.trim();
           if (isFirst) {
-            if (!lockIn || String(lockIn.value).length < 12) {
-              cmsg.appendChild(document.createTextNode('Enter a lock code of at least 12 characters.'));
+            if (!lockIn || String(/** @type {HTMLInputElement} */(lockIn).value).length < 12) {
+              cmsg.appendChild(
+                document.createTextNode('Enter a lock code of at least 12 characters.'),
+              );
               cmsg.style.display = 'block';
               return;
             }
-            if (def.id !== 'ollama' && !kval) {
-              cmsg.appendChild(document.createTextNode('Enter your API key, then try again.'));
+            if (isCustom && (!buStr() || !kval0)) {
+              cmsg.appendChild(
+                document.createTextNode('Enter a base URL and your API key to continue.'),
+              );
+              cmsg.style.display = 'block';
+              return;
+            }
+            if (!isCustom && def.id !== 'ollama' && !kval0) {
+              cmsg.appendChild(
+                document.createTextNode('Enter your API key, then try again.'),
+              );
               cmsg.style.display = 'block';
               return;
             }
           } else {
-            if (def.id !== 'ollama' && !kval) {
-              cmsg.appendChild(document.createTextNode('Enter your API key, then try again.'));
+            if (!isCustom && def.id !== 'ollama' && !kval0) {
+              cmsg.appendChild(
+                document.createTextNode('Enter your API key, then try again.'),
+              );
+              cmsg.style.display = 'block';
+              return;
+            }
+            if (isCustom && (!buStr() || !kval0)) {
+              cmsg.appendChild(
+                document.createTextNode('Enter a base URL and your API key to continue.'),
+              );
               cmsg.style.display = 'block';
               return;
             }
           }
           cbtn.disabled = true;
           spin.style.display = 'inline';
+          const pS = provForSave();
           const v = await verifyKey(
-            /** @type {import('./validators.js').VaultProvider} */ (def.id),
-            kval,
+            /** @type {import('./validators.js').VaultProvider} */(pS),
+            kval0,
+            isCustom ? buStr() : undefined,
           );
           if (!v.ok) {
-            cmsg.replaceChildren();
+            connectState.validationFailed = true;
+            cbtn2.style.display = 'inline-flex';
             cmsg.appendChild(
-              document.createTextNode("Couldn't connect \u2014 check the key and try again"),
+              document.createTextNode("Couldn't connect \u2014 check the key, or save without verify."),
             );
             cmsg.style.display = 'block';
             cbtn.disabled = false;
@@ -546,13 +932,12 @@ export function createVaultUI(_vault, triggerButton) {
             return;
           }
           if (isFirst) {
-            const i = await vault.init(String((/** @type {HTMLInputElement} */ (lockIn)).value));
+            const i = await vault.init(String(/** @type {HTMLInputElement} */(lockIn).value));
             if (!i.ok) {
-              cmsg.replaceChildren();
               cmsg.appendChild(
                 document.createTextNode(
                   userFacingError(
-                    (/** @type {any} */ (i).error),
+                    (/** @type {any} */(i).error),
                     "Couldn't finish setup. Try again.",
                   ),
                 ),
@@ -564,8 +949,9 @@ export function createVaultUI(_vault, triggerButton) {
             }
           } else {
             if (!vault.isUnlocked()) {
-              cmsg.replaceChildren();
-              cmsg.appendChild(document.createTextNode('Your keys are locked. Unlock to continue.'));
+              cmsg.appendChild(
+                document.createTextNode('Your keys are locked. Unlock to continue.'),
+              );
               cmsg.style.display = 'block';
               cbtn.disabled = false;
               spin.style.display = 'none';
@@ -575,17 +961,20 @@ export function createVaultUI(_vault, triggerButton) {
           if (expanded.mode === 'replace' && expanded.replaceKeyId) {
             await vault.deleteKey(expanded.replaceKeyId);
           }
-          const addR = await vault.addKey({
-            provider: def.id,
-            label: defaultLabel(def.id),
-            key_value: kval,
-          });
+          const pSave1 = provForSave();
+          const addR = await vault.addKey(
+            /** @type {any} */({
+              provider: pSave1,
+              label: defaultLabel(/** @type {any} */(pSave1)),
+              key_value: kval0,
+              ...(isCustom && buStr() ? { base_url: buStr() } : {}),
+            }),
+          );
           if (!addR.ok) {
-            cmsg.replaceChildren();
             cmsg.appendChild(
               document.createTextNode(
                 userFacingError(
-                  (/** @type {any} */ (addR).error),
+                  (/** @type {any} */(addR).error),
                   "Couldn't connect \u2014 check the key and try again",
                 ),
               ),
@@ -596,13 +985,17 @@ export function createVaultUI(_vault, triggerButton) {
             return;
           }
           keyIn.value = '';
+          if (baseUrlIn) {
+            (/** @type {HTMLInputElement} */(baseUrlIn)).value = '';
+          }
           if (lockIn) {
             (/** @type {HTMLInputElement} */ (lockIn)).value = '';
           }
           cbtn.disabled = false;
           spin.style.display = 'none';
+          lastAmbig = null;
           expanded = null;
-          const pid = def.id;
+          const pid = pSave1;
           successFlash = { id: pid, until: Date.now() + 1500 };
           setTimeout(() => {
             successFlash = null;
@@ -687,7 +1080,7 @@ export function createVaultUI(_vault, triggerButton) {
     rm.addEventListener('click', async () => {
       const id = kid;
       await vault.deleteKey(id);
-      const delProv = PROVIDERS.find((d) => d.displayName === provLabel);
+      const delProv = Object.values(PROVIDERS).find((d) => d.displayName === provLabel);
       if (delProv) {
         testUi[delProv.id] = { phase: 'idle' };
         delete cardTestLine[delProv.id];
@@ -1083,8 +1476,8 @@ export function createVaultUI(_vault, triggerButton) {
         if (Date.now() < t.until) {
           const fl = document.createElement('p');
           fl.className = 'msg ok';
-          const label = PROVIDERS.find((p) => p.id === t.id);
-          const nm = label ? label.displayName : t.id;
+          const pdef0 = PROVIDERS[/** @type {keyof typeof PROVIDERS} */ (t.id)] || null;
+          const nm = pdef0 ? pdef0.displayName : t.id;
           fl.appendChild(
             document.createTextNode('\u2713 ' + nm + ' connected'),
           );
@@ -1121,20 +1514,61 @@ export function createVaultUI(_vault, triggerButton) {
           },
         });
       }
-      const g = document.createElement('div');
-      g.className = 'grid';
       const keys = await vault.listKeys();
-      for (const def of PROVIDERS) {
-        g.appendChild(
-          makeCard(
-            /** @type {import('./validators.js').VaultProvider} */ (def.id),
-            def,
-            keys,
-            () => render(),
-          ),
-        );
+      const sec = getSectionedGridOrder(lastPasteProviderId);
+      function addSub(t) {
+        const h = document.createElement('div');
+        h.className = 'subhead';
+        h.appendChild(document.createTextNode(t));
+        body.appendChild(h);
       }
-      body.appendChild(g);
+      function addGrid(/** @type {string[]} */ ids, nudge) {
+        const g2 = document.createElement('div');
+        g2.className = 'grid';
+        for (const pid of ids) {
+          if (!PROVIDERS[/** @type {keyof typeof PROVIDERS} */(pid)]) {
+            continue;
+          }
+          g2.appendChild(
+            makeCard(
+              /** @type {import('./validators.js').VaultProvider} */(pid),
+              /** @type {any} */(PROVIDERS[/** @type {keyof typeof PROVIDERS} */(pid)]),
+              keys,
+              () => render(),
+              nudge,
+            ),
+          );
+        }
+        return g2;
+      }
+      if (sec.detected.length) {
+        addSub('Picked for your key');
+        body.appendChild(addGrid(sec.detected, false));
+      }
+      addSub('Popular');
+      body.appendChild(addGrid(sec.popular, false));
+      const moreDet = document.createElement('details');
+      moreDet.className = 'more-blk';
+      if (moreProviderExpanded) {
+        moreDet.setAttribute('open', 'open');
+      }
+      moreDet.addEventListener('toggle', () => {
+        moreProviderExpanded = moreDet.open;
+      });
+      const msum = document.createElement('summary');
+      msum.appendChild(
+        document.createTextNode('More providers (' + String(sec.more.length) + ')'),
+      );
+      moreDet.appendChild(msum);
+      moreDet.appendChild(addGrid(sec.more, false));
+      if (sec.more.length === 0) {
+        moreDet.style.display = 'none';
+      } else {
+        moreDet.style.display = '';
+      }
+      body.appendChild(moreDet);
+      addSub('Custom endpoint');
+      body.appendChild(addGrid(sec.custom, nudgeCustomHint));
       mainLayer.appendChild(body);
       if (openFlag) {
         void afterRenderFocus();
@@ -1146,6 +1580,8 @@ export function createVaultUI(_vault, triggerButton) {
     backdrop.classList.remove('open');
     openFlag = false;
     clearMenus();
+    nudgeCustomHint = false;
+    lastPasteProviderId = null;
     if (keydownHandler) {
       document.removeEventListener('keydown', keydownHandler);
       keydownHandler = null;

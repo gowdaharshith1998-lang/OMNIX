@@ -459,3 +459,32 @@ This is the canonical demo: OMNIX found a contract gap in its own signing layer 
 **Cleanup:** deleted stale `_apply_canvas2d.py` (one-shot script from galaxy attempts).
 
 **Bet status:** 8 features in 2 days. PBT engine + Bug Finder MVP shipped. First two real bugs found in own codebase (bitlen_u64 yesterday, zero-arity recursion today). **Next:** #6.1 framework-decorator skip → real-world `find-bugs ~/omnix` demo.
+
+---
+
+## Day 2.5 — Vault Auto-Detect + Custom OpenAI-Compatible (2026-04-25 night)
+
+**Shipped:** Frontend vault expanded from 4 providers to 16+ with paste-time auto-detection.
+
+**New module:** `src/web/vault/providers.js` — centralized provider catalog
+- 16 built-in providers: anthropic, openai, google, ollama (existing) + xai, groq, perplexity, openrouter, deepseek, mistral, cohere, together, fireworks, replicate, huggingface, cerebras
+- `detectProvider(key)` returns `{ matches, confidence: 'exact'|'ambiguous'|'none' }` based on regex patterns + priority resolution
+- `custom_openai` escape hatch — never auto-detected, requires user-provided base URL + Bearer key, validates via `${baseUrl}/models`
+
+**UI integration (src/web/vault/ui.js):**
+- "Connect your AI" modal with grouped grid: POPULAR (6) / More providers (10, collapsible) / CUSTOM ENDPOINT
+- Paste handler: auto-selects on exact match, "Did you mean?" picker on ambiguous, falls through to Custom on unknown
+- Per-provider color circles + monogram letters
+- Save-anyway path on validation failure (P15/P16 preserved)
+
+**Compliance preserved (no key leaks):**
+- P2/P15 — keys never sent to OMNIX backend, browser → provider only
+- P16 — error messages never include key value
+- P22 — never log key values
+- Custom endpoint stores `base_url` as additive optional field (no schema migration)
+
+**Tests:**
+- 106 vitest (was 85, +21 new): test_detect.spec.js + test_validators.spec.js
+- 129 pytest unchanged
+
+**Bet status:** 9 features in 2 days. Vault is now usable by 95%+ of LLM API holders (was ~50% with 4 providers). **Next:** #6.1 framework-decorator skip → real-world `find-bugs ~/omnix` demo, then galaxy v3 reference saved for Day 7+.
