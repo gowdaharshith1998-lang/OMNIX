@@ -68,7 +68,10 @@ class GraphStore:
         self._conn.commit()
 
     def reset(self) -> None:
-        self._conn.executescript("DELETE FROM edges; DELETE FROM nodes;")
+        self._conn.executescript(
+            "DELETE FROM skip_summary WHERE 1;"
+            "DELETE FROM edges; DELETE FROM nodes;"
+        )
         self._conn.commit()
 
     def sqlite_connection(self) -> sqlite3.Connection:
@@ -170,6 +173,22 @@ class GraphStore:
         return int(row[0]) if row else 0
 
     def commit(self) -> None:
+        self._conn.commit()
+
+    def replace_skip_summary(
+        self, rows: list[tuple[str, int, int, str, str | None]]
+    ) -> None:
+        """Replace ``skip_summary`` contents (analyze ingest; one run per DB)."""
+        cur = self._conn.cursor()
+        cur.execute("DELETE FROM skip_summary")
+        if rows:
+            cur.executemany(
+                """
+                INSERT INTO skip_summary(extension, files, loc, reason, suggested_install)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
         self._conn.commit()
 
 

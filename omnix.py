@@ -42,6 +42,19 @@ def main() -> None:
         help="Do not launch a browser (still serves on --port)",
     )
     analyze.add_argument("--port", type=int, default=7777, help="Web UI port")
+    analyze.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit 2 if any grammar package is missing (no_grammar skips) or >50%% of est. LOC was skipped",
+    )
+    analyze.add_argument(
+        "--skip-threshold",
+        type=float,
+        default=None,
+        metavar="N",
+        help="Exit 2 when skipped_est_loc / total_loc > N (0.0–1.0). "
+        "Default: 1.0 (off) without --strict; 0.5 with --strict unless you pass this flag.",
+    )
 
     vsub = subparsers.add_parser(
         "verify", help="Property-based test / verify a Python function"
@@ -172,6 +185,10 @@ def main() -> None:
         print(f"Unknown command: {args.command!r}", file=sys.stderr)
         sys.exit(1)
 
+    _st = args.skip_threshold
+    if _st is not None and not (0.0 <= _st <= 1.0):
+        parser.error("--skip-threshold must be between 0.0 and 1.0")
+
     root = os.path.dirname(os.path.abspath(__file__))
     if root not in sys.path:
         sys.path.insert(0, root)
@@ -183,6 +200,7 @@ def main() -> None:
     from src.graph.exporter import export_json
     from src.parser import evolution
     from src.parser.ingest_dispatch import ingest_unified_codebase
+    from src.parser.skip_tracking import exit_code_for_skips, format_skip_banner
 
     target = os.path.abspath(args.path)
     # Per-codebase graph + evolution: DB lives under the analyzed tree (Q2 / ITER 4).
@@ -213,6 +231,17 @@ def main() -> None:
         )
 
     print(f"📊 Parsed {py_count} Python + {ts_count} TypeScript files")
+    _skip_banner = format_skip_banner(_ingest_tot.skip)
+    if _skip_banner:
+        print(_skip_banner)
+    ratio_thr = float(
+        args.skip_threshold if args.skip_threshold is not None else (0.5 if args.strict else 1.0)
+    )
+    analyze_rc = exit_code_for_skips(
+        strict=bool(args.strict),
+        ratio_threshold=ratio_thr,
+        agg=_ingest_tot.skip,
+    )
     print(f"🌀 {dm_count} dark matter nodes detected")
     print(f"⚡ {ent_count} entangled pairs detected")
     print(f"🧬 {store.node_count()} nodes, {store.edge_count()} edges")
@@ -233,7 +262,19 @@ def main() -> None:
 
     if args.no_open:
         print(f"💾 Graph written to {graph_json}")
-        return
+        if analyze_rc != 0:
+            print(
+                "⚠️  Analyze coverage gate: exiting with code 2 (--strict / --skip-threshold).",
+                file=sys.stderr,
+            )
+        sys.exit(analyze_rc)
+
+    if analyze_rc != 0:
+        print(
+            "⚠️  Analyze coverage gate: exiting with code 2 (--strict / --skip-threshold).",
+            file=sys.stderr,
+        )
+        sys.exit(analyze_rc)
 
     import threading
     import webbrowser

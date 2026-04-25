@@ -8,6 +8,8 @@ import os
 from collections.abc import Iterator
 from pathlib import Path
 
+from src.parser.skip_tracking import SkipAggregate
+
 _LOG = logging.getLogger("find_bugs.walker")
 
 IGNORE_DIRS: frozenset[str] = frozenset(
@@ -163,10 +165,18 @@ def scan_codebase_sources(
     return parseable, n_unparse, n_big
 
 
-def iter_dispatch_paths(root: Path, max_size: int = 1_000_000) -> Iterator[Path]:
+def iter_dispatch_paths(
+    root: Path,
+    max_size: int = 1_000_000,
+    *,
+    skip_tracker: SkipAggregate | None = None,
+) -> Iterator[Path]:
     """
     All files under *root* suitable for language dispatch (ignores, size cap).
     TypeScript: skips ``.d.ts`` to match the dedicated TypeScript parser.
+
+    When *skip_tracker* is set, files over *max_size* are recorded as ``too_large``
+    (intentionally ignored dirs are not counted).
     """
     root = root.resolve()
     gignore = _load_gitignore(root)
@@ -189,6 +199,9 @@ def iter_dispatch_paths(root: Path, max_size: int = 1_000_000) -> Iterator[Path]
             except OSError:
                 continue
             if st.st_size > max_size:
+                if skip_tracker is not None:
+                    ext = full.suffix.lower() or "(no extension)"
+                    skip_tracker.record_too_large(ext, st.st_size)
                 continue
             if not full.is_file():
                 continue

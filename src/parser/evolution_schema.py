@@ -60,4 +60,20 @@ def apply_evolution_schema(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    cur.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS skip_summary (
+            extension TEXT NOT NULL,
+            files INTEGER NOT NULL,
+            loc INTEGER NOT NULL,
+            reason TEXT NOT NULL,
+            suggested_install TEXT
+        );
+        """
+    )
+    cur.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_skip_summary_loc ON skip_summary(loc DESC);
+        """
+    )
     conn.commit()
