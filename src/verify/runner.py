@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib
 import inspect
-import importlib.util
 import json
 import os
 import sys
-import uuid
 from enum import IntEnum
 from pathlib import Path
 from typing import Any, Callable, TextIO
@@ -33,20 +32,123 @@ def _sha256_file(p: Path) -> str:
     return h.hexdigest()
 
 
-def _load(target: Path, name: str) -> Callable[..., Any] | None:
+def _resolve_package_path(file_path: Path) -> tuple[Path, str]:
+    """Return (sys.path entry, fully qualified module name) for a source file.
+
+    For a flat file (no ``__init__.py`` in parent), returns
+    the file's parent directory and the module name equal to the file stem.
+    """
+    abs_path = file_path.resolve()
+    parts: list[str] = [abs_path.stem]
+    cur = abs_path.parent
+
+    while (cur / "__init__.py").is_file():
+        parts.insert(0, cur.name)
+        cur = cur.parent
+
+    qualified = ".".join(parts)
+    return cur, qualified
+
+
+def _load_target_module(file_path: Path) -> Any:
+    """Import a file with package context so relative imports work.
+
+    Restores ``sys.path`` on exit. On failure, the original exception propagates
+    (not converted to None).
+    """
+    sys_path_entry, qualified = _resolve_package_path(file_path)
+    inserted = False
+    str_entry = str(sys_path_entry)
+    if str_entry not in sys.path:
+        sys.path.insert(0, str_entry)
+        inserted = True
     try:
-        mname = f"omnx_{name}_{uuid.uuid4().hex[:5]}"
-        sp = importlib.util.spec_from_file_location(mname, str(target))
-        if not sp or not sp.loader:
-            return None
-        m = importlib.util.module_from_spec(sp)
-        sp.loader.exec_module(m)
-        o = getattr(m, name, None)
-        if o is None or not callable(o):
-            return None
-        return o
-    except (OSError, ImportError, SyntaxError, Exception):
+        if qualified in sys.modules:
+            del sys.modules[qualified]
+        return importlib.import_module(qualified)
+    finally:
+        if inserted:
+            try:
+                sys.path.remove(str_entry)
+            except ValueError:
+                pass
+
+
+def _import_failure_dict(exc: Exception | None, fn_name: str) -> dict[str, Any]:
+    if exc is not None:
+        return {
+            "input": "(import)",
+            "exception_type": type(exc).__name__,
+            "exception_message": (str(exc) or repr(exc))[:10_000],
+            "shrunk_input": "(import)",
+            "shrunk_input_size_bytes": len("(import)".encode("utf-8")),
+        }
+    return {
+        "input": "(import)",
+        "exception_type": "AttributeError",
+        "exception_message": f"not found or not callable: {fn_name!r}",
+        "shrunk_input": "(import)",
+        "shrunk_input_size_bytes": len("(import)".encode("utf-8")),
+    }
+
+
+def _load_for_invariant(target: Path, name: str) -> Callable[..., Any] | None:
+    try:
+        m = _load_target_module(target)
+    except Exception:
         return None
+    o = getattr(m, name, None)
+    if o is None or not callable(o):
+        return None
+    return o
+
+
+def _import_error_receipt(
+    tpath: Path,
+    fsha: str,
+    function: str | None,
+    fn_name: str,
+    ts: str,
+    import_failures: list[dict[str, Any]],
+    sign: bool,
+    no_receipt: bool,
+    receipt_dir: str | None,
+    output_format: str,
+    inv_pairs: int,
+    lineno: int,
+) -> tuple[int, str]:
+    """Emit ERROR result with import failures in the receipt JSON."""
+    fns_label = function or fn_name
+    rbody: dict[str, Any] = {
+        "version": 1,
+        "kind": "verify",
+        "timestamp": ts,
+        "target": {
+            "file": str(tpath),
+            "file_sha256": fsha,
+            "function": fns_label,
+            "lineno": lineno,
+        },
+        "results": [],
+        "strategies": {},
+        "graph_signals": {
+            "caller_count": 0,
+            "boundary_examples_count": 0,
+            "invariant_pairs_count": inv_pairs,
+        },
+        "examples_run": 0,
+        "failures": import_failures,
+    }
+    psk = _default_secret_key()
+    want_sign = sign and psk is not None and psk.is_file() and not no_receipt
+    rdir = Path(receipt_dir) if receipt_dir else Path.home() / ".omnix" / "receipts"
+    js2 = _json_receipt(rbody, psk, want_sign, no_receipt)
+    if not no_receipt:
+        nm = (function or "all")[:100].replace(os.sep, "_")
+        receipt.write_receipt_to_disk(js2, function_name=nm, out_dir=rdir)  # type: ignore[assignment, call-arg, misc, call-arg, arg-type]
+    if output_format == "json":
+        return (int(ExitCode.ERROR), js2)
+    return (int(ExitCode.ERROR), f"omnix verify: could not import {fn_name!r} from {tpath}\n")
 
 
 def _strat_map(sig: list[tuple[str, str | None]], cshape: Any, bmap: Any) -> dict[str, Any]:
@@ -141,8 +243,8 @@ def _invariant_smoke(
     tpath: Path, pair: tuple[str, str], scope: set[str]
 ) -> bool:
     f1, f2 = pair
-    a = _load(tpath, f1)
-    b2 = _load(tpath, f2)
+    a = _load_for_invariant(tpath, f1)
+    b2 = _load_for_invariant(tpath, f2)
     if a is None or b2 is None:
         return False
     s = hst.integers()
@@ -251,9 +353,39 @@ def run(
     results: list[dict[str, Any]] = []
     for s in sigs:
         fn_name = s["name"]
-        fn = _load(tpath, fn_name)
-        if fn is None:
-            return (int(ExitCode.ERROR), f"omnix verify: could not import {fn_name!r} from {tpath}\n")
+        try:
+            _mod = _load_target_module(tpath)
+        except Exception as e:
+            return _import_error_receipt(
+                tpath,
+                fsha,
+                function,
+                fn_name,
+                ts,
+                [_import_failure_dict(e, fn_name)],
+                sign,
+                no_receipt,
+                receipt_dir,
+                output_format,
+                len(ipairs),
+                int(s.get("lineno") or 0),
+            )
+        fn = getattr(_mod, fn_name, None)
+        if fn is None or not callable(fn):
+            return _import_error_receipt(
+                tpath,
+                fsha,
+                function,
+                fn_name,
+                ts,
+                [_import_failure_dict(None, fn_name)],
+                sign,
+                no_receipt,
+                receipt_dir,
+                output_format,
+                len(ipairs),
+                int(s.get("lineno") or 0),
+            )
         params: list[tuple[str, str | None]] = list(s["params"])
         cshape = caller_shape.aggregate_caller_arg_types(
             gpath, str(tpath), fn_name, str(croot)
