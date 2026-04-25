@@ -124,20 +124,23 @@ def handle_vault_scan_post(
                 }
             )
         host = handler.headers.get("Host", "")
-        rpath = write_vault_scan_receipt(
-            sources_scanned=sources,
-            detections_found=len(detections),
-            host=host,
-        )
-        if rpath:
-            rp = Path(rpath)
-            try:
-                rel = rp.resolve().relative_to(Path.home().resolve())
-                approx = f"~/{rel.as_posix()}"
-            except ValueError:
-                approx = str(rp)
-        else:
-            approx = "~/.omnix/receipts/"
+        approx = "~/.omnix/receipts/"
+        try:
+            rpath = write_vault_scan_receipt(
+                sources_scanned=sources,
+                detections_found=len(detections),
+                host=host,
+            )
+            if rpath:
+                rp = Path(rpath)
+                try:
+                    rel = rp.resolve().relative_to(Path.home().resolve())
+                    approx = f"~/{rel.as_posix()}"
+                except ValueError:
+                    approx = str(rp)
+        except OSError:
+            # Receipt is best-effort; scanning should still succeed.
+            pass
         out: dict[str, Any] = {
             "detections": detections,
             "receipt_path": approx,

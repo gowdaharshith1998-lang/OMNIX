@@ -463,7 +463,10 @@ def run(
     js2 = _json_receipt(rbody, psk, want_sign, no_receipt)
     if not no_receipt:
         nm = (function or "all")[:100].replace(os.sep, "_")
-        receipt.write_receipt_to_disk(js2, function_name=nm, out_dir=rdir)  # type: ignore[assignment, call-arg, misc, call-arg, arg-type]
+        try:
+            receipt.write_receipt_to_disk(js2, function_name=nm, out_dir=rdir)  # type: ignore[assignment, call-arg, misc, call-arg, arg-type]
+        except PermissionError:
+            pass
     if output_format == "json":
         return (int(ExitCode.OK) if ok else int(ExitCode.FAIL), js2)
     return (int(ExitCode.OK) if ok else int(ExitCode.FAIL), text_out)

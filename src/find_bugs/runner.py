@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import json
 import os
+import pwd
+import getpass
+import resource
 import signal
 import sqlite3
+import subprocess
+import sys
 import time
 import traceback
+from collections import Counter
 from collections.abc import Iterable
 from multiprocessing import get_context
 from pathlib import Path
@@ -19,16 +25,71 @@ from verify.signature import extract_signatures
 from . import bundle as bundle_mod
 from .entry_points import (
     detect_entry_points,
+    detect_framework_decorated,
     graph_id_for,
 )
 from .severity import compute_severity, rank_findings
 from .walker import scan_codebase_sources
 
 VERIFY_TIMEOUT_S = 30.0
+MAX_RSS_PER_VERIFY = 512 * 1024 * 1024  # 512 MB
+
+
+def _set_subprocess_limits() -> None:
+    # Address-space cap (best-effort RSS ceiling) so pathological allocations
+    # raise MemoryError inside the worker instead of kernel OOM-killing us.
+    resource.setrlimit(
+        resource.RLIMIT_AS, (MAX_RSS_PER_VERIFY, MAX_RSS_PER_VERIFY)
+    )
+
+
+def _verify_subprocess_cmd(run_args: dict[str, Any]) -> list[str]:
+    cmd = [
+        sys.executable,
+        "-m",
+        "verify.cli",
+        str(run_args["target_path"]),
+        "--examples",
+        str(int(run_args["examples"])),
+        "--json",
+        "--no-receipt",
+    ]
+    fn = run_args.get("function")
+    if fn:
+        cmd.extend(["--function", str(fn)])
+    gdb = run_args.get("graph_db_path")
+    if gdb:
+        cmd.extend(["--graph-db", str(gdb)])
+    croot = run_args.get("codebase_root")
+    if croot:
+        cmd.extend(["--codebase-root", str(croot)])
+    return cmd
 
 
 def _omnix_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent
+
+
+def _real_home_dir() -> str:
+    """Home directory independent of $HOME (needed for subprocess site-packages)."""
+    try:
+        return pwd.getpwuid(os.getuid()).pw_dir
+    except Exception:
+        u = (
+            os.environ.get("SUDO_USER")
+            or os.environ.get("USER")
+            or os.environ.get("LOGNAME")
+            or ""
+        )
+        if not u:
+            try:
+                u = getpass.getuser()
+            except Exception:
+                u = ""
+        cand = Path("/home") / u if u else None
+        if cand and cand.is_dir():
+            return str(cand)
+        return "/"
 
 
 def resolve_graph_db(
@@ -228,6 +289,15 @@ def _child_verify(
             return
 
 
+def _child_verify_limited(out_q: object, run_args: dict[str, Any]) -> None:
+    os.environ["HOME"] = _real_home_dir()
+    try:
+        _set_subprocess_limits()
+    except Exception:
+        pass
+    _child_verify(out_q, run_args)
+
+
 def _run_verify_direct(run_args: dict[str, Any]) -> tuple[int, str]:
     return verify_runner.run(
         run_args["target_path"],
@@ -245,60 +315,69 @@ def _run_verify_direct(run_args: dict[str, Any]) -> tuple[int, str]:
 def _run_verify_limited(
     run_args: dict[str, Any], timeout_s: float
 ) -> tuple[int, str, str | None]:
-    """(exit_code, payload, worker_err). *timeout* uses a real-time timer in-process
-    on Unix; *spawn* on platforms without itimer, or for ``OMNIX_FIND_BUGS_NO_TIMEOUT``."""
-    if os.environ.get("OMNIX_FIND_BUGS_NO_TIMEOUT"):
-        a = _run_verify_direct(run_args)
-        return (a[0], a[1], None)
-    if timeout_s <= 0:
-        a = _run_verify_direct(run_args)
-        return (a[0], a[1], None)
-    itimer = hasattr(signal, "ITIMER_REAL") and hasattr(signal, "SIGALRM")
-    if itimer:
+    """(exit_code, payload, worker_err) where verify runs in a subprocess.
 
-        def _handler(_s: int, _f: Any) -> None:
-            raise TimeoutError("omnix find-bugs: verify time limit")
-
-        oldh = signal.signal(  # type: ignore[assignment, attr-defined, misc]
-            signal.SIGALRM, _handler
-        )
+    Timeout is enforced by `communicate(timeout=...)` so we can always apply
+    per-process memory limits via `preexec_fn`.
+    """
+    env = dict(os.environ)
+    # Keep caller's HOME for bundle/receipts, but run verify subprocess with the
+    # *real* home so user-site deps (e.g. Hypothesis) remain importable even when
+    # tests monkeypatch HOME.
+    env["HOME"] = _real_home_dir()
+    src_root = str((_omnix_root() / "src").resolve())
+    env["PYTHONPATH"] = (
+        src_root
+        + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    )
+    p = subprocess.Popen(
+        _verify_subprocess_cmd(run_args),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=str(_omnix_root()),
+        start_new_session=True,
+        preexec_fn=_set_subprocess_limits,
+    )
+    try:
+        if os.environ.get("OMNIX_FIND_BUGS_NO_TIMEOUT") or timeout_s <= 0:
+            out, err = p.communicate()
+        else:
+            out, err = p.communicate(timeout=float(timeout_s))
+    except subprocess.TimeoutExpired:
         try:
-            signal.setitimer(  # type: ignore[union-attr, arg-type, attr-defined, unused-ignore, misc, operator]
-                signal.ITIMER_REAL, float(timeout_s), 0.0
-            )
-            try:
-                a = _run_verify_direct(run_args)
-                return (a[0], a[1], None)
-            except TimeoutError as e:
-                return 2, "", str(e)
-            finally:
-                signal.setitimer(  # type: ignore[union-attr, arg-type, attr-defined, operator, unused-ignore, misc]
-                    signal.ITIMER_REAL, 0.0, 0.0
-                )
-        finally:
-            if oldh is not None:
-                signal.signal(  # type: ignore[assignment, attr-defined, arg-type, misc, unused-ignore]
-                    signal.SIGALRM, oldh
-                )
-    else:
+            os.killpg(p.pid, signal.SIGKILL)
+        except Exception:
+            p.kill()
+        _ = p.communicate(timeout=2.0)
+        return (2, "", f"verify timed out after {int(timeout_s)}s")
+    rc = int(p.returncode or 0)
+    err_s = err.strip() if err and err.strip() else ""
+    werr = err_s if (rc != 0 and not out.strip() and err_s) else (err_s if rc == 2 else None)
+    if werr and "no module named" in werr.lower() and "hypothesis" in werr.lower():
+        # Fallback: tests may monkeypatch HOME and hide user-site deps from
+        # subprocesses. Use a spawned worker process and set limits there, so
+        # the parent process can't be destabilized by RLIMIT_AS.
         ctx = get_context("spawn")
         q: Any = ctx.Queue()
-        p = ctx.Process(target=_child_verify, args=(q, run_args), daemon=True)
-        p.start()
-        p.join(timeout=timeout_s)
-        if p.is_alive():
-            p.terminate()
-            p.join(3.0)
+        wp = ctx.Process(target=_child_verify_limited, args=(q, run_args), daemon=True)
+        wp.start()
+        wp.join(timeout=timeout_s if timeout_s > 0 else None)
+        if wp.is_alive():
+            wp.terminate()
+            wp.join(3.0)
             return (2, "", f"verify timed out after {int(timeout_s)}s")
         try:
-            c, t, werr = q.get(block=True, timeout=0.5)
-        except (OSError, ValueError, Exception):
-            c, t, werr = (2, "", "no result from verify worker")
-        if werr is not None:
-            return 2, "", werr
-        if isinstance(c, int) and isinstance(t, str):
-            return c, t, None
-        return 2, "", "invalid worker response"
+            c2, t2, w2 = q.get(block=True, timeout=0.5)
+        except Exception:
+            return (2, "", "no result from verify worker")
+        if w2 is not None:
+            return (2, "", str(w2))
+        if isinstance(c2, int) and isinstance(t2, str):
+            return (c2, t2, None)
+        return (2, "", "invalid worker response")
+    return (rc, out or "", werr)
 
 
 def _first_three(failures: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -314,6 +393,13 @@ def _first_three(failures: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+def _looks_like_memory_error(txt: str | None) -> bool:
+    if not txt:
+        return False
+    t = txt.lower()
+    return "memoryerror" in t or "cannot allocate memory" in t
 
 
 def _failures_for_name(j: dict[str, Any], fn: str) -> list[dict[str, Any]]:
@@ -447,6 +533,7 @@ def run_find_bugs(
                 }
             )
             continue
+        frame_skip = {n: r for n, r in detect_framework_decorated(fpath)}
         for s in sigs:
             fn = str(s.get("name", ""))
             fcount += 1
@@ -456,6 +543,12 @@ def run_find_bugs(
             if sk:
                 skipped_main.append(
                     {"file": relp, "function": fn, "reason": sk}
+                )
+                continue
+            fwr = frame_skip.get(fn)
+            if fwr is not None:
+                skipped_main.append(
+                    {"file": relp, "function": fn, "reason": fwr}
                 )
                 continue
             lineno = int(s.get("lineno", 0) or 0)
@@ -485,6 +578,38 @@ def run_find_bugs(
                             "message": werr or "timeout",
                         }
                     )
+                elif _looks_like_memory_error(werr):
+                    findings.append(
+                        {
+                            "kind": "memory_pathology",
+                            "file": relp,
+                            "function": fn,
+                            "lineno": lineno,
+                            "severity_score": 100,
+                            "caller_count": in_cnt.get(graph_id_for(relp, fn), 0),
+                            "reachable_from_entries": bool(
+                                entry_reach_map.get(graph_id_for(relp, fn), False)
+                            ),
+                            "cluster_id": cc.get(graph_id_for(relp, fn)),
+                            "input": "(unknown)",
+                            "reason": f"function exhausted memory limit ({int(MAX_RSS_PER_VERIFY / (1024 * 1024))} MB)",
+                            "failures": [
+                                {
+                                    "shrunk_input": "(unknown)",
+                                    "exception_type": "MemoryError",
+                                    "message": "verify worker hit memory limit",
+                                }
+                            ],
+                        }
+                    )
+                else:
+                    import_errs.append(
+                        {
+                            "kind": "import_error",
+                            "file": relp,
+                            "message": f"verify worker error (function {fn!r}): {werr[:5000]}",
+                        }
+                    )
                 continue
             if code == 2:
                 fl = j.get("failures")
@@ -497,6 +622,31 @@ def run_find_bugs(
                     msg = str(
                         fl[0].get("exception_message", msg)  # type: ignore[call-overload, index, union-attr]
                     )[:5000]
+                if _looks_like_memory_error(msg):
+                    findings.append(
+                        {
+                            "kind": "memory_pathology",
+                            "file": relp,
+                            "function": fn,
+                            "lineno": lineno,
+                            "severity_score": 100,
+                            "caller_count": in_cnt.get(graph_id_for(relp, fn), 0),
+                            "reachable_from_entries": bool(
+                                entry_reach_map.get(graph_id_for(relp, fn), False)
+                            ),
+                            "cluster_id": cc.get(graph_id_for(relp, fn)),
+                            "input": "(unknown)",
+                            "reason": f"function exhausted memory limit ({int(MAX_RSS_PER_VERIFY / (1024 * 1024))} MB)",
+                            "failures": [
+                                {
+                                    "shrunk_input": "(unknown)",
+                                    "exception_type": "MemoryError",
+                                    "message": msg,
+                                }
+                            ],
+                        }
+                    )
+                    continue
                 import_errs.append(
                     {
                         "kind": "import_error",
@@ -520,6 +670,37 @@ def run_find_bugs(
                         if isinstance(x, dict):
                             fails.append(x)
                 if not fails:
+                    continue
+                mem_fails = [
+                    x
+                    for x in fails
+                    if isinstance(x, dict)
+                    and (
+                        str(x.get("exception_type") or "") == "MemoryError"
+                        or _looks_like_memory_error(str(x.get("message") or ""))
+                        or _looks_like_memory_error(str(x.get("exception_message") or ""))
+                    )
+                ]
+                if mem_fails:
+                    mf0 = mem_fails[0]
+                    shr = str(mf0.get("shrunk_input") or mf0.get("input") or "(unknown)")
+                    findings.append(
+                        {
+                            "kind": "memory_pathology",
+                            "file": relp,
+                            "function": fn,
+                            "lineno": lineno,
+                            "severity_score": 100,
+                            "caller_count": in_cnt.get(graph_id_for(relp, fn), 0),
+                            "reachable_from_entries": bool(
+                                entry_reach_map.get(graph_id_for(relp, fn), False)
+                            ),
+                            "cluster_id": cc.get(graph_id_for(relp, fn)),
+                            "input": shr,
+                            "reason": f"function exhausted memory limit ({int(MAX_RSS_PER_VERIFY / (1024 * 1024))} MB)",
+                            "failures": _first_three(mem_fails),
+                        }
+                    )
                     continue
                 fk = graph_id_for(relp, fn)
                 sub = _first_three(fails)
@@ -560,6 +741,11 @@ def run_find_bugs(
         "total_examples_run": ex_total,
         "wall_time_seconds": wall,
         "skipped_main_count": len(skipped_main),
+        "skipped_by_reason": dict(
+            sorted(
+                Counter(s.get("reason", "") for s in skipped_main if s).items()
+            )
+        ),
     }
     gsig: dict[str, Any] = {
         "entry_points_detected": ep_list,
