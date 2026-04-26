@@ -146,6 +146,15 @@ def main() -> None:
         help="public.pem (default: ~/.omnix/keys/public.pem)",
     )
 
+    st = subparsers.add_parser("studio", help="OMNIX Studio live graph workspace (FastAPI on :7778 default)")
+    st.add_argument("path", nargs="?", default=None, help="Project root to open (optional; welcome screen if omitted)")
+    st.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Server port (default: 7778, override with OMNIX_STUDIO_PORT env)",
+    )
+
     if len(sys.argv) > 1 and sys.argv[1] == "axiom":
         root_om = os.path.dirname(os.path.abspath(__file__))
         if root_om not in sys.path:
@@ -186,6 +195,18 @@ def main() -> None:
 
         rc = int(cli.run(args))  # type: ignore[assignment, call-arg, misc, arg-type]
         sys.exit(0 if rc == 0 else 1 if rc == 1 else 2)
+    if args.command == "studio":
+        if root_om not in sys.path:
+            sys.path.insert(0, root_om)
+        from src.studio.server import run as studio_run  # type: ignore[import-not-found, no-untyped-def, misc, no-untyped-def, no-any-return]  # noqa: E501
+
+        pp: str | None
+        if args.path:  # noqa: E501
+            pp = os.path.abspath(str(args.path))  # type: ignore[no-untyped-def, misc, no-untyped-def, no-any-return]  # noqa: E501, E501
+        else:  # noqa: E501
+            pp = None
+        studio_run(project_path=pp, port=getattr(args, "port", None))  # type: ignore[no-untyped-def, misc, no-untyped-def, no-untyped-def, no-any-return]  # noqa: E501, E501
+        sys.exit(0)
     if args.command != "analyze":
         print(f"Unknown command: {args.command!r}", file=sys.stderr)
         sys.exit(1)

@@ -1,0 +1,1 @@
+"""OMNIX Studio tests."""

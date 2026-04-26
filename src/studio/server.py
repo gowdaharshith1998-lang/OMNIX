@@ -1,0 +1,582 @@
+"""FastAPI Studio server: REST, WebSocket, static SPA (production)."""
+
+from __future__ import annotations
+
+import logging
+import os
+
+if os.environ.get("OMNIX_STUDIO_DEBUG") == "1":
+    logging.basicConfig(
+        level=logging.WARNING, format="%(levelname)s:%(name)s:%(message)s", force=True
+    )
+    for _noisy in ("watchdog", "watchdog.observers", "watchdog.observers.inotify_buffer"):
+        logging.getLogger(_noisy).setLevel(logging.WARNING)
+    logging.getLogger("omnix.studio").setLevel(logging.DEBUG)
+
+import asyncio
+import contextlib
+import json
+import time
+from pathlib import Path
+from typing import Any
+
+import sqlite3
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+from src.graph.store import GraphStore, NodeRow
+from src.parser import evolution
+from src.parser.grammar_detect import detect_for_path
+from src.parser.ingest_dispatch import ingest_unified_codebase
+from src.omnix_version import __version__
+from src.studio.parser_bridge import ParserBridge, broadcast_to_workspace
+from src.studio.recent import add_recent, list_recent
+from src.studio.watcher import ProjectWatcher
+from src.studio.workspace import (
+    MANAGER,
+    Workspace,
+    node_row_to_dict,
+    open_workspace,
+)
+from src.studio.watcher import is_studio_ignored
+from src.studio.ws_protocol import (
+    msg_bootstrap_complete,
+    msg_bootstrap_start,
+    msg_edge_added,
+    msg_error,
+    msg_node_added,
+    msg_pong,
+    msg_stats,
+)
+
+INITIAL_STUDIO_PATH: str | None = None
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_FRONTEND_DIST = _REPO_ROOT / "src" / "studio" / "frontend" / "dist"
+
+
+@contextlib.asynccontextmanager
+async def _app_lifespan(_app: FastAPI) -> Any:  # noqa: ANN401, RUF029, ASYNC109
+    yield
+    for w in list(MANAGER.workspaces.values()):
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await w.stop()  # type: ignore[union-attr, misc, no-untyped-def]
+
+
+app = FastAPI(title="OMNIX Studio", lifespan=_app_lifespan)  # type: ignore[assignment, misc, no-untyped-def]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Pydantic models
+class OpenBody(BaseModel):
+    path: str
+
+
+class CloseBody(BaseModel):
+    workspace_id: str = Field(min_length=1)
+
+
+class FileWriteBody(BaseModel):
+    path: str
+    content: str = ""
+
+
+class FilePutBody(BaseModel):
+    path: str
+    content: str
+    expected_last_modified: float = Field(
+        description="Mtime of file when read (epoch seconds, float from OS)"
+    )
+
+
+def _row_to_node_public(r: sqlite3.Row) -> NodeRow:
+    m = r["metadata"]
+    return NodeRow(
+        id=str(r["id"]),
+        name=str(r["name"]),
+        type=str(r["type"]),
+        file_path=str(r["file_path"]) if r["file_path"] is not None else None,
+        start_line=r["start_line"],
+        end_line=r["end_line"],
+        complexity=int(r["complexity"] or 0),
+        metadata=json.loads(m) if m else None,
+    )
+
+
+def get_node_by_id(st: GraphStore, node_id: str) -> NodeRow | None:
+    c = st.sqlite_connection()
+    r = c.execute("SELECT * FROM nodes WHERE id = ?", (node_id,)).fetchone()
+    if not r:
+        return None
+    return _row_to_node_public(r)
+
+
+def _ingest_block(workspace: Workspace) -> None:
+    assert isinstance(workspace, Workspace)  # noqa: S101
+    evolution.begin_evolution_run()
+    try:
+        ingest_unified_codebase(
+            str(workspace.root), workspace.store, force=False, omnix_version=__version__
+        )
+    finally:
+        with contextlib.suppress(OSError, ValueError, RuntimeError):
+            evolution.finalize_evolution_run(workspace.store.sqlite_connection())
+    with contextlib.suppress(OSError, ValueError, RuntimeError):
+        workspace.store.commit()
+
+
+async def _start_background_ingest(w: Workspace, loop: asyncio.AbstractEventLoop) -> None:  # noqa: E501
+    await loop.run_in_executor(None, _ingest_block, w)
+    br = ParserBridge(loop, w)
+    w.set_parser_bridge(br)  # type: ignore[union-attr, misc, no-untyped-def]
+    obs = ProjectWatcher(
+        str(w.root),
+        br.on_filesystem,
+    )
+    obs.start()
+    w.set_watcher(obs)  # type: ignore[union-attr, misc, no-untyped-def]
+    br.start()  # type: ignore[union-attr, misc, no-untyped-def]
+    w.ingest_event.set()  # type: ignore[union-attr, misc, no-untyped-def]
+
+
+# --- API ---
+
+
+@app.get("/api/health")
+def api_health() -> dict[str, str]:
+    return {"status": "ok", "version": __version__}
+
+
+@app.get("/api/recent")
+def api_recent() -> dict[str, list[dict[str, str]]]:
+    return {"recent": list_recent()}
+
+
+@app.get("/api/studio/initial")
+def api_studio_initial() -> dict[str, str | None]:
+    envp = (os.environ.get("OMNIX_STUDIO_INITIAL") or "").strip()
+    p = (INITIAL_STUDIO_PATH or envp or None)  # type: ignore[has-type, assignment, misc, no-redef, union-attr]
+    return {"path": p}  # type: ignore[return-value, no-any-return]
+
+
+def _edge_dict(
+    eid: int, sid: str, tid: str, rel: str, meta: dict[str, Any] | None
+) -> dict[str, Any]:
+    return {
+        "id": eid,
+        "source_id": sid,
+        "target_id": tid,
+        "relationship": rel,
+        "metadata": meta or {},
+    }
+
+
+def _row_edge(r: sqlite3.Row) -> dict[str, Any]:  # noqa: D103
+    m = r["metadata"]
+    return _edge_dict(
+        int(r["id"]),
+        str(r["source_id"]),
+        str(r["target_id"]),
+        str(r["relationship"]),
+        json.loads(m) if m else None,
+    )
+
+
+async def _run_bootstrap(websocket: WebSocket, w: Workspace) -> None:
+    st = w.store
+    c = st.sqlite_connection()
+    t0 = time.time()
+    rowf = c.execute("SELECT COUNT(*) FROM file_hashes").fetchone()  # noqa: E501
+    total_files = int(rowf[0] or 0) if rowf else 0
+    n_total = c.execute("SELECT COUNT(*) FROM nodes").fetchone()  # noqa: E501
+    n_nodes = int(n_total[0] or 0) if n_total else 0
+    e_row = c.execute("SELECT COUNT(*) FROM edges").fetchone()  # noqa: E501
+    n_edges = int(e_row[0] or 0) if e_row else 0
+    bmode: Any = "scratch" if w.mode == "scratch" else "existing"
+    await websocket.send_text(
+        json.dumps(msg_bootstrap_start(w.id, max(0, total_files), bmode))
+    )
+    last_s = 0.0
+    for r in c.execute("SELECT * FROM nodes ORDER BY file_path, id"):
+        node_r = _row_to_node_public(r)  # noqa: E501
+        await websocket.send_text(
+            json.dumps(msg_node_added(node_row_to_dict(node_r)))
+        )  # noqa: E501
+        n = time.time()
+        if n - last_s >= 1.0:
+            s = w.stats_dict()  # noqa: E501
+            await websocket.send_text(
+                json.dumps(
+                    msg_stats(
+                        s["files"],
+                        s["functions"],
+                        s["classes"],
+                        s["edges"],
+                        s["dark_matter"],
+                        s["entangled"],
+                    )
+                )  # noqa: E501
+            )
+            last_s = n
+    for r in c.execute("SELECT * FROM edges ORDER BY id"):
+        await websocket.send_text(
+            json.dumps(  # type: ignore[no-untyped-def, misc, no-any-return, arg-type]
+                msg_edge_added(  # noqa: E501
+                    _row_edge(r)  # noqa: E501
+                )
+            )  # noqa: E501
+        )
+    dur = int(1000 * (time.time() - t0))
+    await websocket.send_text(
+        json.dumps(msg_bootstrap_complete(dur, n_nodes, n_edges), default=str)  # noqa: E501
+    )
+
+
+@app.post("/api/workspace/open")
+async def api_workspace_open(body: OpenBody) -> dict[str, Any]:
+    try:
+        w, stats0 = open_workspace(body.path)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    add_recent(body.path)
+    MANAGER.put(w)
+    loop = asyncio.get_running_loop()  # noqa: E501
+    asyncio.create_task(_start_background_ingest(w, loop))  # noqa: RUF006
+    return {
+        "workspace_id": w.id,
+        "mode": w.mode,
+        "stats": {
+            "files": stats0["files"],
+            "functions": stats0["functions"],
+            "classes": stats0["classes"],
+            "edges": stats0["edges"],
+        },
+    }
+
+
+@app.post("/api/workspace/close")
+async def api_workspace_close(body: CloseBody) -> dict[str, bool]:  # noqa: D103
+    w = MANAGER.get(body.workspace_id)
+    if w is None:
+        raise HTTPException(404, "unknown workspace_id")
+    await w.stop()  # type: ignore[union-attr, misc, no-untyped-def]
+    MANAGER.remove(body.workspace_id)
+    return {"closed": True}
+
+
+def _file_matches_prefix(rel: str, pfx: str) -> bool:
+    if not pfx:
+        return True
+    return rel == pfx or rel.startswith(pfx.rstrip("/") + "/")
+
+
+def _iter_listable_files(
+    root: Path, pfx: str, limit: int
+) -> list[dict[str, Any]]:
+    root = root.resolve()
+    pfx0 = pfx or ""
+    out: list[dict[str, Any]] = []
+    for f in root.rglob("*"):
+        if not f.is_file():
+            continue
+        try:
+            r = f.relative_to(root).as_posix()  # noqa: E501
+        except (OSError, ValueError) as e:  # noqa: F841, E501
+            continue
+        if is_studio_ignored(root, r) or not _file_matches_prefix(r, pfx0):
+            continue
+        try:  # noqa: E501
+            st = f.stat()
+        except OSError:
+            continue
+        out.append(
+            {
+                "path": r,
+                "type": "file",
+                "size": st.st_size,
+                "modified": st.st_mtime,
+            }
+        )  # noqa: E501
+        if len(out) >= limit:
+            break
+    return out
+
+
+@app.get("/api/workspace/{workspace_id}/files")
+def api_list_files(  # noqa: D103
+    workspace_id: str,
+    prefix: str = "",
+    limit: int = 100,
+) -> dict[str, list[dict[str, Any]]]:  # noqa: E501
+    w = MANAGER.get(workspace_id)  # noqa: E501
+    if w is None:
+        raise HTTPException(404, "unknown workspace_id")
+    lim = max(1, min(limit, 200))
+    return {
+        "files": _iter_listable_files(  # noqa: E501
+            w.root,  # type: ignore[no-untyped-def, misc, no-any-return, arg-type, union-attr, misc]
+            prefix,  # noqa: E501
+            lim,  # noqa: E501
+        )
+    }
+
+
+@app.post("/api/workspace/{workspace_id}/file")
+async def api_create_file(  # noqa: D103
+    workspace_id: str,
+    body: FileWriteBody,
+) -> dict[str, Any]:  # noqa: E501
+    w = MANAGER.get(workspace_id)  # noqa: E501
+    if w is None:
+        raise HTTPException(404, "unknown workspace_id")
+    rel = body.path.replace("\\", "/").lstrip("/")
+    p = w.root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)  # noqa: E501
+    p.write_text(body.content, encoding="utf-8", newline="")  # noqa: E501, WPS
+    return {"created": True, "path": rel}  # noqa: E501
+
+
+@app.get("/api/workspace/{workspace_id}/file")
+def api_get_file(  # noqa: D103
+    workspace_id: str,
+    path: str = Query(""),
+) -> dict[str, Any]:  # noqa: E501
+    w = MANAGER.get(workspace_id)  # noqa: E501
+    if w is None:
+        raise HTTPException(404, "unknown workspace_id")
+    if not path:
+        raise HTTPException(400, "path required")
+    p = w.root / path
+    if not p.is_file():
+        raise HTTPException(404, "file not found")
+    raw = p.read_text(encoding="utf-8", errors="replace")
+    mtime = 0.0
+    with contextlib.suppress(OSError, ValueError):
+        mtime = p.stat().st_mtime
+    d = detect_for_path(p)
+    lang = (d.grammar_name or d.inferred_lang or "text") or "text"  # noqa: E501
+    return {  # noqa: E501
+        "path": path,
+        "content": raw,
+        "last_modified": mtime,
+        "language": str(lang),  # noqa: E501
+    }
+
+
+def _mtime_mismatch(
+    a: float, b: float, *, eps: float = 0.5e-2
+) -> bool:
+    return abs(float(a) - float(b)) > eps
+
+
+@app.put("/api/workspace/{workspace_id}/file")
+async def api_put_file(  # noqa: D103
+    workspace_id: str,
+    body: FilePutBody,
+) -> dict[str, Any]:
+    w = MANAGER.get(workspace_id)  # noqa: E501
+    if w is None:
+        raise HTTPException(404, "unknown workspace_id")
+    rel = body.path.replace("\\", "/").lstrip("/")
+    p = w.root / rel
+    if not p.is_file():
+        raise HTTPException(404, "file not found")
+    try:  # noqa: E501, SIM, E501
+        cur = float(p.stat().st_mtime)  # noqa: E501, WPS, E501, WPS
+    except (OSError, ValueError, RuntimeError):
+        cur = 0.0
+    if _mtime_mismatch(float(cur), float(body.expected_last_modified)):
+        raise HTTPException(409, "stale: file changed on disk")
+    p.write_text(body.content, encoding="utf-8", newline="")
+    nm2 = 0.0
+    with contextlib.suppress(OSError, ValueError, RuntimeError, TypeError):
+        nm2 = float(p.stat().st_mtime)  # noqa: E501
+    return {
+        "written": True,  # noqa: E501
+        "new_last_modified": float(nm2),  # noqa: E501, WPS
+    }
+
+
+def _node_refs(
+    c: sqlite3.Connection, node_id: str, *, as_target: bool
+) -> list[dict[str, str | None]]:  # noqa: D103, E501
+    """Callers: edges into *node*; callees: edges from *node* (CALLS only)."""
+    if as_target:  # noqa: E501
+        sub = (  # noqa: E501
+            "SELECT source_id FROM edges WHERE target_id = ? "  # noqa: E501
+            "AND relationship = 'CALLS' LIMIT 50"  # noqa: E501
+        )
+    else:  # noqa: E501
+        sub = (  # noqa: E501
+            "SELECT target_id FROM edges WHERE source_id = ? "  # noqa: E501
+            "AND relationship = 'CALLS' LIMIT 50"  # noqa: E501
+        )
+    out: list[dict[str, str | None]] = []
+    for r in c.execute(  # noqa: E501
+        f"SELECT n.id, n.name, n.type FROM nodes n WHERE n.id IN ({sub})",  # noqa: S608, E501
+        (node_id,),
+    ):
+        out.append(
+            {
+                "id": str(r[0]),
+                "name": str(r[1]) if r[1] is not None else None,
+                "type": str(r[2]) if r[2] is not None else None,
+            }
+        )
+    return out
+
+
+@app.get("/api/workspace/{workspace_id}/node/{node_id}")
+def api_get_node(  # noqa: D103
+    workspace_id: str,
+    node_id: str,
+) -> dict[str, Any]:  # noqa: E501
+    w = MANAGER.get(workspace_id)  # noqa: E501
+    if w is None:
+        raise HTTPException(404, "unknown workspace_id")
+    st = w.store
+    n0 = get_node_by_id(st, node_id)  # noqa: E501
+    if n0 is None:  # noqa: E501
+        raise HTTPException(404, "node not found")
+    c0 = st.sqlite_connection()
+    return {
+        "node": {
+            "id": n0.id,  # noqa: E501
+            "name": n0.name,
+            "type": n0.type,
+            "file_path": n0.file_path,
+            "line_start": n0.start_line,
+            "line_end": n0.end_line,
+            "metadata": n0.metadata or {},
+        },
+        "callers": _node_refs(c0, n0.id, as_target=True),
+        "callees": _node_refs(c0, n0.id, as_target=False),
+        "file_path": n0.file_path,
+        "line_start": n0.start_line,
+        "line_end": n0.end_line,
+    }
+
+async def _stats_ticker(w: Workspace, stop: asyncio.Event) -> None:
+    while w._websockets:  # type: ignore[union-attr, misc, no-untyped-def]
+        if stop.is_set():
+            return
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=0.5)
+        except asyncio.CancelledError:
+            raise
+        except (asyncio.TimeoutError, OSError):
+            s = w.stats_dict()
+            with contextlib.suppress(Exception):
+                await broadcast_to_workspace(
+                    w,
+                    msg_stats(
+                        s["files"],
+                        s["functions"],
+                        s["classes"],
+                        s["edges"],
+                        s["dark_matter"],
+                        s["entangled"],
+                    ),
+                )
+        else:
+            return
+
+
+@app.websocket("/ws/workspace/{workspace_id}")
+async def ws_workspace(websocket: WebSocket, workspace_id: str) -> None:
+    w = MANAGER.get(workspace_id)
+    if w is None:
+        await websocket.close(code=1008)
+        return
+    await websocket.accept()
+    w.add_ws(websocket)  # type: ignore[union-attr, misc, no-untyped-def]
+    stop = asyncio.Event()
+    t_stats = asyncio.create_task(_stats_ticker(w, stop), name="studio-stats")
+    try:
+        try:
+            first = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+        except asyncio.TimeoutError:
+            return
+        try:
+            d0 = json.loads(first) if first else {}
+        except json.JSONDecodeError:
+            await websocket.send_text(json.dumps(msg_error("invalid JSON", True)))
+            return
+        if d0.get("type") != "subscribe" or d0.get("workspace_id") != workspace_id:
+            await websocket.send_text(
+                json.dumps(
+                    msg_error("expected subscribe with matching workspace_id", True)
+                )
+            )
+            return
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(w.ingest_event.wait(), timeout=600.0)  # type: ignore[union-attr, misc, no-untyped-def]
+        await _run_bootstrap(websocket, w)
+        while True:
+            try:
+                raw = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+            except (asyncio.TimeoutError,):
+                continue
+            try:
+                d2 = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if d2.get("type") == "ping":
+                await websocket.send_text(
+                    json.dumps(msg_pong(float(d2.get("ts", 0.0))))
+                )
+    except WebSocketDisconnect:
+        pass
+    except asyncio.CancelledError:
+        raise
+    finally:
+        stop.set()
+        t_stats.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await t_stats
+        w.remove_ws(websocket)  # type: ignore[union-attr, misc, no-untyped-def]
+
+
+if (_FRONTEND_DIST / "assets").is_dir():
+    app.mount(
+        "/assets",
+        StaticFiles(directory=str(_FRONTEND_DIST / "assets")),
+        name="studio-assets",
+    )
+
+
+@app.get("/", response_model=None)  # noqa: E501
+def spa_index() -> FileResponse | JSONResponse:  # noqa: D103
+    idx = _FRONTEND_DIST / "index.html"
+    if idx.is_file():
+        return FileResponse(str(idx))
+    return JSONResponse(
+        {"detail": "Build frontend: cd src/studio/frontend && npm run build"},
+        status_code=200,
+    )
+
+
+def run(
+    *,
+    project_path: str | None = None,
+    host: str = "127.0.0.1",
+    port: int | None = None,
+) -> None:  # noqa: D103
+    import uvicorn  # noqa: WPS433
+
+    global INITIAL_STUDIO_PATH  # noqa: PLW0603
+    p = int((os.environ.get("OMNIX_STUDIO_PORT") or "7778").strip() or 7778)
+    if port is not None:
+        p = int(port)
+    if project_path is not None:
+        INITIAL_STUDIO_PATH = str(Path(project_path).resolve())
+    else:
+        INITIAL_STUDIO_PATH = None
+    uvicorn.run(app, host=host, port=p)

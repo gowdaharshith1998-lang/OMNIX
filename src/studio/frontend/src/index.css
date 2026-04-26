@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Hex grid (subtle) over deep background */
+.studio-hex-bg {
+  background-color: #06080c;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill-rule='evenodd'%3E%3Cg fill='%231a2332' fill-opacity='0.35'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5-13-7.5v-15l13-7.5zM1.18 9.2l12.16 7.02V31.1L1.18 24.08V9.2z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
