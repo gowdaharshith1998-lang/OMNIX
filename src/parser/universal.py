@@ -11,6 +11,9 @@ from tree_sitter import Language, Node, Parser
 
 from src.graph.store import GraphStore
 from src.parser.hint_loader import MergedHints, load_merged_hints
+from src.parser.memory_graph import MemoryGraphStore
+
+_GraphSink = GraphStore | MemoryGraphStore
 
 
 def _text(source: bytes, node: Node) -> str:
@@ -26,7 +29,7 @@ def _parser(lang: Language) -> Parser:
 
 
 def ingest_universal_to_store(
-    store: GraphStore,
+    store: _GraphSink,
     rel: str,
     text: str,
     logical_lang: str,
@@ -108,7 +111,7 @@ def _impl_type_name(impl: Node, source: bytes) -> str | None:
 
 
 def _ingest_rust(
-    store: GraphStore, rel: str, text: str, language: Language, m: MergedHints
+    store: _GraphSink, rel: str, text: str, language: Language, m: MergedHints
 ) -> None:
     source = text.encode("utf-8")
     tree = _parser(language).parse(source)
@@ -312,7 +315,7 @@ def _rust_call_target(
 
 
 def _ingest_generic_ts_tree(
-    store: GraphStore, rel: str, text: str, language: Language, m: MergedHints
+    store: _GraphSink, rel: str, text: str, language: Language, m: MergedHints
 ) -> None:
     source = text.encode("utf-8")
     root = _parser(language).parse(source).root_node
@@ -346,7 +349,6 @@ def _ingest_generic_ts_tree(
                 metadata={"parse_mode": m.parse_mode},
             )
             store.add_edge(file_id, fid, "DEFINES")
-    store.commit()
 
 
 def _guess_decl_name(n: Node, source: bytes) -> str | None:
@@ -377,7 +379,7 @@ def _count_syntactic_node_types(
 
 
 def parse_stats_for_universal_ingest(
-    store: GraphStore,
+    store: _GraphSink,
     rel: str,
     text: str,
     *,

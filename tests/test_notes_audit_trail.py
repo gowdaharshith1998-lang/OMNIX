@@ -17,6 +17,7 @@ def test_notes_has_historical_quality_formulas_section() -> None:
     assert "### Formula v1" in t
     assert "### Formula v2" in t
     assert "0.7266" in t and "0.6524" in t
+    assert "Phase 14a baseline" in t and "0.6831" in t and "0.6461" in t
     assert "function_count" in t and "line_density" in t
 
 

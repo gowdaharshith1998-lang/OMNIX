@@ -566,10 +566,25 @@ launch) → recommended. (b) #4 Monaco IDE shell. (c) #7 Multi-agent PEV.
 - **Per-grammar profiles in** `src/parser/quality_profiles/`
 - **Profiles shipped:** 7 modern (python, typescript, javascript, go, rust, java, generic), 3 legacy (cobol, hlasm, fortran) — see `docs/LEGACY_LANGUAGE_SUPPORT.md`
 - **Roadmap (Integration #15):** rpg, pl/i, jcl, vb6 — these require custom grammars not yet in the tree-sitter integration path; **not** supported today
-- **AXIOM-V2 baseline q values** (post-walker-fix excluding `.next`/`.nuxt/`.output` build dirs):
-  - **python:** 0.7266 (372 files, 270.30 total quality score)
-  - **typescript:** 0.6524 (179 files, 116.78 total quality score)
 - **TypeScript improvement:** +0.23 absolute, +55% relative (driven by `interface_declaration` / `type_alias_declaration` / `enum_declaration` nodes now contributing signal, plus build-output exclusion in the file walker)
+
+## AXIOM-V2 baseline q values
+
+### Phase 3b baseline (DEPRECATED — pre-skip-tracking)
+- python: 0.7266 (372 files, 270.30 total quality score)
+- typescript: 0.6524 (179 files, 116.78 total quality score)
+- Note: these numbers included files that Phase 13.5's trust fix correctly identified as no-grammar/binary/build artifacts. They overcounted total_quality_score because skipped-but-counted files contributed weakly-positive partial scores.
+
+### Phase 14a baseline (CURRENT — post-skip-tracking)
+- python: 0.6831 (372 files, 254.10 total quality score)
+- typescript: 0.6461 (179 files, 115.66 total quality score)
+- Reproducible with: `cd ~/AXIOM-V2 && rm -f omnix.db && OMNIX_INGEST_WORKERS=1 python3 ~/omnix/omnix.py analyze . --no-open ; sqlite3 omnix.db "SELECT grammar_name, total_quality_score, total_files_parsed FROM grammar_profile WHERE grammar_name IN ('python','typescript');"`
+- Both serial-1 and parallel-11 produce IDENTICAL output to 6 decimal places (verified Phase 14a HALT 2 Track A).
+
+### Forward stability invariant (Phase 14a P_2_4 update)
+- "Parallel output == serial output" within ±0.000001 per grammar
+- "Today's run == previous run on same code" within ±0.0001
+- Old "compare to Phase 3b NOTES baseline" gate is RETIRED. The Phase 3b numbers reflect a pre-skip-tracking state of the world that we deliberately moved past in Phase 13.5.
 
 ## Integration #15: Custom Grammar Pack (deferred)
 

@@ -36,7 +36,12 @@ class GraphStore:
         self.db_path = db_path
         self._conn = sqlite3.connect(db_path, isolation_level="DEFERRED", check_same_thread=False)  # noqa: E501
         self._conn.row_factory = sqlite3.Row
+        self._open_batch: bool = False
         self._ensure_schema()
+        jm = self._conn.execute("PRAGMA journal_mode").fetchone()
+        if not jm or (jm[0] or "").upper() != "WAL":
+            self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
 
     def _ensure_schema(self) -> None:
         self._conn.executescript(
@@ -174,6 +179,78 @@ class GraphStore:
 
     def commit(self) -> None:
         self._conn.commit()
+
+    def begin_batch(self) -> None:
+        """Start a single DEFERRED transaction (batch of graph writes)."""
+        if not self._open_batch:
+            self._conn.execute("BEGIN")
+            self._open_batch = True
+
+    def commit_batch(self) -> None:
+        """Commit the current batch transaction (no-op if no batch open)."""
+        if not self._open_batch:
+            return
+        try:
+            self._conn.commit()
+        except (OSError, ValueError):
+            self._conn.rollback()
+            self._open_batch = False
+            raise
+        self._open_batch = False
+
+    def rollback_batch(self) -> None:
+        if self._open_batch:
+            self._conn.rollback()
+            self._open_batch = False
+
+    def import_graph_snapshot(
+        self, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]
+    ) -> None:
+        """
+        Apply nodes and edges from a worker :class:`MemoryGraphStore` dump.
+        Caller must hold an open batch (``begin_batch``) for transactional grouping.
+        """
+        if not nodes and not edges:
+            return
+        nparams = [
+            (
+                r["id"],
+                r["name"],
+                r["type"],
+                r.get("file_path"),
+                r.get("start_line"),
+                r.get("end_line"),
+                r.get("complexity", 0),
+                json.dumps(r["metadata"]) if r.get("metadata") else None,
+            )
+            for r in nodes
+        ]
+        eparams = [
+            (
+                e["source_id"],
+                e["target_id"],
+                e["relationship"],
+                json.dumps(e["metadata"], sort_keys=True) if e.get("metadata") else None,
+            )
+            for e in edges
+        ]
+        if nparams:
+            self._conn.executemany(
+                """
+                INSERT OR REPLACE INTO nodes
+                (id, name, type, file_path, start_line, end_line, complexity, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                nparams,
+            )
+        if eparams:
+            self._conn.executemany(
+                """
+                INSERT INTO edges (source_id, target_id, relationship, metadata)
+                VALUES (?, ?, ?, ?)
+                """,
+                eparams,
+            )
 
     def replace_skip_summary(
         self, rows: list[tuple[str, int, int, str, str | None]]
