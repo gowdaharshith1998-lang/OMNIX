@@ -55,6 +55,11 @@ def main() -> None:
         help="Exit 2 when skipped_est_loc / total_loc > N (0.0–1.0). "
         "Default: 1.0 (off) without --strict; 0.5 with --strict unless you pass this flag.",
     )
+    analyze.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-parse all files (bypasses content hash + profile/version change detection)",
+    )
 
     vsub = subparsers.add_parser(
         "verify", help="Property-based test / verify a Python function"
@@ -198,6 +203,7 @@ def main() -> None:
     from src.parser.git_parser import parse_git_history
     from src.graph.store import GraphStore
     from src.graph.exporter import export_json
+    from src.omnix_version import __version__ as omnix_v
     from src.parser import evolution
     from src.parser.ingest_dispatch import ingest_unified_codebase
     from src.parser.skip_tracking import exit_code_for_skips, format_skip_banner
@@ -213,8 +219,12 @@ def main() -> None:
 
     evolution.begin_evolution_run()
     store = GraphStore(db_path)
-    store.reset()
-    _ingest_tot = ingest_unified_codebase(target, store)
+    _ingest_tot = ingest_unified_codebase(
+        target,
+        store,
+        force=bool(getattr(args, "force", False)),
+        omnix_version=omnix_v,
+    )
     _ = evolution.finalize_evolution_run(store.sqlite_connection())
     py_count = int(_ingest_tot.by_grammar.get("python", 0))
     ts_count = int(_ingest_tot.by_grammar.get("typescript", 0))
@@ -230,7 +240,13 @@ def main() -> None:
             f"⏳ Timeline saved: {timeline['first_date']} → {timeline['last_date']}"
         )
 
-    print(f"📊 Parsed {py_count} Python + {ts_count} TypeScript files")
+    print(f"📊 Parsed {py_count} Python + {ts_count} TypeScript files", end="")
+    if int(getattr(_ingest_tot, "cached", 0) or 0) > 0:
+        print(
+            f" (unchanged, skipped: {int(_ingest_tot.cached)} files in Merkle cache)",
+            end="",
+        )
+    print()
     _skip_banner = format_skip_banner(_ingest_tot.skip)
     if _skip_banner:
         print(_skip_banner)

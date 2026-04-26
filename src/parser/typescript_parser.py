@@ -10,17 +10,18 @@ import tree_sitter_typescript as tst
 
 from src.graph.store import GraphStore
 from src.parser import should_skip_dir
+from src.parser.tree_parse_cache import get_shared_parser, parse_tree_cached
 
 _TS_LANG = Language(tst.language_typescript())
 _TSX_LANG = Language(tst.language_tsx())
 
 
 def _parser_ts() -> Parser:
-    return Parser(_TS_LANG)
+    return get_shared_parser("ts", _TS_LANG)
 
 
 def _parser_tsx() -> Parser:
-    return Parser(_TSX_LANG)
+    return get_shared_parser("tsx", _TSX_LANG)
 
 
 def _text(source: bytes, node: Node) -> str:
@@ -64,7 +65,7 @@ def parse_typescript_files(root: str, store: GraphStore) -> int:
 
 def _build_ts_call_index(store: GraphStore) -> dict[str, list[tuple[str, str]]]:
     by_short: dict[str, list[tuple[str, str]]] = defaultdict(list)
-    for n in store.get_all_nodes():
+    for n in store.iter_all_nodes():
         if n.type not in ("function", "method"):
             continue
         short = n.name.split(".")[-1]
@@ -107,8 +108,9 @@ def _ts_add_type_decl_for_stats(
 
 def _ts_pass1(store: GraphStore, rel: str, text: str, is_tsx: bool) -> None:
     source = text.encode("utf-8")
+    g = "tsx" if is_tsx else "ts"
     parser = _parser_tsx() if is_tsx else _parser_ts()
-    tree = parser.parse(source)
+    tree = parse_tree_cached(g, rel, parser, source)
     file_id = rel
     lc = text.count("\n") + 1 if text else 1
     store.add_node(
@@ -457,8 +459,9 @@ def _ts_pass2(
     index: dict[str, list[tuple[str, str]]],
 ) -> None:
     source = text.encode("utf-8")
+    g = "tsx" if is_tsx else "ts"
     parser = _parser_tsx() if is_tsx else _parser_ts()
-    tree = parser.parse(source)
+    tree = parse_tree_cached(g, rel, parser, source)
     ctx = _TsCallCtx(store=store, rel=rel, source=source, index=index, stack=[])
     for ch in tree.root_node.children:
         _ts_pass2_statement(ctx, ch, parent_function=None)

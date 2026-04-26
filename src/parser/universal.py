@@ -7,11 +7,12 @@ import re
 from collections import defaultdict
 from typing import Any
 
-from tree_sitter import Language, Node, Parser
+from tree_sitter import Language, Node
 
 from src.graph.store import GraphStore
 from src.parser.hint_loader import MergedHints, load_merged_hints
 from src.parser.memory_graph import MemoryGraphStore
+from src.parser.tree_parse_cache import get_shared_parser, parse_tree_cached
 
 _GraphSink = GraphStore | MemoryGraphStore
 
@@ -22,10 +23,6 @@ def _text(source: bytes, node: Node) -> str:
 
 def _lines_for_node(source: bytes, node: Node) -> int:
     return node.end_point[0] - node.start_point[0] + 1
-
-
-def _parser(lang: Language) -> Parser:
-    return Parser(lang)
 
 
 def ingest_universal_to_store(
@@ -71,7 +68,9 @@ def ingest_universal_to_store(
         return
 
     if m is not None:
-        _ingest_generic_ts_tree(store, rel, text, language, m)
+        _ingest_generic_ts_tree(
+            store, rel, text, language, m, logical_lang=logical_lang
+        )
     return
 
 
@@ -114,7 +113,8 @@ def _ingest_rust(
     store: _GraphSink, rel: str, text: str, language: Language, m: MergedHints
 ) -> None:
     source = text.encode("utf-8")
-    tree = _parser(language).parse(source)
+    p = get_shared_parser("rust", language)
+    tree = parse_tree_cached("rust", rel, p, source)
     root = tree.root_node
     lc = text.count("\n") + 1 if text else 1
     file_id = rel
@@ -315,10 +315,17 @@ def _rust_call_target(
 
 
 def _ingest_generic_ts_tree(
-    store: _GraphSink, rel: str, text: str, language: Language, m: MergedHints
+    store: _GraphSink,
+    rel: str,
+    text: str,
+    language: Language,
+    m: MergedHints,
+    *,
+    logical_lang: str,
 ) -> None:
     source = text.encode("utf-8")
-    root = _parser(language).parse(source).root_node
+    p = get_shared_parser(logical_lang, language)
+    root = parse_tree_cached(logical_lang, rel, p, source).root_node
     lc = text.count("\n") + 1 if text else 1
     file_id = rel
     store.add_node(
@@ -362,14 +369,15 @@ def _guess_decl_name(n: Node, source: bytes) -> str | None:
 
 
 def _count_syntactic_node_types(
-    language: Language | None, text: str
+    grammar: str, language: Language | None, text: str, file_path: str
 ) -> dict[str, int]:
     """Count Tree-sitter node `type` occurrences (full tree) for per-grammar quality."""
-    if not language or not text:
+    if not language or not text or not file_path:
         return {}
     try:
         source = text.encode("utf-8")
-        root = _parser(language).parse(source).root_node
+        p = get_shared_parser(grammar, language)
+        root = parse_tree_cached(grammar, file_path, p, source).root_node
     except (OSError, ValueError, RuntimeError):
         return {}
     c: dict[str, int] = defaultdict(int)
@@ -392,15 +400,11 @@ def parse_stats_for_universal_ingest(
     (``parse_mode``-agnostic; ``is_tsx`` reserved for call sites that care).
     """
     _ = is_tsx  # grammar + ``language`` already identify TSX vs TS parser
-    nodes = [n for n in store.get_all_nodes() if n.file_path == rel]
+    nodes = list(store.iter_nodes_by_file(rel))
+    n_call_edges = store.count_call_edges_for_file(rel)
     n_fn = len([1 for n in nodes if n.type in ("function", "method")])
     n_cl = len([1 for n in nodes if n.type == "class"])
     n_im = len([1 for n in nodes if n.type == "import"])
-    n_e = [
-        1
-        for e in store.get_all_edges()
-        if e.source_id.startswith(rel) and e.relationship == "CALLS"
-    ]
     names = tuple(
         n.name
         for n in nodes
@@ -427,7 +431,10 @@ def parse_stats_for_universal_ingest(
     for n in nodes:
         if n.type == "function" and n.metadata and n.metadata.get("arrow") is True:
             n_arrow_g += 1
-    ctree = _count_syntactic_node_types(language, text) if language else {}
+    ts_gram = f"ts{'x' if is_tsx else ''}" if grammar == "typescript" else grammar
+    ctree = (
+        _count_syntactic_node_types(ts_gram, language, text, rel) if language else {}
+    )
     n_arrow = max(int(ctree.get("arrow_function", 0)), n_arrow_g)
     n_iface = max(n_iface, int(ctree.get("interface_declaration", 0)))
     n_talias = max(n_talias, int(ctree.get("type_alias_declaration", 0)))
@@ -455,7 +462,7 @@ def parse_stats_for_universal_ingest(
         "n_functions": n_fn,
         "n_classes": n_cl,
         "n_imports": n_im,
-        "n_call_edges": len(n_e),
+        "n_call_edges": n_call_edges,
         "n_lines": text.count("\n") + 1 if text else 0,
         "function_class_names": names,
         "n_interface_declaration": n_iface,

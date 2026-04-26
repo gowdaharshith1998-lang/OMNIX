@@ -1,6 +1,7 @@
 {
   "grammar": "generic",
-  "_comment": "Default for grammars without a dedicated profile file. Weights follow the language-agnostic legacy buckets (function/import/calls/names/density) so behavior stays conservative while allowing line_density where signal exists.",
+  "quality_formula_version": 2,
+  "_comment": "Default for grammars without a dedicated profile file. Weights follow the language-agnostic legacy buckets (function/import/calls/names/density) so behavior stays conservative while allowing line_density where signal exists. Phase 14b-2 expected_range uses Ruby (tree_sitter_ruby) codebases, where this profile is the scoring fallback: grammar_profile rows use grammar_name=ruby in the DB, not the string generic.",
   "formula": "weighted_sum",
   "profile_version": 1,
   "weights": {
@@ -10,5 +11,19 @@
     "non_synthetic_names": 0.2,
     "line_density": 0.1
   },
-  "required_minimums": {}
+  "required_minimums": {},
+  "expected_range": {
+    "min": 0.0021,
+    "max": 0.0434,
+    "mean": 0.0215,
+    "std": 0.0148,
+    "n_samples": 5,
+    "samples": [
+      { "name": "rack", "q": 0.0128, "nodes": 102, "commit_sha": "96beb2195901f91c89234d6bc7c464d32ea383c4" },
+      { "name": "puma", "q": 0.0331, "nodes": 337, "commit_sha": "03825bc90fd04dc00dd63d1bf6bf72c224ccbed9" },
+      { "name": "sidekiq", "q": 0.0434, "nodes": 301, "commit_sha": "da0f1988e793e850d21934270584f388d11b0d43" },
+      { "name": "sinatra", "q": 0.0163, "nodes": 155, "commit_sha": "f891dd2b6f4911e356600efe6c3b82af97d262c6" },
+      { "name": "vagrant", "q": 0.0021, "nodes": 1690, "commit_sha": "f9e2630d69a5e357963bba67dd2be8604ef2b82b" }
+    ]
+  }
 }

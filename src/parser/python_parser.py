@@ -10,12 +10,13 @@ import tree_sitter_python as tsp
 
 from src.graph.store import GraphStore
 from src.parser import should_skip_dir
+from src.parser.tree_parse_cache import get_shared_parser, parse_tree_cached
 
 _PY = Language(tsp.language())
 
 
-def _parser() -> Parser:
-    return Parser(_PY)
+def _py_parser() -> Parser:
+    return get_shared_parser("python", _PY)
 
 
 def _text(source: bytes, node: Node) -> str:
@@ -57,7 +58,7 @@ def parse_python_files(root: str, store: GraphStore) -> int:
 def _build_call_index(store: GraphStore) -> dict[str, list[tuple[str, str]]]:
     """Map short function name -> [(node_id, file_path), ...]."""
     by_short: dict[str, list[tuple[str, str]]] = defaultdict(list)
-    for n in store.get_all_nodes():
+    for n in store.iter_all_nodes():
         if n.type not in ("function", "method"):
             continue
         short = n.name.split(".")[-1]
@@ -68,7 +69,8 @@ def _build_call_index(store: GraphStore) -> dict[str, list[tuple[str, str]]]:
 
 def _pass1_definitions(store: GraphStore, rel: str, text: str) -> None:
     source = text.encode("utf-8")
-    tree = _parser().parse(source)
+    p = _py_parser()
+    tree = parse_tree_cached("python", rel, p, source)
     file_id = rel
     lc = text.count("\n") + 1 if text else 1
     store.add_node(
@@ -100,7 +102,8 @@ def _pass2_calls(
     index: dict[str, list[tuple[str, str]]],
 ) -> None:
     source = text.encode("utf-8")
-    tree = _parser().parse(source)
+    p = _py_parser()
+    tree = parse_tree_cached("python", rel, p, source)
     ctx = _CallContext(store=store, rel=rel, source=source, index=index)
     _walk_calls_module(ctx, tree.root_node)
 

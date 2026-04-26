@@ -1,6 +1,7 @@
 {
   "grammar": "python",
-  "_comment": "Matches legacy compute_score: 0.3/0.2/0.2/0.2/0.1 (function, import, call, names, line density with v1 thresholds). AXIOM-V2 aggregate tracks historical ~0.73; no class term because v1 did not reward class.",
+  "quality_formula_version": 2,
+  "_comment": "14b-2+ metadata; public SHAs and q from shallow HEAD + omnix analyze (OMNIX_INGEST_WORKERS=1) 2026-04-25/26. AXIOM-V2 anchor from in-house tree. See docs/QUALITY_PROFILE_BASELINES.md.",
   "formula": "weighted_sum",
   "profile_version": 1,
   "weights": {
@@ -10,5 +11,20 @@
     "non_synthetic_names": 0.2,
     "line_density": 0.1
   },
-  "required_minimums": {}
+  "required_minimums": {},
+  "expected_range": {
+    "min": 0.4512,
+    "max": 0.7074,
+    "mean": 0.6154,
+    "std": 0.0912,
+    "n_samples": 6,
+    "samples": [
+      { "name": "django", "q": 0.4512, "nodes": 44990, "commit_sha": "017d7f6f12e597e6179de7ffdf330a52c2b22053" },
+      { "name": "flask", "q": 0.6542, "nodes": 1487, "commit_sha": "2ac89889f4cc330eabd50f295dcef02828522c69" },
+      { "name": "fastapi", "q": 0.5357, "nodes": 7792, "commit_sha": "b44585589a04a095abf4bf0f1b4526b35ddaeca8" },
+      { "name": "requests", "q": 0.6611, "nodes": 874, "commit_sha": "f43f750ee10addbaa13901c1017631b4d70fd6e3" },
+      { "name": "pytest", "q": 0.7074, "nodes": 7550, "commit_sha": "cd7592c41c40ebc9663c2984447d72e95c731bda" },
+      { "name": "AXIOM-V2", "q": 0.6831, "nodes": 4859, "commit_sha": "dd60430bc3012f830e7d448507ee8a75e61757a2" }
+    ]
+  }
 }

@@ -20,7 +20,7 @@ _TYPE_COLORS: dict[str, str] = {
 def export_json(store: GraphStore, out_path: str) -> dict[str, Any]:
     store.commit()
     nodes_out: list[dict[str, Any]] = []
-    for n in store.get_all_nodes():
+    for n in store.iter_all_nodes():
         line = n.start_line if n.start_line is not None else 0
         nodes_out.append(
             {
@@ -35,7 +35,7 @@ def export_json(store: GraphStore, out_path: str) -> dict[str, Any]:
         )
 
     links_out: list[dict[str, str]] = []
-    for e in store.get_all_edges():
+    for e in store.iter_all_edges():
         links_out.append(
             {
                 "source": e.source_id,

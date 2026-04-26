@@ -24,6 +24,8 @@ def test_no_grammar_skip_reported_in_banner(
         return real(g)
 
     monkeypatch.setattr(gd, "try_load_language_for_grammar", _fake)
+    # Workers run in child processes; monkeypatch only applies in-process (workers=1).
+    monkeypatch.setenv("OMNIX_INGEST_WORKERS", "1")
     (tmp_path / "main.go").write_text("package main\nfunc main() {}\n", encoding="utf-8")
     (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
     store = GraphStore(str(tmp_path / "t.db"))

@@ -599,5 +599,34 @@ OMNIX does **not** ship RPG, PL/I, JCL, or VB6 parsers today. This table is a **
 
 **Grammar status:** not integrated in this repository; `docs/LEGACY_LANGUAGE_SUPPORT.md` describes shipping vs deferred languages.
 
+## Phase 14b-2 — quality profile calibration (2026-04-25)
+
+- **Procedure:** `git clone --depth 1` of each sample into `/tmp/calib-*` (cleared before runs); `OMNIX_INGEST_WORKERS=1` `omnix analyze . --no-open`. Per-codebase &gt;10 min wall time is used only as a *safety valve* (log and continue); 14b-1 speedup made multi-minute ingests the exception, not the rule. Very large codebases (e.g. `moby`/`react`) are included intentionally when they complete within a generous timeout.
+- **Go / kubernetes:** The master 14b prompt still treats **kubernetes** as a manual skip (RAM on commodity hardware). **14b-2** uses **docker** (`github.com/moby/moby` clone) plus **hugo, gin, cobra, prometheus** — *not* `kubernetes/kubernetes`.
+- **Java:** The optional **`tree-sitter-java`** package is *not* an omnix `pyproject` dependency. An early 14b-2 attempt on **spring-framework** / **elasticsearch** (without the pack) produced &lt;20 `nodes` and *no* `java` `grammar_profile` row (`.java` skipped with “grammar not installed”). **After** `pip install tree-sitter-java`, calibration used **gson, guava, junit4, kafka (apache/kafka, shallow clone)**, n=4 — meets P_2_4 n≥3. No fourth Java sample is forced; spring/elasticsearch were *not* used for the final table because the reliable runs were the four above.
+- **C / lodepng / kqueue (dry run):** With `tree_sitter_c` *not* installed, shallow clones produced **0** `nodes` / `grammar_profile` for pure-C samples; C calibration is *not* in 14b-2 until `tree-sitter-c` is available in the environment; **not** a profile weight recalibration (P_2_1 / P_2_2).
+- **generic** `expected_range` is measured on **Ruby** (rack, puma, sidekiq, sinatra, vagrant): **scoring** still uses `generic.json` (no `ruby.json`); **`grammar_name` in the DB** is `ruby` for `observe_parse` aggregates, not the literal `generic`.
+- **No weight recalibration** in 14b-2: only additive `expected_range` metadata and `quality_formula_version: 2` on JSON profiles. **docs/QUALITY_PROFILE_BASELINES.md** lists every sample commit and per-language `mean`/`std`/`n_samples`.
+
+## Phase 14b-3 — incremental re-analyze (Merkle-style) — 2026-04-25
+
+- **State:** `omnix.db` has a `meta` table: `omnix_version`, `schema_version` (e.g. `3`), `profile_hash` (content hash of concatenated sorted `src/parser/quality_profiles/*.json`). `file_paths` that disappear from disk are removed from the graph; per-file content digests skip re-parse when unchanged. Full invalidation logs to stderr: profile bump (“quality profiles updated…”), or version bump (“upgraded from X to Y…”). `--force` bypasses cache.
+- **HALT 14b-3 (sample, `/tmp/scale-django`, 2026-04-25, `OMNIX_INGEST_WORKERS=8`, laptop):** **cold** ~14 s, **warm** (no source changes) ~3.8 s, **`--force`** ~13 s. **Profile / version invalidation:** `tests/graph/test_file_hashes.py` (`test_profile_change_invalidates_cache`, `test_version_bump_invalidates_cache`). **Tests (evolving):** see Phase 14b-4 for current `pytest` count; Merkle + tree-cache tests.
+
+**Backlog (14c / 15+):**
+
+- **Phase 15:** Investigate **generic profile under-crediting** in dynamic-dispatch languages (e.g. Ruby `q` anomaly ~0.02 in some codebases).
+- **Docs:** **TypeScript** and **JavaScript** both use `grammar_name='typescript'` in `grammar_profile` while per-file quality scoring uses the correct per-extension profile; document for operators.
+- **Deps:** **Pin** `tree-sitter-java`, `tree-sitter-go`, `tree-sitter-rust` in `pyproject.toml` (Phase 14c+).
+
+## Phase 14b-4 — Tree-sitter parse LRU + incremental reparse (2026-04-25)
+
+- **Code:** `src/parser/tree_parse_cache.py` — per-process `parse_tree_cached(grammar_id, file_key, parser, source)`; **LRU** upper bound 1000 `(grammar_id, file_key)` entries; `get_shared_parser(grammar, language)`; **identical** bytes reuse the same `Tree` (pass1/pass2/quality counts share one parse). When *bytes* at a key change, the prior `Tree` is used as `old_tree` (Tree-sitter incremental API). **INFO** logging at 101, 200, …, 1000 cache entries (plus `evicted_total`) so a pathological Studio working set is visible *before* hard RSS limits.
+- **Wiring:** `python_parser`, `typescript_parser` (`ts` / `tsx` cache keys), `universal` (rust + generic; `ts`+`is_tsx` in `_count_syntactic`), `ingest_dispatch` `top_level_syntactic_types` (shares the same key as the ingest `rel`).
+- **HALT 14b-4 (min of 20 runs, ~48 KiB Python, tail append, sample laptop):** **full** ≈3.7 ms, **incremental** ≈1.4 ms, **speedup** ≈2.8× (small edits and mid-file changes vary; 50 kiB is mostly noise vs Tree-sitter core cost).
+- **Tests:** `python -m pytest tests/` — **273** passed, 1 skipped. Tree parse cache: `tests/parser/test_tree_incremental.py`.
+- **HALT 14b-final — live profile invalidation (content hash):** *mtime-only* `touch` is **insufficient**; e.g. `echo >> src/parser/quality_profiles/python.json` to append a newline. **Warm** `omnix analyze /tmp/scale-django` ~3.7 s → **after profile byte change** stderr: `OMNIX: quality profiles updated since last analyze, re-parsing all files (one-time cost on first run after upgrade)`; wall ~**15 s** (full re-parse on same tree). `git checkout --` the profile to restore.
+- **Commit message notes (per master review):** include **(a)** 14b-3 *side fix* — `begin_batch` commits to flush implicit transactions from standalone writes before `BEGIN` (14a class bug surfaced by Merkle skip paths). **(b)** 14b-1/parallel: **parallel-8** ~**13.6 s** vs **serial-1** 19.25 s on **Django** (≈28% faster) — prior 14a “parallel regresses on small-file codebases” is addressed by the SQL/batch scoping so IPC is not dominated by main-thread per-file work. **(c)** **14b-4** Tree-sitter LRU + incremental, Studio-oriented cache cap, INFO past 100 entries.
+
 ---
 

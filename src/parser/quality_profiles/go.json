@@ -1,6 +1,7 @@
 {
   "grammar": "go",
-  "_comment": "Go packages use explicit imports, free functions, methods, structs, and small interfaces. Structs and interface types are counted separately because they often live in different files in real codebases.",
+  "quality_formula_version": 2,
+  "_comment": "Go packages use explicit imports, free functions, methods, structs, and small interfaces. Structs and interface types are counted separately because they often live in different files in real codebases. kubernetes/ excluded from 14b-2 sample set (resource-heavy); see baselines doc.",
   "formula": "weighted_sum",
   "profile_version": 1,
   "weights": {
@@ -12,5 +13,19 @@
     "call_edge": 0.1,
     "non_synthetic_names": 0.05
   },
-  "required_minimums": {}
+  "required_minimums": {},
+  "expected_range": {
+    "min": 0.5861,
+    "max": 0.6823,
+    "mean": 0.6354,
+    "std": 0.0387,
+    "n_samples": 5,
+    "samples": [
+      { "name": "moby", "q": 0.5979, "nodes": 113153, "commit_sha": "dc7af7c4e85266089b444ba43daf618a2da2d17b" },
+      { "name": "hugo", "q": 0.6374, "nodes": 8767, "commit_sha": "8920d56e951e872e1eabd08fc34f9c1350fe5da3" },
+      { "name": "gin", "q": 0.6823, "nodes": 1410, "commit_sha": "d3ffc9985281dcf4d3bef604cce4e662b1a327a6" },
+      { "name": "cobra", "q": 0.5861, "nodes": 631, "commit_sha": "ad460ea8f249db69c943a365fb84f3a59042d54e" },
+      { "name": "prometheus", "q": 0.6733, "nodes": 13036, "commit_sha": "ca578101aff0022c64d8a47827de6fcca0a168f2" }
+    ]
+  }
 }

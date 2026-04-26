@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from typing import Any
 
 from src.graph.store import EdgeRow, NodeRow
@@ -73,11 +74,42 @@ class MemoryGraphStore:
         )
         return True
 
+    def iter_all_nodes(self) -> Iterator[NodeRow]:
+        yield from self._nodes.values()
+
+    def iter_all_edges(self) -> Iterator[EdgeRow]:
+        for e in self._edges:
+            yield e
+
+    def iter_nodes_by_file(self, file_path: str) -> Iterator[NodeRow]:
+        for n in self._nodes.values():
+            if n.file_path == file_path:
+                yield n
+
     def get_all_nodes(self) -> list[NodeRow]:
-        return list(self._nodes.values())
+        return list(self.iter_all_nodes())
 
     def get_all_edges(self) -> list[EdgeRow]:
-        return list(self._edges)
+        return list(self.iter_all_edges())
+
+    def count_call_edges_for_file(self, rel: str) -> int:
+        return sum(
+            1
+            for e in self._edges
+            if e.relationship == "CALLS" and e.source_id.startswith(rel)
+        )
+
+    def node_count(self) -> int:
+        return len(self._nodes)
+
+    def edge_count(self) -> int:
+        return len(self._edges)
+
+    def count_nodes(self) -> int:
+        return self.node_count()
+
+    def count_edges(self) -> int:
+        return self.edge_count()
 
     def to_transfer_dicts(self) -> dict[str, list[dict[str, Any]]]:
         """Serialize for IPC (pickle-friendly)."""

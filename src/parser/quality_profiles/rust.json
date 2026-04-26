@@ -1,5 +1,6 @@
 {
   "grammar": "rust",
+  "quality_formula_version": 2,
   "_comment": "Rust sources pair structs with impl blocks, traits, and use declarations. impl_item is heavily weighted as the locus of behavior; call edges and names add runtime signal.",
   "formula": "weighted_sum",
   "profile_version": 1,
@@ -12,5 +13,19 @@
     "call_edge": 0.1,
     "non_synthetic_names": 0.05
   },
-  "required_minimums": {}
+  "required_minimums": {},
+  "expected_range": {
+    "min": 0.5709,
+    "max": 0.8347,
+    "mean": 0.7012,
+    "std": 0.0969,
+    "n_samples": 5,
+    "samples": [
+      { "name": "ripgrep", "q": 0.649, "nodes": 2138, "commit_sha": "4519153e5e461527f4bca45b042fff45c4ec6fb9" },
+      { "name": "alacritty", "q": 0.8347, "nodes": 2197, "commit_sha": "2f03c30283a111bdbfb6ccd7bcb03a6290ba1151" },
+      { "name": "tokio", "q": 0.6612, "nodes": 10274, "commit_sha": "6c03e03898d71eca976ee1ad8481cf112ae722ba" },
+      { "name": "serde", "q": 0.5709, "nodes": 1845, "commit_sha": "fa7da4a93567ed347ad0735c28e439fca688ef26" },
+      { "name": "exa", "q": 0.79, "nodes": 827, "commit_sha": "3d1edbb47052cb416ef9478106c3907586da5150" }
+    ]
+  }
 }

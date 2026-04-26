@@ -1,6 +1,7 @@
 {
   "grammar": "java",
-  "_comment": "Java compilation units are class- and import-centric; interface declarations are less common than methods; weights follow typical single-file class plus import layout.",
+  "quality_formula_version": 2,
+  "_comment": "Java compilation units are class- and import-centric; interface declarations are less common than methods; weights follow typical single-file class plus import layout. Phase 14b-2: samples require `pip install tree-sitter-java` (not in the minimal omnix runtime deps). spring-framework / shallow elasticsearch in an early dry run produced almost no .java in grammar_profile; gson, guava, junit4, and kafka (apache) were used as the four n>=3 codebases with full Java ingests.",
   "formula": "weighted_sum",
   "profile_version": 1,
   "weights": {
@@ -11,5 +12,18 @@
     "call_edge": 0.15,
     "non_synthetic_names": 0.1
   },
-  "required_minimums": {}
+  "required_minimums": {},
+  "expected_range": {
+    "min": 0.6484,
+    "max": 0.7078,
+    "mean": 0.6802,
+    "std": 0.0217,
+    "n_samples": 4,
+    "samples": [
+      { "name": "gson", "q": 0.6756, "nodes": 3637, "commit_sha": "6bf8bf6cbf4d4f5f72f69262be890a5a5e28259d" },
+      { "name": "guava", "q": 0.7078, "nodes": 62069, "commit_sha": "cba9860402b27a017c6cdb69a0650ecc5fc56aaa" },
+      { "name": "junit4", "q": 0.6484, "nodes": 4775, "commit_sha": "300468b1efd48d76fac2f7bd6d576846dcbbf5ed" },
+      { "name": "kafka", "q": 0.6891, "nodes": 80692, "commit_sha": "0dad6a7c9c0a365eed29b62e4331744fab30ccf3" }
+    ]
+  }
 }

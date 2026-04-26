@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
+import sys
 from collections.abc import Iterator
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from tree_sitter import Language, Parser
+from tree_sitter import Language
 
 from src.graph.store import GraphStore
 from src.parser import evolution
@@ -21,9 +24,13 @@ from src.parser.hint_loader import MergedHints, load_merged_hints
 from src.parser.memory_graph import MemoryGraphStore
 from src.parser.quality import compute_score_v2, quality_inputs_from_parsed_stats
 from src.parser.skip_tracking import SkipAggregate
+from src.omnix_version import __version__ as OMNIX_APP_VERSION
+from src.parser.tree_parse_cache import get_shared_parser, parse_tree_cached
 from src.parser.universal import ingest_universal_to_store, parse_stats_for_universal_ingest
 
 _LOG = logging.getLogger("omnix.parser.ingest_dispatch")
+_CACHE_SKIP = "__omnix_cache_skip__"
+SCHEMA_V = "3"
 
 _DEFAULT_MODE = "generic"
 
@@ -77,19 +84,22 @@ def _known_union(m: MergedHints) -> frozenset[str]:
     )
 
 
-def _parser(lang: Language) -> Parser:
-    return Parser(lang)
-
-
 def top_level_syntactic_types(
-    language: Language | None, text: str
+    language: Language | None,
+    text: str,
+    *,
+    file_key: str,
+    grammar_name: str,
+    is_tsx: bool,
 ) -> set[str]:
-    if not language or not text:
+    if not language or not text or not file_key:
         return set()
     try:
         src = text.encode("utf-8")
-        pr = _parser(language).parse(src)
-        rnode = pr.root_node
+        g = f"ts{'x' if is_tsx else ''}" if grammar_name == "typescript" else grammar_name
+        p = get_shared_parser(g, language)
+        t = parse_tree_cached(g, file_key, p, src)
+        rnode = t.root_node
         return {c.type for c in rnode.children if c is not None}
     except (OSError, ValueError, RuntimeError) as e:
         _LOG.debug("top_level_syntactic_types: %s", e)
@@ -102,7 +112,92 @@ class IngestTotals:
     skipped_unknown: int = 0
     skipped_no_grammar: int = 0
     errors: int = 0
+    cached: int = 0
     skip: SkipAggregate = field(default_factory=SkipAggregate)
+
+
+def quality_profile_fingerprint() -> str:
+    """SHA-256 over sorted ``src/parser/quality_profiles/*.json`` (bytes + name order)."""
+    pdir = Path(__file__).resolve().parent / "quality_profiles"
+    acc = bytearray()
+    for fp in sorted(pdir.glob("*.json")):
+        acc += fp.name.encode() + b"\0"
+        acc += fp.read_bytes() + b"\0"
+    return hashlib.sha256(bytes(acc)).hexdigest()
+
+
+def _file_digest(absolute: Path, root: Path) -> tuple[str, str, float] | None:
+    """(rel, sha256_hex, mtime) or None if unreadable."""
+    try:
+        rel = absolute.relative_to(root).as_posix()
+        b = absolute.read_bytes()
+        mtime = absolute.stat().st_mtime
+        h = hashlib.sha256(b).hexdigest()
+        return (rel, h, mtime)
+    except (OSError, ValueError):
+        return None
+
+
+def _digest_path_list(paths: list[Path], root: Path) -> dict[str, tuple[str, float]]:
+    out: dict[str, tuple[str, float]] = {}
+    n_workers = min(12, max(1, (os.cpu_count() or 2) * 2))
+    with ThreadPoolExecutor(max_workers=n_workers) as ex:
+        futs = {ex.submit(_file_digest, p, root): p for p in paths}
+        for fut in as_completed(futs):
+            got = fut.result()
+            if got is None:
+                continue
+            rel, h, mt = got
+            out[rel] = (h, mt)
+    return out
+
+
+def _maybe_invalidate_ingest_cache(
+    store: GraphStore, *, force: bool, new_profile_fp: str, omnix_version: str
+) -> None:
+    if force:
+        print(
+            "OMNIX: --force set, re-parsing all source files and rebuilding graph",
+            file=sys.stderr,
+        )
+        store.full_invalidate_ingest_cache()
+        return
+    c = store.sqlite_connection()
+    n_graph = int(c.execute("SELECT COUNT(*) FROM nodes").fetchone()[0] or 0)
+    n_fh = int(c.execute("SELECT COUNT(*) FROM file_hashes").fetchone()[0] or 0)
+    old_v = store.get_meta("omnix_version")
+    old_p = store.get_meta("profile_hash")
+    if n_graph > 0 and n_fh == 0:
+        print(
+            "OMNIX: no file hash cache in database for existing graph, "
+            "re-parsing all source files (one-time cost after cache upgrade)",
+            file=sys.stderr,
+        )
+        store.full_invalidate_ingest_cache()
+        return
+    if old_v and old_v != omnix_version:
+        print(
+            f"OMNIX: upgraded from {old_v!r} to {omnix_version!r}, "
+            "re-parsing all source files (one-time cost on first run after upgrade)",
+            file=sys.stderr,
+        )
+        store.full_invalidate_ingest_cache()
+        return
+    if n_graph > 0 and not old_p and n_fh > 0:
+        print(
+            "OMNIX: quality profile hash missing in database, re-parsing all files",
+            file=sys.stderr,
+        )
+        store.full_invalidate_ingest_cache()
+        return
+    if n_graph > 0 and old_p and old_p != new_profile_fp:
+        print(
+            "OMNIX: quality profiles updated since last analyze, re-parsing all files "
+            "(one-time cost on first run after upgrade)",
+            file=sys.stderr,
+        )
+        store.full_invalidate_ingest_cache()
+        return
 
 
 def ingest_one_path_parse_only(
@@ -111,8 +206,29 @@ def ingest_one_path_parse_only(
     """
     Pure parse in a worker process (no GraphStore / evolution / skip_summary).
     *job* is ``(order_idx, root, full_path, parse_mode)`` or a 5-tuple with
-    *test_force_basename* (from the parent) for unit tests.
+    *test_force_basename* (from the parent) for unit tests, or 6-tuple
+    *cache skip* (unchanged on-disk vs ``file_hashes``; main process only).
     """
+    if len(job) == 6 and job[5] == _CACHE_SKIP:
+        order_idx, root_s, full_s, _parse_mode_s, _test_force, _x = job
+        root = Path(root_s)
+        full = Path(full_s)
+        try:
+            rel = full.relative_to(root).as_posix()
+        except ValueError as e:
+            return {
+                "order_idx": order_idx,
+                "status": "error",
+                "skip_reason": None,
+                "parse_error": str(e),
+                "rel_path": "",
+            }
+        return {
+            "order_idx": order_idx,
+            "status": "ok",
+            "kind": "unchanged",
+            "rel_path": rel,
+        }
     if len(job) == 4:
         order_idx, root_s, full_s, parse_mode_s = job
         test_force = os.environ.get("OMNIX_TEST_FORCE_PARSE_ERROR_BASENAME")
@@ -263,12 +379,20 @@ def ingest_one_path_parse_only(
         }
 
     snap = mem.to_transfer_dicts()
+    n_snap = len(snap.get("nodes", []))
+    e_snap = len(snap.get("edges", []))
     qgram = _quality_grammar(d.grammar_name, full, d.is_tsx)
     stats = parse_stats_for_universal_ingest(
         mem, rel, text, grammar=d.grammar_name, language=lang, is_tsx=d.is_tsx
     )
     q = compute_score_v2(quality_inputs_from_parsed_stats(stats), qgram)
-    types = top_level_syntactic_types(lang, text)
+    types = top_level_syntactic_types(
+        lang,
+        text,
+        file_key=rel,
+        grammar_name=d.grammar_name,
+        is_tsx=d.is_tsx,
+    )
     return {
         "order_idx": order_idx,
         "status": "ok",
@@ -276,6 +400,8 @@ def ingest_one_path_parse_only(
         "rel_path": rel,
         "text": text,
         "parse_result": snap,
+        "n_snap_nodes": n_snap,
+        "n_snap_edges": e_snap,
         "grammar_name": d.grammar_name,
         "inferred_lang": d.inferred_lang,
         "is_tsx": d.is_tsx,
@@ -286,6 +412,14 @@ def ingest_one_path_parse_only(
     }
 
 
+def _purge_stale_ingest_entry(store: GraphStore, rel: str) -> None:
+    """If *rel* was previously recorded in ``file_hashes``, remove graph and cache row."""
+    if not rel or not store.get_file_hash_row(rel):
+        return
+    store.delete_graph_rows_for_file_path(rel)
+    store.delete_file_hash(rel)
+
+
 def _apply_result_row(
     r: dict[str, Any],
     store: GraphStore,
@@ -294,6 +428,7 @@ def _apply_result_row(
     agg: SkipAggregate | None,
     *,
     n_batch: list[int],
+    file_digests: dict[str, tuple[str, float]] | None = None,
 ) -> None:
     """
     *n_batch* is a single-element list used as a mutable int counter for
@@ -303,6 +438,7 @@ def _apply_result_row(
     """
     st = r.get("status")
     if st == "skip":
+        _purge_stale_ingest_entry(store, str(r.get("rel_path") or ""))
         reason = r["skip_reason"]
         ext_key = r.get("ext_key") or "(no extension)"
         if tot is not None:
@@ -321,6 +457,7 @@ def _apply_result_row(
             agg.record_skip(ext_key, reason, int(r.get("st_size", 0)))
         return
     if st == "error":
+        _purge_stale_ingest_entry(store, str(r.get("rel_path") or ""))
         if tot is not None:
             tot.errors += 1
         is_parse = r.get("skip_reason") == "parse_error" or r.get("parse_error")
@@ -339,6 +476,11 @@ def _apply_result_row(
     if st != "ok":
         return
 
+    if r.get("kind") == "unchanged":
+        if tot is not None:
+            tot.cached += 1
+        return
+
     if r.get("kind") == "empty":
         ku = _known_union(
             load_merged_hints(r["inferred_lang"], parse_mode=r["parse_mode"])
@@ -355,6 +497,10 @@ def _apply_result_row(
         if tot is not None:
             g = r["grammar_name"] or "?"
             tot.by_grammar[g] = tot.by_grammar.get(g, 0) + 1
+        rel0 = r["rel_path"]
+        if file_digests and rel0 in file_digests:
+            s0, m0t = file_digests[rel0]
+            store.set_file_hash(rel0, s0, m0t, node_count=0, edge_count=0)
         return
 
     if r.get("kind") == "graph":
@@ -368,6 +514,7 @@ def _apply_result_row(
             return
         if n_batch[0] == 0:
             store.begin_batch()
+        store.delete_graph_rows_for_file_path(rel)
         pr = r["parse_result"] or {"nodes": [], "edges": []}
         store.import_graph_snapshot(pr.get("nodes", []), pr.get("edges", []))
         n_batch[0] += 1
@@ -393,6 +540,11 @@ def _apply_result_row(
         if tot is not None:
             g = r["grammar_name"] or "?"
             tot.by_grammar[g] = tot.by_grammar.get(g, 0) + 1
+        if file_digests and rel in file_digests:
+            s0, m0t = file_digests[rel]
+            nn = int(r.get("n_snap_nodes", 0) or 0)
+            en = int(r.get("n_snap_edges", 0) or 0)
+            store.set_file_hash(rel, s0, m0t, node_count=nn, edge_count=en)
         return
 
 
@@ -422,6 +574,7 @@ def ingest_one_path(
         None,
         skip_tracker,
         n_batch=n_batch,
+        file_digests=None,
     )
     if n_batch[0] > 0:
         store.commit_batch()
@@ -563,32 +716,87 @@ def _run_ingest_parallel(
     paths: list[Path],
     parse_mode: str | None,
     tot: IngestTotals,
+    *,
+    file_digests: dict[str, tuple[str, float]] | None = None,
+    use_cache: set[int] | None = None,
 ) -> None:
     pm = parse_mode if parse_mode is not None else default_parse_mode()
     n_batch: list[int] = [0]
     test_force = os.environ.get("OMNIX_TEST_FORCE_PARSE_ERROR_BASENAME")
-    jobs = [
-        (i, str(r), str(full), pm, test_force) for i, full in enumerate(paths)
-    ]
+    ucache = use_cache or set()
+    jobs: list[tuple[Any, ...]] = []
+    for i, full in enumerate(paths):
+        t = (i, str(r), str(full), pm, test_force)
+        if i in ucache:
+            t = t + (_CACHE_SKIP,)
+        jobs.append(t)
     n = len(jobs)
     if n == 0:
         return
     for row in _iter_parse_results_in_order(r, paths, jobs):
-        _apply_result_row(row, store, r, tot, tot.skip, n_batch=n_batch)
+        _apply_result_row(
+            row,
+            store,
+            r,
+            tot,
+            tot.skip,
+            n_batch=n_batch,
+            file_digests=file_digests,
+        )
     if n_batch[0] > 0:
         store.commit_batch()
 
 
 def ingest_unified_codebase(
-    target_root: str, store: GraphStore, *, parse_mode: str | None = None
+    target_root: str,
+    store: GraphStore,
+    *,
+    parse_mode: str | None = None,
+    force: bool = False,
+    omnix_version: str = OMNIX_APP_VERSION,
 ) -> IngestTotals:
-    """Full-tree ingest + observation for ``omnix analyze``."""
+    """Full-tree ingest + observation for ``omnix analyze`` (optional Merkle cache)."""
     r = Path(target_root).resolve()
     tot = IngestTotals()
     agg = tot.skip
+    fp = quality_profile_fingerprint()
+    _maybe_invalidate_ingest_cache(
+        store, force=force, new_profile_fp=fp, omnix_version=omnix_version
+    )
     paths = list(iter_dispatch_paths(r, skip_tracker=agg))
-    _run_ingest_parallel(store, r, paths, parse_mode, tot)
+    walked = {p.relative_to(r).as_posix() for p in paths}
+    for pth in list(store.all_file_hash_paths()):
+        if pth not in walked:
+            store.delete_graph_rows_for_file_path(pth)
+            store.delete_file_hash(pth)
+    file_digests = _digest_path_list(paths, r)
+    ucache: set[int] = set()
+    if not force:
+        for i, full in enumerate(paths):
+            rel = full.relative_to(r).as_posix()
+            d = file_digests.get(rel)
+            if not d:
+                continue
+            row = store.get_file_hash_row(rel)
+            if not row:
+                continue
+            h0, m0, _lp, _nn, _en = row
+            if h0 == d[0] and abs(float(m0) - d[1]) < 1e-9:
+                ucache.add(i)
+    _run_ingest_parallel(
+        store,
+        r,
+        paths,
+        parse_mode,
+        tot,
+        file_digests=file_digests,
+        use_cache=ucache,
+    )
     agg.persist(store)
+    store.set_meta("omnix_version", omnix_version)
+    store.set_meta("profile_hash", fp)
+    store.set_meta("schema_version", SCHEMA_V)
+    store.commit()
     return tot
 
 

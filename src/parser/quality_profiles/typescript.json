@@ -1,5 +1,6 @@
 {
   "grammar": "typescript",
+  "quality_formula_version": 2,
   "_comment": "Core (fn/import/call/names/line) matches calibrated .ts/TSX behavior; small interface/type/enum for declaration-only. Build-output .js in .next is excluded in find_bugs/walker, not this profile.",
   "formula": "weighted_sum",
   "profile_version": 1,
@@ -13,5 +14,20 @@
     "type_alias_declaration": 0.04,
     "enum_declaration": 0.02
   },
-  "required_minimums": {}
+  "required_minimums": {},
+  "expected_range": {
+    "min": 0.2757,
+    "max": 0.6461,
+    "mean": 0.4924,
+    "std": 0.1106,
+    "n_samples": 6,
+    "samples": [
+      { "name": "react", "q": 0.4808, "nodes": 31953, "commit_sha": "561ed529b3a6a16e5b2b76fa5ee86c09f959686c" },
+      { "name": "vue", "q": 0.5413, "nodes": 7983, "commit_sha": "3310eea4ececff0379ea657e633e3c18b0f647eb" },
+      { "name": "nestjs", "q": 0.5047, "nodes": 14540, "commit_sha": "8eec029772fa979aa51e782aeb668b8522efd6d5" },
+      { "name": "axios", "q": 0.5059, "nodes": 1473, "commit_sha": "bd3816bf9eaff677c3e278df9b03bcd302e9177b" },
+      { "name": "vite", "q": 0.2757, "nodes": 8188, "commit_sha": "640202a2167b0c19b94e4d3b8ff87309ae1f44d0" },
+      { "name": "AXIOM-V2", "q": 0.6461, "nodes": 4859, "commit_sha": "dd60430bc3012f830e7d448507ee8a75e61757a2" }
+    ]
+  }
 }

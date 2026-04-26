@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -65,11 +67,31 @@ class GraphStore:
                 FOREIGN KEY (source_id) REFERENCES nodes(id),
                 FOREIGN KEY (target_id) REFERENCES nodes(id)
             );
-            CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_id);
+            CREATE INDEX IF NOT EXISTS idx_nodes_file_path ON nodes(file_path);
+            CREATE INDEX IF NOT EXISTS idx_edges_source_id ON edges(source_id);
             CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id);
+            CREATE INDEX IF NOT EXISTS idx_edges_source_rel ON edges(source_id, relationship);
             """
         )
+        # Legacy name; superseded by idx_edges_source_id (keeps existing DBs deduped).
+        self._conn.execute("DROP INDEX IF EXISTS idx_edges_source")
         _evo_schema.apply_evolution_schema(self._conn)
+        self._conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS file_hashes (
+                file_path TEXT PRIMARY KEY,
+                sha256 TEXT NOT NULL,
+                last_modified REAL NOT NULL,
+                last_parsed_at REAL NOT NULL,
+                node_count INTEGER NOT NULL,
+                edge_count INTEGER NOT NULL
+            );
+            """
+        )
         self._conn.commit()
 
     def reset(self) -> None:
@@ -77,6 +99,80 @@ class GraphStore:
             "DELETE FROM skip_summary WHERE 1;"
             "DELETE FROM edges; DELETE FROM nodes;"
         )
+        self._conn.commit()
+
+    def get_meta(self, key: str) -> str | None:
+        r = self._conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return str(r[0]) if r else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+            (key, value),
+        )
+
+    def get_file_hash_row(self, file_path: str) -> tuple[str, float, float, int, int] | None:
+        r = self._conn.execute(
+            "SELECT sha256, last_modified, last_parsed_at, node_count, edge_count "
+            "FROM file_hashes WHERE file_path = ?",
+            (file_path,),
+        ).fetchone()
+        if not r:
+            return None
+        return (
+            str(r[0]),
+            float(r[1]),
+            float(r[2]),
+            int(r[3]),
+            int(r[4]),
+        )
+
+    def set_file_hash(
+        self,
+        file_path: str,
+        sha256: str,
+        last_modified: float,
+        *,
+        node_count: int,
+        edge_count: int,
+    ) -> None:
+        t = time.time()
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO file_hashes
+            (file_path, sha256, last_modified, last_parsed_at, node_count, edge_count)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (file_path, sha256, last_modified, t, node_count, edge_count),
+        )
+
+    def delete_file_hash(self, file_path: str) -> None:
+        self._conn.execute("DELETE FROM file_hashes WHERE file_path = ?", (file_path,))
+
+    def all_file_hash_paths(self) -> list[str]:
+        cur = self._conn.execute("SELECT file_path FROM file_hashes")
+        return [str(x[0]) for x in cur.fetchall()]
+
+    def clear_file_hashes(self) -> None:
+        self._conn.execute("DELETE FROM file_hashes")
+
+    def delete_graph_rows_for_file_path(self, file_path: str) -> None:
+        """Remove nodes (and their edges) whose ``file_path`` is *file_path*."""
+        c = self._conn
+        c.execute("DELETE FROM edges WHERE source_id IN (SELECT id FROM nodes WHERE file_path = ?) OR target_id IN (SELECT id FROM nodes WHERE file_path = ?)", (file_path, file_path))  # noqa: E501
+        c.execute("DELETE FROM nodes WHERE file_path = ?", (file_path,))
+
+    def full_invalidate_ingest_cache(
+        self, *, also_clear_evolution_grammar: bool = True
+    ) -> None:
+        """Wipe graph + per-file cache + skip summary. Optionally reset grammar_profile aggregates."""
+        self._conn.executescript(
+            "DELETE FROM skip_summary WHERE 1;"
+            "DELETE FROM file_hashes WHERE 1;"
+            "DELETE FROM edges; DELETE FROM nodes;"
+        )
+        if also_clear_evolution_grammar:
+            self._conn.execute("DELETE FROM grammar_profile")
         self._conn.commit()
 
     def sqlite_connection(self) -> sqlite3.Connection:
@@ -135,13 +231,38 @@ class GraphStore:
         )
         return True
 
+    def iter_all_nodes(self) -> Iterator[NodeRow]:
+        for r in self._conn.execute("SELECT * FROM nodes"):
+            yield _row_to_node(r)
+
+    def iter_all_edges(self) -> Iterator[EdgeRow]:
+        for r in self._conn.execute("SELECT * FROM edges"):
+            yield _row_to_edge(r)
+
+    def iter_nodes_by_file(self, file_path: str) -> Iterator[NodeRow]:
+        for r in self._conn.execute(
+            "SELECT * FROM nodes WHERE file_path = ?", (file_path,)
+        ):
+            yield _row_to_node(r)
+
     def get_all_nodes(self) -> list[NodeRow]:
-        rows = self._conn.execute("SELECT * FROM nodes").fetchall()
-        return [_row_to_node(r) for r in rows]
+        return list(self.iter_all_nodes())
 
     def get_all_edges(self) -> list[EdgeRow]:
-        rows = self._conn.execute("SELECT * FROM edges").fetchall()
-        return [_row_to_edge(r) for r in rows]
+        return list(self.iter_all_edges())
+
+    def count_call_edges_for_file(self, rel: str) -> int:
+        """Count CALLS edges with ``source_id`` matching Python's ``str.startswith(rel)``."""
+        row = self._conn.execute(
+            """
+            SELECT COUNT(*) FROM edges
+            WHERE relationship = 'CALLS'
+              AND length(source_id) >= length(?)
+              AND substr(source_id, 1, length(?)) = ?
+            """,
+            (rel, rel, rel),
+        ).fetchone()
+        return int(row[0]) if row else 0
 
     def get_neighbors(self, node_id: str) -> list[NodeRow]:
         rows = self._conn.execute(
@@ -177,12 +298,21 @@ class GraphStore:
         row = self._conn.execute("SELECT COUNT(*) FROM edges").fetchone()
         return int(row[0]) if row else 0
 
+    def count_nodes(self) -> int:
+        return self.node_count()
+
+    def count_edges(self) -> int:
+        return self.edge_count()
+
     def commit(self) -> None:
         self._conn.commit()
 
     def begin_batch(self) -> None:
         """Start a single DEFERRED transaction (batch of graph writes)."""
         if not self._open_batch:
+            # End any implicit transaction from standalone operations (e.g. set_file_hash
+            # on an empty/skip path) so BEGIN does not nest.
+            self._conn.commit()
             self._conn.execute("BEGIN")
             self._open_batch = True
 
