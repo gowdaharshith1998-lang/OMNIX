@@ -1,0 +1,69 @@
+/**
+ * OMNIX visual tokens — extracted from analyze viewer (src/web/index.html).
+ * Do not add invented palette values here; keep in sync with the viewer.
+ */
+:root {
+  /* Core canvas (viewer body + COLORS.bg) */
+  --omnix-bg-primary: #020615;
+  --omnix-bg-gradient-end: #0a0f1a;
+
+  /* Glass — .glass on viewer HUD */
+  --omnix-glass-bg: rgba(10, 15, 26, 0.8);
+  --omnix-glass-blur: 12px;
+  --omnix-glass-border: rgba(99, 102, 241, 0.2);
+  --omnix-glass-shadow: 0 0 40px rgba(59, 130, 246, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+  /* Text */
+  --omnix-text-primary: #e2e8f0;
+  --omnix-text-muted: #94a3b8;
+  --omnix-text-dim: #64748b;
+  --omnix-text-sep: #475569;
+  --omnix-border-subtle: rgba(148, 163, 184, 0.2);
+
+  /* Indigos / search focus (match #search-input, grid line hex 0x6366f1) */
+  --omnix-neon-cyan: #22d3ee;
+  --omnix-accent-indigo: #6366f1;
+  --omnix-input-focus-ring: 0 0 18px rgba(99, 102, 241, 0.22);
+
+  /* Stat numerals (stats-panel + stat-dark / stat-entangled inline) */
+  --omnix-stat-mono: #4ade80;
+  --omnix-stat-dark-matter: #8b5cf6;
+  --omnix-stat-entangled: #f59e0b;
+
+  /* X-RAY + rail accent (sb --sb-accent) */
+  --omnix-xray-label: #6366f1;
+  --omnix-rail-accent: #00e5a0;
+
+  /* Left sidebar tokens (—sb-*) */
+  --omnix-sb-bg: #0a0f1a;
+  --omnix-sb-surface: #111a2e;
+  --omnix-sb-border: #1a2540;
+  --omnix-sb-text: #e8edf5;
+  --omnix-sb-muted: #8899b4;
+  --omnix-sb-dim: #556a8a;
+  --omnix-sb-accent: #00e5a0;
+  --omnix-sb-glow: rgba(0, 229, 160, 0.12);
+
+  /* X-ray panel (inline #xray-panel) */
+  --omnix-xray-bg: rgba(2, 6, 21, 0.95);
+  --omnix-xray-border: rgba(99, 102, 241, 0.3);
+
+  /* Search / find controls */
+  --omnix-search-input-bg: rgba(2, 6, 23, 0.65);
+  --omnix-bottom-btn-bg: rgba(30, 41, 59, 0.55);
+  --omnix-bottom-btn-border: rgba(148, 163, 184, 0.25);
+
+  /* Stat title (.stats-title) */
+  --omnix-stats-title: #a78bfa;
+
+  /* Toast / error */
+  --omnix-err: #f87171;
+
+  /* Hex grid: Pixi drawHexGrid lineStyle(1, 0x6366f1, 0.06) */
+  --omnix-hex-line: rgba(99, 102, 241, 0.06);
+
+  /* Fonts (loaded in index.html) */
+  --omnix-font-sans: "Outfit", system-ui, sans-serif;
+  --omnix-font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --omnix-font-display: "Syne", sans-serif;
+}

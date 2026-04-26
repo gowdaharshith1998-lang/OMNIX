@@ -14,6 +14,8 @@ import type { editor } from "monaco-editor";
 type Props = {
   workspaceId: string;
   target: DrillDownTarget;
+  /** X-RAY style badge (e.g. FILE, FUNCTION) — from analyze viewer inline header. */
+  headBadge: string;
   onClose: () => void;
   onToast: (message: string, durationMs?: number) => void;
   /** Bumps when the open file is touched by a live graph delta. */
@@ -23,9 +25,11 @@ type Props = {
 export type DrillDownHandle = { save: () => void };
 
 const tabBtn =
-  "px-2 py-1 text-[10px] uppercase border-b-2 -mb-px transition-colors";
-const tabActive = "border-sky-400 text-white";
-const tabInert = "border-transparent text-studio-muted hover:text-slate-300";
+  "relative px-3 py-2 font-sans text-[10px] font-medium uppercase tracking-wide transition-colors";
+const tabActive =
+  "text-omnix-text-primary [box-shadow:0_1px_0_0_#6366f1,0_0_12px_rgba(99,102,241,0.4)]";
+const tabInert =
+  "text-omnix-text-dim hover:text-omnix-text-muted";
 
 function fileBasename(p: string) {
   const n = p.replace(/\\/g, "/").split("/").pop();
@@ -72,7 +76,7 @@ function loadKey(t: DrillDownTarget) {
 
 export const DrillDown = forwardRef<DrillDownHandle, Props>(
   function DrillDown(
-    { workspaceId, target, onClose, onToast, externalFileEpoch },
+    { workspaceId, target, headBadge, onClose, onToast, externalFileEpoch },
     ref
   ) {
     const [tab, setTab] = useState<"code" | "agent" | "history">("code");
@@ -247,22 +251,41 @@ export const DrillDown = forwardRef<DrillDownHandle, Props>(
         : `${target.name} — ${target.filePath}:${target.lineStart}-${target.lineEnd}`;
 
     return (
-      <div className="flex h-full w-full min-h-0 min-w-0 flex-col border-l border-studio-line bg-studio-panel/90 shadow-xl">
-        <div className="flex shrink-0 items-start justify-between gap-2 border-b border-studio-line px-2 py-1.5">
-          <div className="min-w-0">
-            <div className="font-mono text-[10px] uppercase text-studio-muted">
-              Drill down
+      <div
+        className="flex h-full w-full min-h-0 min-w-0 flex-col border-l border-omnix-accent-indigo/30 bg-[--omnix-xray-bg] shadow-[-8px_0_32px_rgba(0,0,0,0.35)]"
+        id="xray-panel"
+        style={{ backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)" }}
+      >
+        <div className="flex shrink-0 items-start justify-between gap-2 border-b border-omnix-accent-indigo/25 px-4 py-3">
+          <div className="min-w-0 pr-1">
+            <div
+              className="mb-1.5 font-display text-[13px] font-bold tracking-[0.15em] text-omnix-xray-label"
+            >
+              X-RAY
             </div>
             <div
-              className="truncate font-mono text-xs text-slate-200"
+              className="mb-1.5 inline-block rounded border border-omnix-accent-indigo/30 bg-[rgba(99,102,241,0.08)] px-2 py-0.5 font-mono text-[9px] font-medium uppercase tracking-wide text-omnix-stat"
+            >
+              {headBadge}
+            </div>
+            <div
+              className="truncate font-mono text-sm font-semibold text-omnix-text-primary"
               title={headerText}
             >
-              {headerText}
+              {fileBasename(target.mode === "file" ? target.path : target.filePath)}
             </div>
+            {target.mode === "node" && (
+              <div
+                className="mt-0.5 truncate font-mono text-[10px] text-omnix-text-muted"
+                title={headerText}
+              >
+                {headerText}
+              </div>
+            )}
           </div>
           <button
             type="button"
-            className="shrink-0 rounded border border-studio-line px-2 py-0.5 text-[10px] text-slate-400 hover:border-white/30 hover:text-white"
+            className="shrink-0 text-xl leading-none text-omnix-text-dim transition hover:text-omnix-text-primary"
             onClick={onClose}
             aria-label="Close drill down"
           >
@@ -270,7 +293,7 @@ export const DrillDown = forwardRef<DrillDownHandle, Props>(
           </button>
         </div>
 
-        <div className="flex shrink-0 border-b border-studio-line px-1">
+        <div className="flex shrink-0 gap-0 border-b border-omnix-accent-indigo/20 px-1">
           <button
             type="button"
             className={`${tabBtn} ${tab === "code" ? tabActive : tabInert}`}
@@ -297,7 +320,7 @@ export const DrillDown = forwardRef<DrillDownHandle, Props>(
         </div>
 
         {diskStale && (
-          <div className="shrink-0 border-b border-amber-700/50 bg-amber-950/40 px-2 py-1 text-[10px] text-amber-200/90">
+          <div className="shrink-0 border-b border-amber-800/50 bg-amber-950/35 px-3 py-1 text-[10px] text-amber-200/90">
             file changed on disk — reload to discard your edits
           </div>
         )}
@@ -309,13 +332,14 @@ export const DrillDown = forwardRef<DrillDownHandle, Props>(
                 <div className="p-2 text-rose-300/90">Load error: {err}</div>
               )}
               {loading && !err && (
-                <div className="p-2 text-studio-muted">Loading…</div>
+                <div className="p-2 text-omnix-text-dim">Loading…</div>
               )}
               {!loading && !err && (
                 <Editor
                   className="min-h-0 flex-1"
                   key={editorKey}
                   defaultLanguage="plaintext"
+                  theme="omnix-dark"
                   path={path + "?" + editorKey}
                   value={editorValue}
                   onChange={(v) => {
@@ -328,6 +352,7 @@ export const DrillDown = forwardRef<DrillDownHandle, Props>(
                   options={{
                     minimap: { enabled: false },
                     fontSize: 12,
+                    fontFamily: "JetBrains Mono, ui-monospace, monospace",
                     scrollBeyondLastLine: false,
                     automaticLayout: true,
                     wordWrap: "on",
@@ -338,11 +363,11 @@ export const DrillDown = forwardRef<DrillDownHandle, Props>(
           )}
 
           {tab === "agent" && (
-            <div className="p-3 text-studio-muted">Agent comes Day 14</div>
+            <div className="p-3 font-sans text-sm text-omnix-text-dim">Agent comes Day 14</div>
           )}
 
           {tab === "history" && (
-            <div className="p-3 text-studio-muted">History comes Day 16</div>
+            <div className="p-3 font-sans text-sm text-omnix-text-dim">History comes Day 16</div>
           )}
         </div>
       </div>

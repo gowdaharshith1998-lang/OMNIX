@@ -5,6 +5,7 @@ type Props = {
   open: boolean;
   files: FileEntry[];
   filter: string;
+  onFilterChange: (v: string) => void;
   onClose: () => void;
   /** Picked a file; drill-down and file list consumers should use this. */
   onFilePicked: (path: string) => void;
@@ -14,10 +15,12 @@ export function QuickFilePicker({
   open,
   files,
   filter,
+  onFilterChange,
   onClose,
   onFilePicked,
 }: Props) {
   const listRef = useRef<HTMLUListElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const [sel, setSel] = useState(0);
   const q = filter.trim().toLowerCase();
   const rows = useMemo(
@@ -28,6 +31,12 @@ export function QuickFilePicker({
   useEffect(() => {
     setSel(0);
   }, [q, open, rows.length]);
+
+  useEffect(() => {
+    if (open) {
+      queueMicrotask(() => inputRef.current?.focus());
+    }
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -58,32 +67,45 @@ export function QuickFilePicker({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 pt-24"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 pt-20 backdrop-blur-sm"
       onMouseDown={onClose}
     >
       <div
-        className="w-full max-w-lg rounded-lg border border-studio-line bg-studio-panel p-0 shadow-2xl"
+        className="omnix-glass w-full max-w-lg overflow-hidden rounded-xl border border-omnix-accent-indigo/20 shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="Quick file picker"
       >
-        <div className="border-b border-studio-line px-3 py-2 text-xs text-studio-muted">
-          Open file <span className="text-slate-500">— project</span>
+        <div className="border-b border-omnix-accent-indigo/20 px-3 py-2 font-mono text-xs text-omnix-text-muted">
+          open file <span className="text-omnix-text-dim/90">— project</span>
+        </div>
+        <div className="border-b border-omnix-accent-indigo/15 p-2">
+          <input
+            ref={inputRef}
+            className="w-full rounded-md border border-slate-400/20 bg-[rgba(2,6,23,0.5)] px-2 py-1.5 font-mono text-sm text-omnix-text-primary outline-none focus:border-omnix-accent-indigo/65 focus:shadow-omnix-glow-cyan"
+            value={filter}
+            onChange={(e) => onFilterChange(e.target.value)}
+            placeholder="Filter…"
+            spellCheck={false}
+            aria-label="Filter files"
+          />
         </div>
         <ul
           ref={listRef}
-          className="max-h-64 overflow-y-auto text-sm text-slate-200"
+          className="max-h-64 overflow-y-auto text-sm text-omnix-text-primary"
         >
           {rows.length === 0 && (
-            <li className="px-3 py-2 text-studio-muted">No matches</li>
+            <li className="px-3 py-2 text-omnix-text-dim">No matches</li>
           )}
           {rows.map((f, i) => (
             <li key={f.path}>
               <button
                 type="button"
                 className={
-                  "w-full cursor-pointer px-3 py-1.5 text-left font-mono text-xs " +
-                  (i === sel ? "bg-white/10" : "hover:bg-white/5")
+                  "w-full cursor-pointer border-l-2 py-1.5 pl-3 pr-3 text-left font-mono text-xs transition " +
+                  (i === sel
+                    ? "border-omnix-accent-indigo bg-[rgba(99,102,241,0.1)] text-omnix-text-primary shadow-omnix-glow"
+                    : "border-transparent hover:bg-[rgba(99,102,241,0.08)] hover:shadow-omnix-glow")
                 }
                 onClick={() => {
                   onFilePicked(f.path);

@@ -49,37 +49,37 @@ export function NewFileModal({ open, onClose, onCreate }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
       onMouseDown={onClose}
     >
       <div
-        className="w-full max-w-md rounded-lg border border-studio-line bg-studio-panel p-4 shadow-2xl"
+        className="omnix-glass w-full max-w-md rounded-xl border border-omnix-accent-indigo/20 p-4 shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="New file"
       >
-        <h2 className="mb-3 text-sm font-medium text-white">New file</h2>
-        <label className="mb-1 block text-[10px] uppercase text-studio-muted">
+        <h2 className="mb-3 font-sans text-sm font-medium text-omnix-text-primary">New file</h2>
+        <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-omnix-text-muted">
           Path (relative)
         </label>
         <input
-          className="mb-2 w-full rounded border border-studio-line bg-black/30 px-2 py-1 font-mono text-xs text-white outline-none"
+          className="mb-2 w-full rounded-md border border-slate-400/20 bg-[rgba(2,6,23,0.5)] px-2 py-1.5 font-mono text-xs text-omnix-text-primary outline-none focus:border-omnix-accent-indigo/60 focus:shadow-omnix-glow-cyan"
           value={path}
           onChange={(e) => setPath(e.target.value)}
         />
-        <label className="mb-1 block text-[10px] uppercase text-studio-muted">
+        <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-omnix-text-muted">
           Content
         </label>
         <textarea
-          className="mb-3 h-28 w-full resize-none rounded border border-studio-line bg-black/30 p-2 font-mono text-xs text-white outline-none"
+          className="mb-3 h-28 w-full resize-none rounded-md border border-slate-400/20 bg-[rgba(2,6,23,0.5)] p-2 font-mono text-xs text-omnix-text-primary outline-none focus:border-omnix-accent-indigo/60 focus:shadow-omnix-glow-cyan"
           value={content}
           onChange={(e) => setContent(e.target.value)}
         />
-        {err && <p className="mb-2 text-xs text-rose-400">{err}</p>}
+        {err && <p className="mb-2 text-xs text-[--omnix-err]">{err}</p>}
         <div className="flex justify-end gap-2">
           <button
             type="button"
-            className="rounded border border-studio-line px-3 py-1 text-xs text-slate-300 hover:bg-white/5"
+            className="omnix-glass cursor-pointer rounded-md border px-3 py-1 text-xs text-omnix-text-muted transition hover:text-omnix-text-primary"
             onClick={onClose}
           >
             Cancel
@@ -87,7 +87,7 @@ export function NewFileModal({ open, onClose, onCreate }: Props) {
           <button
             type="button"
             disabled={busy}
-            className="rounded border border-sky-600 bg-sky-600/30 px-3 py-1 text-xs text-white hover:bg-sky-500/40 disabled:opacity-50"
+            className="cursor-pointer rounded-md border border-omnix-accent-indigo/60 bg-omnix-accent-indigo/25 px-3 py-1 text-xs text-white transition hover:bg-omnix-accent-indigo/40 disabled:opacity-50"
             onClick={() => void submit()}
           >
             {busy ? "…" : "Create"}

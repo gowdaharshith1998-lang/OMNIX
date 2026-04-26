@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 type Stats = {
   files: number;
   functions: number;
@@ -7,57 +9,68 @@ type Stats = {
   entangled?: number;
 };
 
-type Props = { stats: Stats; wsState: "connecting" | "open" | "closed" | "idle" };
+type Props = { stats: Stats };
 
-function Dot({ ok }: { ok: boolean }) {
-  return (
-    <span
-      className={
-        "ml-1 inline-block h-2 w-2 rounded-full " +
-        (ok ? "bg-emerald-500" : "bg-amber-500")
-      }
-    />
-  );
+const row = "stat-row flex justify-between gap-4 font-mono text-xs leading-tight last:mb-0";
+
+function Label({ children }: { children: ReactNode }) {
+  return <span className="text-omnix-text-muted">{children}</span>;
 }
 
-export function StatsPanel({ stats, wsState }: Props) {
-  const live = wsState === "open";
+export function StatsPanel({ stats }: Props) {
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-studio-line bg-studio-panel/90 px-3 py-2 text-xs text-slate-200 shadow-lg backdrop-blur">
-      <span className="font-mono text-studio-muted">graph</span>
-      <span>
-        files <b className="text-white">{stats.files}</b>
-      </span>
-      <span>
-        fn <b className="text-white">{stats.functions}</b>
-      </span>
-      <span>
-        cls <b className="text-white">{stats.classes}</b>
-      </span>
-      <span>
-        edges <b className="text-white">{stats.edges}</b>
-      </span>
-      {(stats.dark_matter != null || stats.entangled != null) && (
-        <>
-          {stats.dark_matter != null && (
-            <span>
-              DM <b className="text-white">{stats.dark_matter}</b>
+    <div className="omnix-glass pointer-events-auto min-w-[200px] rounded-xl px-4 py-3.5">
+      <div className="mb-2.5 font-display text-[11px] font-bold uppercase tracking-[0.25em] text-[#a78bfa]">
+        graph
+      </div>
+      <div className="space-y-1">
+        <div className={row}>
+          <Label>Files</Label>
+          <span className="text-right" style={{ color: "var(--omnix-stat-mono)" }}>
+            {stats.files}
+          </span>
+        </div>
+        <div className={row}>
+          <Label>Functions</Label>
+          <span className="text-right" style={{ color: "var(--omnix-stat-mono)" }}>
+            {stats.functions}
+          </span>
+        </div>
+        <div className={row}>
+          <Label>Classes</Label>
+          <span className="text-right" style={{ color: "var(--omnix-stat-mono)" }}>
+            {stats.classes}
+          </span>
+        </div>
+        <div className={row}>
+          <Label>Edges</Label>
+          <span className="text-right" style={{ color: "var(--omnix-stat-mono)" }}>
+            {stats.edges}
+          </span>
+        </div>
+        {stats.dark_matter != null && (
+          <div className={row}>
+            <Label>Dark Matter</Label>
+            <span
+              className="text-right"
+              style={{ color: "var(--omnix-stat-dark-matter)" }}
+            >
+              {stats.dark_matter}
             </span>
-          )}
-          {stats.entangled != null && (
-            <span>
-              ent <b className="text-white">{stats.entangled}</b>
+          </div>
+        )}
+        {stats.entangled != null && (
+          <div className={row}>
+            <Label>Entangled</Label>
+            <span
+              className="text-right"
+              style={{ color: "var(--omnix-stat-entangled)" }}
+            >
+              {stats.entangled}
             </span>
-          )}
-        </>
-      )}
-      <span className="border-l border-studio-line pl-3 text-studio-muted">
-        ws
-        <span title={wsState}>
-          <Dot ok={live} />
-        </span>
-        <span className="ml-1 font-mono text-[10px] uppercase">{wsState}</span>
-      </span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

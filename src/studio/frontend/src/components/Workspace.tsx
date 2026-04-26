@@ -6,6 +6,7 @@ import { applyNodeModified } from "@/lib/graphNode";
 import { BottomToolbar } from "./BottomToolbar";
 import { DrillDown, type DrillDownHandle } from "./DrillDown";
 import { FindBar } from "./FindBar";
+import { LeftIconStrip } from "./LeftIconStrip";
 import { NewFileModal } from "./NewFileModal";
 import { QuickFilePicker } from "./QuickFilePicker";
 import { StatsPanel } from "./StatsPanel";
@@ -32,6 +33,24 @@ function isDebugOn() {
     return true;
   }
   return false;
+}
+
+function projectLabel(p: string) {
+  const s = p.replace(/\\/g, "/");
+  const parts = s.split("/").filter(Boolean);
+  return parts.length > 0 ? (parts[parts.length - 1] as string) : s;
+}
+
+function headBadgeFor(
+  t: DrillDownTarget,
+  nodeType: string | undefined
+): string {
+  if (t.mode === "file") return "FILE";
+  const u = (nodeType || "symbol").toLowerCase();
+  if (u.includes("dir")) return "DIRECTORY";
+  if (u === "function" || u === "method") return "FUNCTION";
+  if (u === "class") return "CLASS";
+  return u.replace(/[\s_]+/g, " ").toUpperCase().slice(0, 22);
 }
 
 function recordFromNodePayload(n: Record<string, unknown>): GraphNode | null {
@@ -67,6 +86,7 @@ export function Workspace({
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [picker, setPicker] = useState(false);
   const [newFile, setNewFile] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [graphHint, setGraphHint] = useState<string[]>([]);
   const [drillDownTarget, setDrillDownTarget] = useState<DrillDownTarget | null>(
@@ -258,9 +278,26 @@ export function Workspace({
     setTimeout(() => setToast(null), 2200);
   }, []);
 
+  const pName = projectLabel(projectPath);
+  const headBadge = drillDownTarget
+    ? headBadgeFor(
+        drillDownTarget,
+        drillDownTarget.mode === "node"
+          ? graphNodes.get(drillDownTarget.nodeId)?.type
+          : undefined
+      )
+    : "FILE";
+
+  const stripActive =
+    settingsOpen ? "settings" : picker ? "find" : (null as "find" | "settings" | "project" | null);
+
   useStudioKeybindings({
     drillOpen: drillDownTarget != null,
     onEscape: () => {
+      if (settingsOpen) {
+        setSettingsOpen(false);
+        return true;
+      }
       if (drillDownTarget) {
         closeDrillDown();
         return true;
@@ -282,84 +319,182 @@ export function Workspace({
   });
 
   return (
-    <div className="studio-hex-bg flex h-full flex-col text-slate-200">
-      <header className="flex shrink-0 items-center justify-between gap-2 border-b border-studio-line bg-black/40 px-3 py-2">
-        <div className="min-w-0">
+    <div className="omnix-hex-bg relative h-full min-h-0 w-full pl-12 font-sans text-omnix-text-primary">
+      <LeftIconStrip
+        projectPath={projectPath}
+        active={stripActive}
+        onOpenFind={() => setPicker(true)}
+        onOpenSettings={() => setSettingsOpen((s) => !s)}
+        onProject={async () => {
+          try {
+            await navigator.clipboard.writeText(projectPath);
+            showToastStable("Project path copied", 1500);
+          } catch {
+            showToastStable(projectPath, 3000);
+          }
+        }}
+      />
+
+      {settingsOpen && (
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-[50] border-0 bg-black/50 backdrop-blur-[2px] cursor-default"
+            aria-label="Close settings"
+            onClick={() => setSettingsOpen(false)}
+          />
+          <aside
+            className="fixed left-12 top-0 z-[60] box-border flex h-full w-[min(360px,90vw-3rem)] flex-col border-r border-omnix-sb-border bg-omnix-bg shadow-[8px_0_32px_rgba(0,0,0,0.35)]"
+            aria-label="Settings"
+          >
+            <div className="flex items-center justify-between border-b border-omnix-sb-border px-3 py-2.5">
+              <h2 className="text-sm font-semibold text-omnix-sb-text">Settings</h2>
+              <button
+                type="button"
+                className="h-7 w-7 cursor-pointer rounded border border-omnix-sb-border bg-omnix-panel text-omnix-sb-muted text-base leading-none hover:text-omnix-sb-text"
+                onClick={() => setSettingsOpen(false)}
+                aria-label="Close settings"
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="overflow-auto p-3 text-sm text-omnix-sb-text">
+              <p className="text-omnix-sb-muted">
+                Settings — coming Day 14+ (placeholders, providers, and agent wiring).
+              </p>
+            </div>
+          </aside>
+        </>
+      )}
+
+      <nav
+        className="pointer-events-none fixed left-1/2 top-5 z-[30] w-[min(100%-2rem,720px)] -translate-x-1/2 px-4 text-center"
+        aria-label="Breadcrumb"
+      >
+        <div
+          className="omnix-glass pointer-events-auto mx-auto flex w-max max-w-full items-center justify-center gap-1.5 rounded-full border border-omnix-accent-indigo/25 px-4 py-2 font-mono text-xs"
+          id="breadcrumb"
+        >
           <button
             type="button"
             onClick={onBack}
-            className="mr-2 text-[10px] uppercase text-studio-muted hover:text-white"
+            className="text-omnix-text-muted transition hover:rounded-md hover:bg-[rgba(99,102,241,0.15)] hover:text-omnix-text-primary"
           >
-            ← Back
+            OMNIX
           </button>
-          <span className="truncate font-mono text-xs text-slate-300">
-            {projectPath}
+          <span className="text-omnix-text-sep select-none">›</span>
+          <span
+            className="max-w-[min(50vw,24rem)] truncate text-omnix-text-primary"
+            title={projectPath}
+          >
+            {pName}
           </span>
         </div>
-        <StatsPanel stats={stats} wsState={wsState} />
-      </header>
+      </nav>
 
-      <div className="flex shrink-0 border-b border-studio-line bg-black/20 px-3 py-2">
-        <FindBar value={find} onChange={setFind} />
+      <div className="pointer-events-none fixed right-5 top-5 z-30" aria-label="Graph stats">
+        <StatsPanel stats={stats} />
       </div>
 
-      <div className="relative flex min-h-0 min-w-0 flex-1">
-        <main className="flex min-w-0 min-h-0 flex-1 flex-col p-3">
-          <div className="mb-2 text-[10px] font-mono uppercase text-studio-muted">
-            Graph
-          </div>
-          <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center rounded-lg border-2 border-dashed border-studio-line/80 bg-black/20 p-6">
-            <div className="max-w-md text-center">
-              <p className="text-sm text-slate-300">
-                Graph canvas <span className="text-studio-muted">(Day 10 shell)</span>
-              </p>
-              {graphHint.length > 0 && (
-                <p className="mt-2 font-mono text-xs text-slate-500">
-                  recent: {graphHint.join(" · ")}
-                </p>
-              )}
+      <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
+        <div className="relative min-h-0 w-full min-w-0 flex-1">
+          <main className="flex h-full min-h-0 w-full min-w-0 flex-col p-3 pt-14">
+            <div className="mb-2 text-[10px] font-mono font-medium uppercase tracking-[0.15em] text-omnix-text-dim">
+              graph
             </div>
-          </div>
-        </main>
-
-        <div
-          className={
-            drillDownTarget
-              ? "flex h-full min-h-0 w-[min(32rem,46vw)] min-w-0 max-w-[min(32rem,90vw)] shrink-0 flex-col transition-all duration-200"
-              : "h-full w-0 max-w-0 shrink-0 flex-col overflow-hidden"
-          }
-        >
-          {drillDownTarget && (
-            <DrillDown
-              key={
-                drillDownTarget.mode === "file"
-                  ? "f:" + drillDownTarget.path
-                  : "n:" + drillDownTarget.nodeId
+            <div
+              className={
+                "flex min-h-0 min-w-0 flex-1 items-center justify-center rounded-lg border-2 border-dashed border-omnix-accent-indigo/25 bg-[rgba(2,6,21,0.35)] p-6" +
+                (drillDownTarget
+                  ? " pr-[min(40%,32rem)] transition-[padding] max-md:pr-0"
+                  : "")
               }
-              ref={drillDownRef}
-              workspaceId={workspaceId}
-              target={drillDownTarget}
-              onClose={closeDrillDown}
-              onToast={showToastStable}
-              externalFileEpoch={externalFileEpoch}
-            />
-          )}
+            >
+              <div className="max-w-md text-center">
+                <p className="text-sm text-omnix-text-muted">
+                  Graph canvas <span className="text-omnix-text-dim">(Day 10 shell)</span>
+                </p>
+                {graphHint.length > 0 && (
+                  <p className="mt-2 font-mono text-xs text-omnix-text-dim/90">
+                    recent: {graphHint.join(" · ")}
+                  </p>
+                )}
+                {isDebugOn() && (
+                  <p className="mt-1 font-mono text-[9px] text-omnix-text-dim/70">
+                    ws: {wsState}
+                  </p>
+                )}
+              </div>
+            </div>
+          </main>
+
+          <div
+            className={
+              drillDownTarget
+                ? "pointer-events-auto flex h-full min-h-0 w-[min(40%,32rem)] min-w-0 max-w-[min(40%,90vw)] shrink-0 flex-col border-omnix-sb-border"
+                : "pointer-events-none w-0 max-w-0 shrink-0 overflow-hidden"
+            }
+            style={drillDownTarget ? { position: "absolute", right: 0, top: 0, bottom: 0, zIndex: 25 } : undefined}
+          >
+            {drillDownTarget && (
+              <DrillDown
+                key={
+                  drillDownTarget.mode === "file"
+                    ? "f:" + drillDownTarget.path
+                    : "n:" + drillDownTarget.nodeId
+                }
+                ref={drillDownRef}
+                headBadge={headBadge}
+                workspaceId={workspaceId}
+                target={drillDownTarget}
+                onClose={closeDrillDown}
+                onToast={showToastStable}
+                externalFileEpoch={externalFileEpoch}
+              />
+            )}
+          </div>
         </div>
       </div>
 
-      <BottomToolbar
-        onGraph={() => setToast("Graph tools — next iteration")}
-        onSearch={() => setPicker(true)}
-        onSave={() => {
-          if (drillDownTarget) drillDownRef.current?.save();
-          else onDrillSaveShell();
-        }}
-      />
+      <div
+        className="pointer-events-none fixed bottom-20 left-0 right-0 z-40 flex justify-center px-3 pl-12"
+        role="search"
+        aria-label="Find in project"
+      >
+        <div className="pointer-events-auto w-full max-w-2xl">
+          <FindBar
+            value={find}
+            onChange={setFind}
+            onClear={find ? () => setFind("") : undefined}
+          />
+        </div>
+      </div>
+
+      <div
+        className="pointer-events-none fixed bottom-5 left-0 right-0 z-40 flex justify-center px-3 pl-12"
+        aria-label="OMNIX toolbar"
+      >
+        <div className="pointer-events-auto w-full max-w-5xl">
+          <BottomToolbar
+            onDarkMatter={() => {
+              showToastStable("Dark matter — with graph (Day 11+)", 2000);
+            }}
+            onTimeline={() => {
+              showToastStable("Timeline — with graph (Day 11+)", 2000);
+            }}
+            onExportJson={() => {
+              showToastStable("Export graph JSON — with graph (Day 11+)", 2000);
+            }}
+          />
+        </div>
+      </div>
 
       <QuickFilePicker
         open={picker}
         files={files}
         filter={find}
+        onFilterChange={setFind}
         onClose={() => setPicker(false)}
         onFilePicked={(p) => {
           openDrillDownFile(p);
@@ -375,7 +510,9 @@ export function Workspace({
       />
 
       {toast && (
-        <div className="pointer-events-none fixed bottom-12 left-1/2 z-[60] -translate-x-1/2 rounded border border-studio-line bg-studio-panel px-3 py-1.5 text-xs text-slate-200 shadow-lg">
+        <div
+          className="omnix-glass pointer-events-none fixed bottom-12 left-1/2 z-[60] -translate-x-1/2 rounded-md border border-omnix-accent-indigo/25 px-3 py-1.5 text-xs text-omnix-text-primary shadow-omnix-glass"
+        >
           {toast}
         </div>
       )}

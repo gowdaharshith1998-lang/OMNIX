@@ -48,7 +48,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-full bg-studio-deep text-slate-200">
+    <div className="omnix-hex-bg min-h-full text-omnix-text-primary">
       {err && (
         <div className="bg-rose-900/50 px-3 py-1 text-center text-xs text-rose-200">
           {err}
