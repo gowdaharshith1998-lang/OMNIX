@@ -1,0 +1,52 @@
+/**
+ * Global Studio keyboard policy: Esc priority, Cmd+P, Cmd+S, Cmd+N.
+ * Cmd+S: when the drill-down is open, the caller should save the editor
+ * (via ref); when closed, a shell no-op (toast) can be shown.
+ */
+
+import { useEffect, useRef } from "react";
+
+function isMod(e: KeyboardEvent) {
+  return e.metaKey || e.ctrlKey;
+}
+
+export function useStudioKeybindings(opts: {
+  drillOpen: boolean;
+  onEscape: () => boolean;
+  onTogglePicker: () => void;
+  onNewFile: () => void;
+  onCmdSWhenNoDrill: () => void;
+  onSaveDrill: () => void;
+}) {
+  const ref = useRef(opts);
+  ref.current = opts;
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      const o = ref.current;
+      if (e.key === "Escape") {
+        if (o.onEscape()) e.preventDefault();
+        return;
+      }
+      if (!isMod(e)) return;
+      const k = e.key.toLowerCase();
+      if (k === "p") {
+        e.preventDefault();
+        o.onTogglePicker();
+        return;
+      }
+      if (k === "n") {
+        e.preventDefault();
+        o.onNewFile();
+        return;
+      }
+      if (k === "s") {
+        e.preventDefault();
+        if (o.drillOpen) o.onSaveDrill();
+        else o.onCmdSWhenNoDrill();
+        return;
+      }
+    };
+    window.addEventListener("keydown", h, true);
+    return () => window.removeEventListener("keydown", h, true);
+  }, []);
+}

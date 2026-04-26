@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FileEntry } from "@/lib/api";
 
 type Props = {
@@ -6,7 +6,8 @@ type Props = {
   files: FileEntry[];
   filter: string;
   onClose: () => void;
-  onPick: (path: string) => void;
+  /** Picked a file; drill-down and file list consumers should use this. */
+  onFilePicked: (path: string) => void;
 };
 
 export function QuickFilePicker({
@@ -14,24 +15,44 @@ export function QuickFilePicker({
   files,
   filter,
   onClose,
-  onPick,
+  onFilePicked,
 }: Props) {
   const listRef = useRef<HTMLUListElement>(null);
+  const [sel, setSel] = useState(0);
   const q = filter.trim().toLowerCase();
   const rows = useMemo(
     () =>
       files.filter((f) => f.path.toLowerCase().includes(q)).slice(0, 50),
     [files, q]
   );
+  useEffect(() => {
+    setSel(0);
+  }, [q, open, rows.length]);
 
   useEffect(() => {
     if (!open) return;
     const h = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSel((i) => Math.min(rows.length - 1, i + 1));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSel((i) => Math.max(0, i - 1));
+        return;
+      }
+      if (e.key === "Enter" && rows[sel]) {
+        e.preventDefault();
+        onFilePicked(rows[sel].path);
+        onClose();
+        return;
+      }
     };
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-  }, [open, onClose]);
+    window.addEventListener("keydown", h, true);
+    return () => window.removeEventListener("keydown", h, true);
+  }, [open, onClose, onFilePicked, rows, sel]);
 
   if (!open) return null;
 
@@ -56,15 +77,19 @@ export function QuickFilePicker({
           {rows.length === 0 && (
             <li className="px-3 py-2 text-studio-muted">No matches</li>
           )}
-          {rows.map((f) => (
+          {rows.map((f, i) => (
             <li key={f.path}>
               <button
                 type="button"
-                className="w-full cursor-pointer px-3 py-1.5 text-left font-mono text-xs hover:bg-white/5"
+                className={
+                  "w-full cursor-pointer px-3 py-1.5 text-left font-mono text-xs " +
+                  (i === sel ? "bg-white/10" : "hover:bg-white/5")
+                }
                 onClick={() => {
-                  onPick(f.path);
+                  onFilePicked(f.path);
                   onClose();
                 }}
+                onMouseEnter={() => setSel(i)}
               >
                 {f.path}
               </button>

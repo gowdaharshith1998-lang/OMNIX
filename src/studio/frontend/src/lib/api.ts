@@ -80,12 +80,38 @@ export async function createFile(
   if (!r.ok) throw new Error("create file");
 }
 
+export type FileGetResult = {
+  path: string;
+  content: string;
+  last_modified: number;
+  language: string;
+};
+
+export async function getFile(
+  workspaceId: string,
+  path: string
+): Promise<FileGetResult> {
+  const q = new URLSearchParams({ path });
+  const r = await fetch(
+    `/api/workspace/${encodeURIComponent(workspaceId)}/file?${q}`
+  );
+  if (!r.ok) throw new Error("get file");
+  return r.json() as Promise<FileGetResult>;
+}
+
+export class FileConflictError extends Error {
+  constructor() {
+    super("stale");
+    this.name = "FileConflictError";
+  }
+}
+
 export async function putFile(
   workspaceId: string,
   path: string,
   content: string,
   expectedLastModified: number
-): Promise<void> {
+): Promise<{ written: boolean; new_last_modified: number }> {
   const r = await fetch(
     `/api/workspace/${encodeURIComponent(workspaceId)}/file`,
     {
@@ -98,6 +124,10 @@ export async function putFile(
       }),
     }
   );
-  if (r.status === 409) throw new Error("stale");
+  if (r.status === 409) throw new FileConflictError();
   if (!r.ok) throw new Error("save");
+  return r.json() as Promise<{
+    written: boolean;
+    new_last_modified: number;
+  }>;
 }

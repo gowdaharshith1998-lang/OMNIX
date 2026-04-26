@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createFile, listFiles, type FileEntry } from "@/lib/api";
 import { StudioWebSocket } from "@/lib/ws";
+import { useStudioKeybindings } from "@/lib/keybindings";
+import { applyNodeModified } from "@/lib/graphNode";
 import { BottomToolbar } from "./BottomToolbar";
-import { DrillDown } from "./DrillDown";
+import { DrillDown, type DrillDownHandle } from "./DrillDown";
 import { FindBar } from "./FindBar";
 import { NewFileModal } from "./NewFileModal";
 import { QuickFilePicker } from "./QuickFilePicker";
 import { StatsPanel } from "./StatsPanel";
+import type { DrillDownTarget, GraphNode } from "@/types/drilldown";
 
 type Props = {
   workspaceId: string;
@@ -22,8 +25,27 @@ type Props = {
 
 type WsState = "idle" | "connecting" | "open" | "closed";
 
-function isMod(e: KeyboardEvent) {
-  return e.metaKey || e.ctrlKey;
+function isDebugOn() {
+  if (import.meta.env.DEV) return true;
+  if (import.meta.env.VITE_OMNIX_STUDIO_DEBUG === "1") return true;
+  if (new URLSearchParams(window.location.search).get("debug") === "1") {
+    return true;
+  }
+  return false;
+}
+
+function recordFromNodePayload(n: Record<string, unknown>): GraphNode | null {
+  if (typeof n.id !== "string" || typeof n.name !== "string" || typeof n.type !== "string") {
+    return null;
+  }
+  return {
+    id: n.id,
+    name: n.name,
+    type: n.type,
+    file_path: typeof n.file_path === "string" ? n.file_path : null,
+    line_start: typeof n.line_start === "number" ? n.line_start : 0,
+    line_end: typeof n.line_end === "number" ? n.line_end : 0,
+  };
 }
 
 export function Workspace({
@@ -47,12 +69,31 @@ export function Workspace({
   const [newFile, setNewFile] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [graphHint, setGraphHint] = useState<string[]>([]);
-  const [sel, setSel] = useState<{
-    id: string;
-    name: string;
-    type: string;
-    file_path?: string | null;
-  } | null>(null);
+  const [drillDownTarget, setDrillDownTarget] = useState<DrillDownTarget | null>(
+    null
+  );
+  const [graphNodes, setGraphNodes] = useState<Map<string, GraphNode>>(
+    () => new Map()
+  );
+  const [externalFileEpoch, setExternalFileEpoch] = useState(0);
+
+  const graphNodesRef = useRef(graphNodes);
+  useEffect(() => {
+    graphNodesRef.current = graphNodes;
+  }, [graphNodes]);
+
+  const drillDownRef = useRef<DrillDownHandle | null>(null);
+  const drillFileRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!drillDownTarget) {
+      drillFileRef.current = null;
+      return;
+    }
+    drillFileRef.current =
+      drillDownTarget.mode === "file"
+        ? drillDownTarget.path
+        : drillDownTarget.filePath;
+  }, [drillDownTarget]);
 
   const refreshFiles = useCallback(async () => {
     try {
@@ -65,6 +106,31 @@ export function Workspace({
   useEffect(() => {
     void refreshFiles();
   }, [refreshFiles]);
+
+  const openDrillDownFile = useCallback((p: string) => {
+    setDrillDownTarget({ mode: "file", path: p });
+  }, []);
+
+  const openDrillDownNode = useCallback((nodeId: string) => {
+    const n = graphNodesRef.current.get(nodeId);
+    if (!n || !n.file_path) {
+      // eslint-disable-next-line no-console
+      console.error("node not found:", nodeId);
+      return;
+    }
+    setDrillDownTarget({
+      mode: "node",
+      nodeId: n.id,
+      filePath: n.file_path,
+      lineStart: n.line_start,
+      lineEnd: n.line_end,
+      name: n.name,
+    });
+  }, []);
+
+  const closeDrillDown = useCallback(() => {
+    setDrillDownTarget(null);
+  }, []);
 
   useEffect(() => {
     const c = new StudioWebSocket(
@@ -81,16 +147,50 @@ export function Workspace({
           });
         }
         if (msg.type === "node_added" && msg.node && typeof msg.node === "object") {
-          const n = msg.node as Record<string, unknown>;
-          if (typeof n.id === "string" && typeof n.name === "string" && typeof n.type === "string") {
-            setSel({
-              id: n.id,
-              name: n.name,
-              type: n.type,
-              file_path: (n.file_path as string) ?? null,
+          const rec = recordFromNodePayload(
+            msg.node as Record<string, unknown>
+          );
+          if (rec) {
+            setGraphNodes((prev) => {
+              const next = new Map(prev);
+              next.set(rec.id, rec);
+              return next;
             });
-            setGraphHint((h) => [String(n.name), ...h].slice(0, 5));
+            setGraphHint((h) => [String(rec.name), ...h].slice(0, 5));
+            if (rec.file_path === drillFileRef.current) {
+              queueMicrotask(() =>
+                setExternalFileEpoch((e) => e + 1)
+              );
+            }
           }
+        }
+        if (msg.type === "node_modified" && msg.node_id) {
+          const nid = String(msg.node_id);
+          const ch = msg.changes as
+            | Record<string, { old?: unknown; new?: unknown }>
+            | undefined;
+          setGraphNodes((prev) => {
+            const next = new Map(prev);
+            const cur = next.get(nid);
+            if (cur) {
+              const u = applyNodeModified(cur, ch);
+              next.set(nid, u);
+              if (u.file_path === drillFileRef.current) {
+                queueMicrotask(() =>
+                  setExternalFileEpoch((e) => e + 1)
+                );
+              }
+            }
+            return next;
+          });
+        }
+        if (msg.type === "node_removed" && msg.node_id) {
+          const id = String(msg.node_id);
+          setGraphNodes((prev) => {
+            const next = new Map(prev);
+            next.delete(id);
+            return next;
+          });
         }
         if (msg.type === "file_added" && typeof msg.path === "string") {
           void refreshFiles();
@@ -107,30 +207,79 @@ export function Workspace({
   }, [workspaceId, refreshFiles]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setPicker(false);
-        setNewFile(false);
-      }
-      if (!isMod(e)) return;
-      const k = e.key.toLowerCase();
-      if (k === "p") {
-        e.preventDefault();
-        setPicker((p) => !p);
-      }
-      if (k === "n") {
-        e.preventDefault();
-        setNewFile(true);
-      }
-      if (k === "s") {
-        e.preventDefault();
-        setToast("No editor file open (shell)");
-        setTimeout(() => setToast(null), 2200);
-      }
+    if (drillDownTarget?.mode !== "node") return;
+    const id = drillDownTarget.nodeId;
+    const inMap = graphNodes.get(id);
+    if (!inMap) return;
+    if (
+      inMap.line_start !== drillDownTarget.lineStart ||
+      inMap.line_end !== drillDownTarget.lineEnd
+    ) {
+      setDrillDownTarget((prev) => {
+        if (!prev || prev.mode !== "node" || prev.nodeId !== id) return prev;
+        return {
+          ...prev,
+          lineStart: inMap.line_start,
+          lineEnd: inMap.line_end,
+        };
+      });
+    }
+  }, [drillDownTarget, graphNodes]);
+
+  useEffect(() => {
+    if (!isDebugOn()) return;
+    (window as unknown as { __omnix_select_node?: (id: string) => void })
+      .__omnix_select_node = (nodeId: string) => {
+      openDrillDownNode(nodeId);
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line no-console
+    console.info("debug: window.__omnix_select_node(nodeId) ready");
+    return () => {
+      const w = window as unknown as { __omnix_select_node?: unknown };
+      if (w.__omnix_select_node) delete w.__omnix_select_node;
+    };
+  }, [openDrillDownNode]);
+
+  const showToastStable = useCallback(
+    (message: string, durationMs?: number) => {
+      setToast(message);
+      setTimeout(
+        () => {
+          setToast((t) => (t === message ? null : t));
+        },
+        durationMs ?? (message === "saved" ? 1000 : 2200)
+      );
+    },
+    []
+  );
+
+  const onDrillSaveShell = useCallback(() => {
+    setToast("No editor file open (shell)");
+    setTimeout(() => setToast(null), 2200);
   }, []);
+
+  useStudioKeybindings({
+    drillOpen: drillDownTarget != null,
+    onEscape: () => {
+      if (drillDownTarget) {
+        closeDrillDown();
+        return true;
+      }
+      if (newFile) {
+        setNewFile(false);
+        return true;
+      }
+      if (picker) {
+        setPicker(false);
+        return true;
+      }
+      return false;
+    },
+    onTogglePicker: () => setPicker((p) => !p),
+    onNewFile: () => setNewFile(true),
+    onCmdSWhenNoDrill: onDrillSaveShell,
+    onSaveDrill: () => drillDownRef.current?.save(),
+  });
 
   return (
     <div className="studio-hex-bg flex h-full flex-col text-slate-200">
@@ -154,12 +303,12 @@ export function Workspace({
         <FindBar value={find} onChange={setFind} />
       </div>
 
-      <div className="flex min-h-0 flex-1">
-        <main className="flex min-w-0 flex-1 flex-col p-3">
+      <div className="relative flex min-h-0 min-w-0 flex-1">
+        <main className="flex min-w-0 min-h-0 flex-1 flex-col p-3">
           <div className="mb-2 text-[10px] font-mono uppercase text-studio-muted">
             Graph
           </div>
-          <div className="flex min-h-0 flex-1 items-center justify-center rounded-lg border-2 border-dashed border-studio-line/80 bg-black/20 p-6">
+          <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center rounded-lg border-2 border-dashed border-studio-line/80 bg-black/20 p-6">
             <div className="max-w-md text-center">
               <p className="text-sm text-slate-300">
                 Graph canvas <span className="text-studio-muted">(Day 10 shell)</span>
@@ -172,15 +321,38 @@ export function Workspace({
             </div>
           </div>
         </main>
-        <DrillDown node={sel} />
+
+        <div
+          className={
+            drillDownTarget
+              ? "flex h-full min-h-0 w-[min(32rem,46vw)] min-w-0 max-w-[min(32rem,90vw)] shrink-0 flex-col transition-all duration-200"
+              : "h-full w-0 max-w-0 shrink-0 flex-col overflow-hidden"
+          }
+        >
+          {drillDownTarget && (
+            <DrillDown
+              key={
+                drillDownTarget.mode === "file"
+                  ? "f:" + drillDownTarget.path
+                  : "n:" + drillDownTarget.nodeId
+              }
+              ref={drillDownRef}
+              workspaceId={workspaceId}
+              target={drillDownTarget}
+              onClose={closeDrillDown}
+              onToast={showToastStable}
+              externalFileEpoch={externalFileEpoch}
+            />
+          )}
+        </div>
       </div>
 
       <BottomToolbar
         onGraph={() => setToast("Graph tools — next iteration")}
         onSearch={() => setPicker(true)}
         onSave={() => {
-          setToast("No editor file open (shell)");
-          setTimeout(() => setToast(null), 2200);
+          if (drillDownTarget) drillDownRef.current?.save();
+          else onDrillSaveShell();
         }}
       />
 
@@ -189,9 +361,8 @@ export function Workspace({
         files={files}
         filter={find}
         onClose={() => setPicker(false)}
-        onPick={(p) => {
-          setToast(`Picked ${p} (open in editor — next)`);
-          setTimeout(() => setToast(null), 2400);
+        onFilePicked={(p) => {
+          openDrillDownFile(p);
         }}
       />
       <NewFileModal
@@ -204,7 +375,7 @@ export function Workspace({
       />
 
       {toast && (
-        <div className="fixed bottom-12 left-1/2 z-[60] -translate-x-1/2 rounded border border-studio-line bg-studio-panel px-3 py-1.5 text-xs text-slate-200 shadow-lg">
+        <div className="pointer-events-none fixed bottom-12 left-1/2 z-[60] -translate-x-1/2 rounded border border-studio-line bg-studio-panel px-3 py-1.5 text-xs text-slate-200 shadow-lg">
           {toast}
         </div>
       )}
