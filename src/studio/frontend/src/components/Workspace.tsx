@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GraphCanvas, type GraphCanvasHandle } from "./Graph/GraphCanvas";
 import { createFile, listFiles, type FileEntry } from "@/lib/api";
+import { isT1Mode } from "@/lib/t1Mode";
 import { StudioWebSocket } from "@/lib/ws";
 import { useStudioKeybindings } from "@/lib/keybindings";
 import { BottomToolbar } from "./BottomToolbar";
@@ -33,13 +34,6 @@ function isDebugOn() {
     return true;
   }
   return false;
-}
-
-/** Bundled JSON + full T1 drill — only when `?t1=1` (or VITE_OMNIX_T1). Default URL uses live WS only. */
-function isT1Mode() {
-  if (import.meta.env.VITE_OMNIX_T1 === "1") return true;
-  if (typeof window === "undefined") return false;
-  return new URLSearchParams(window.location.search).get("t1") === "1";
 }
 
 function projectLabel(p: string) {

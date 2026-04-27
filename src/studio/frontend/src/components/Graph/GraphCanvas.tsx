@@ -6,6 +6,7 @@ import {
 } from "react";
 import { OmnixDomStubs } from "./OmnixDomStubs";
 import { recordFromGraphPayload } from "@/lib/graphNode";
+import { isT1Mode } from "@/lib/t1Mode";
 import type { GraphNode } from "@/types/drilldown";
 import { StudioGraph, type StudioGraphOptions } from "./StudioGraph";
 
@@ -21,12 +22,6 @@ type Props = {
   /** T1: merge static `graph_data*.json` nodes so DrillDown can resolve function/class id → file + lines. */
   onT1GraphNodes?: (nodes: GraphNode[]) => void;
 };
-
-function isT1Mode() {
-  if (import.meta.env.VITE_OMNIX_T1 === "1") return true;
-  if (typeof window === "undefined") return false;
-  return new URLSearchParams(window.location.search).get("t1") === "1";
-}
 
 /**
  * React mount for the transplanted analyze viewer. Graphics are in StudioGraph / viewerEngine.
@@ -86,6 +81,9 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
         },
         get onDeselect() {
           return optionsRef.current.onDeselect;
+        },
+        get onDrilldownCatalog() {
+          return t1OnNodesRef.current;
         },
       } as StudioGraphOptions);
       graphRef.current = g;
