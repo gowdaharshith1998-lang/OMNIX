@@ -3,7 +3,6 @@ import { GraphCanvas, type GraphCanvasHandle } from "./Graph/GraphCanvas";
 import { createFile, listFiles, type FileEntry } from "@/lib/api";
 import { StudioWebSocket } from "@/lib/ws";
 import { useStudioKeybindings } from "@/lib/keybindings";
-import { applyNodeModified, recordFromGraphPayload } from "@/lib/graphNode";
 import { BottomToolbar } from "./BottomToolbar";
 import { DrillDown, type DrillDownHandle } from "./DrillDown";
 import { FindBar } from "./FindBar";
@@ -36,6 +35,13 @@ function isDebugOn() {
   return false;
 }
 
+/** Bundled JSON + full T1 drill — only when `?t1=1` (or VITE_OMNIX_T1). Default URL uses live WS only. */
+function isT1Mode() {
+  if (import.meta.env.VITE_OMNIX_T1 === "1") return true;
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("t1") === "1";
+}
+
 function projectLabel(p: string) {
   const s = p.replace(/\\/g, "/");
   const parts = s.split("/").filter(Boolean);
@@ -62,7 +68,7 @@ export function Workspace({
   onBack,
 }: Props) {
   const [find, setFind] = useState("");
-  const [stats, setStats] = useState({
+  const [stats] = useState({
     files: initialStats.files,
     functions: initialStats.functions,
     classes: initialStats.classes,
@@ -76,14 +82,14 @@ export function Workspace({
   const [newFile, setNewFile] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [graphHint, setGraphHint] = useState<string[]>([]);
+  const [graphHint] = useState<string[]>([]);
   const [drillDownTarget, setDrillDownTarget] = useState<DrillDownTarget | null>(
     null
   );
   const [graphNodes, setGraphNodes] = useState<Map<string, GraphNode>>(
     () => new Map()
   );
-  const [externalFileEpoch, setExternalFileEpoch] = useState(0);
+  const [externalFileEpoch] = useState(0);
 
   const graphNodesRef = useRef(graphNodes);
   const graphRef = useRef<GraphCanvasHandle | null>(null);
@@ -152,79 +158,30 @@ export function Workspace({
   }, []);
 
   useEffect(() => {
+    if (isT1Mode()) return;
+
     const c = new StudioWebSocket(
       workspaceId,
       (msg) => {
         graphRef.current?.ingestMessage(msg);
-        if (msg.type === "stats" && typeof msg.files === "number") {
-          setStats({
-            files: msg.files as number,
-            functions: msg.functions as number,
-            classes: msg.classes as number,
-            edges: msg.edges as number,
-            dark_matter: (msg.dark_matter as number) ?? 0,
-            entangled: (msg.entangled as number) ?? 0,
-          });
-        }
-        if (msg.type === "node_added" && msg.node && typeof msg.node === "object") {
-          const rec = recordFromGraphPayload(
-            msg.node as Record<string, unknown>
-          );
-          if (rec) {
-            setGraphNodes((prev) => {
-              const next = new Map(prev);
-              next.set(rec.id, rec);
-              return next;
-            });
-            setGraphHint((h) => [String(rec.name), ...h].slice(0, 5));
-            if (rec.file_path === drillFileRef.current) {
-              queueMicrotask(() =>
-                setExternalFileEpoch((e) => e + 1)
-              );
-            }
-          }
-        }
-        if (msg.type === "node_modified" && msg.node_id) {
-          const nid = String(msg.node_id);
-          const ch = msg.changes as
-            | Record<string, { old?: unknown; new?: unknown }>
-            | undefined;
-          setGraphNodes((prev) => {
-            const next = new Map(prev);
-            const cur = next.get(nid);
-            if (cur) {
-              const u = applyNodeModified(cur, ch);
-              next.set(nid, u);
-              if (u.file_path === drillFileRef.current) {
-                queueMicrotask(() =>
-                  setExternalFileEpoch((e) => e + 1)
-                );
-              }
-            }
-            return next;
-          });
-        }
-        if (msg.type === "node_removed" && msg.node_id) {
-          const id = String(msg.node_id);
-          setGraphNodes((prev) => {
-            const next = new Map(prev);
-            next.delete(id);
-            return next;
-          });
-        }
-        if (msg.type === "file_added" && typeof msg.path === "string") {
-          void refreshFiles();
-        }
       },
       (s) => {
         if (s === "connecting") setWsState("connecting");
-        if (s === "open") setWsState("open");
+        if (s === "open") {
+          // eslint-disable-next-line no-console
+          console.log("[t2-slice1] ws open");
+          setWsState("open");
+        }
         if (s === "closed") setWsState("closed");
+      },
+      (code) => {
+        // eslint-disable-next-line no-console
+        console.log("[t2-slice1] ws close", code);
       }
     );
     c.connect();
     return () => c.close();
-  }, [workspaceId, refreshFiles]);
+  }, [workspaceId]);
 
   useEffect(() => {
     if (drillDownTarget?.mode !== "node") return;

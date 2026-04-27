@@ -46,9 +46,77 @@ export class StudioGraph {
     });
   }
 
-  /** Day 11a T2+ — live WebSocket deltas (stub until wired). */
+  /** Day 11a T2+ — live WebSocket deltas (slice 1: log-only, no renderer/state). */
   ingestDelta(message: unknown) {
-    this._studio._ingestDelta?.(message);
+    const m = message as Record<string, unknown>;
+    const t = typeof m.type === "string" ? m.type : "";
+    switch (t) {
+      case "bootstrap_start":
+      case "bootstrap_complete":
+        // eslint-disable-next-line no-console
+        console.debug("[t2-slice1]", t, "");
+        break;
+      case "node_added": {
+        const node = m.node;
+        const id =
+          node &&
+          typeof node === "object" &&
+          (node as { id?: unknown }).id != null
+            ? String((node as { id: unknown }).id)
+            : "";
+        // eslint-disable-next-line no-console
+        console.debug("[t2-slice1]", t, id);
+        break;
+      }
+      case "node_modified":
+      case "node_removed": {
+        const id = m.node_id != null ? String(m.node_id) : "";
+        // eslint-disable-next-line no-console
+        console.debug("[t2-slice1]", t, id);
+        break;
+      }
+      case "edge_added": {
+        const e = m.edge;
+        let br = "";
+        if (e && typeof e === "object") {
+          const o = e as Record<string, unknown>;
+          if (o.id != null) br = String(o.id);
+          else
+            br = [o.from_id, o.to_id]
+              .filter((x) => x != null)
+              .map(String)
+              .join("→");
+        }
+        // eslint-disable-next-line no-console
+        console.debug("[t2-slice1]", t, br);
+        break;
+      }
+      case "edge_removed": {
+        const id = m.edge_id != null ? String(m.edge_id) : "";
+        // eslint-disable-next-line no-console
+        console.debug("[t2-slice1]", t, id);
+        break;
+      }
+      case "stats": {
+        const br = `files=${m.files ?? "?"}`;
+        // eslint-disable-next-line no-console
+        console.debug("[t2-slice1]", t, br);
+        break;
+      }
+      case "error": {
+        // eslint-disable-next-line no-console
+        console.debug("[t2-slice1]", t, String(m.message ?? ""));
+        break;
+      }
+      case "pong": {
+        // eslint-disable-next-line no-console
+        console.debug("[t2-slice1]", t, String(m.ts ?? ""));
+        break;
+      }
+      default:
+        // eslint-disable-next-line no-console
+        console.debug("[t2-slice1] unknown", t || "(no type)");
+    }
   }
 
   destroy() {

@@ -18,6 +18,7 @@ export class StudioWebSocket {
   private readonly workspaceId: string;
   private readonly onMessage: WsHandler;
   private readonly onState: WsStateHandler | undefined;
+  private readonly onCloseCode: ((code: number) => void) | undefined;
   private socket: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
@@ -28,11 +29,13 @@ export class StudioWebSocket {
   constructor(
     workspaceId: string,
     onMessage: WsHandler,
-    onState?: WsStateHandler
+    onState?: WsStateHandler,
+    onCloseCode?: (code: number) => void
   ) {
     this.workspaceId = workspaceId;
     this.onMessage = onMessage;
     this.onState = onState;
+    this.onCloseCode = onCloseCode;
     this.url = `${wsBaseUrl()}/ws/workspace/${encodeURIComponent(workspaceId)}`;
   }
 
@@ -86,8 +89,10 @@ export class StudioWebSocket {
       /* onclose will reconnect */
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
+      const code = ev instanceof CloseEvent ? ev.code : 0;
       clearTimeout(failTimer);
+      this.onCloseCode?.(code);
       this._emit("closed");
       this._clearHeartbeat();
       this.socket = null;

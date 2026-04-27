@@ -30,8 +30,8 @@ function isT1Mode() {
 
 /**
  * React mount for the transplanted analyze viewer. Graphics are in StudioGraph / viewerEngine.
- * HALT 11a-T1: open with ?t1=1 — loads bundled `src/web/graph_data_axiom_v2.json` (same shape as
- * analyze `graph_data.json`) so static rendering works without extra HTTP routes.
+ * `?t1=1` (or VITE_OMNIX_T1): loads bundled `src/web/graph_data_axiom_v2.json` — full T1 drill.
+ * Default URL: empty graph; Studio connects WebSocket elsewhere (Workspace) for live bootstrap.
  */
 export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
   function GraphCanvas(
