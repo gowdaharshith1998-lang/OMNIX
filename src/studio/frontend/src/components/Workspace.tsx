@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { GraphCanvas, type GraphCanvasHandle } from "./Graph/GraphCanvas";
 import { createFile, listFiles, type FileEntry } from "@/lib/api";
 import { StudioWebSocket } from "@/lib/ws";
 import { useStudioKeybindings } from "@/lib/keybindings";
-import { applyNodeModified } from "@/lib/graphNode";
+import { applyNodeModified, recordFromGraphPayload } from "@/lib/graphNode";
 import { BottomToolbar } from "./BottomToolbar";
 import { DrillDown, type DrillDownHandle } from "./DrillDown";
 import { FindBar } from "./FindBar";
@@ -53,19 +54,6 @@ function headBadgeFor(
   return u.replace(/[\s_]+/g, " ").toUpperCase().slice(0, 22);
 }
 
-function recordFromNodePayload(n: Record<string, unknown>): GraphNode | null {
-  if (typeof n.id !== "string" || typeof n.name !== "string" || typeof n.type !== "string") {
-    return null;
-  }
-  return {
-    id: n.id,
-    name: n.name,
-    type: n.type,
-    file_path: typeof n.file_path === "string" ? n.file_path : null,
-    line_start: typeof n.line_start === "number" ? n.line_start : 0,
-    line_end: typeof n.line_end === "number" ? n.line_end : 0,
-  };
-}
 
 export function Workspace({
   workspaceId,
@@ -98,6 +86,7 @@ export function Workspace({
   const [externalFileEpoch, setExternalFileEpoch] = useState(0);
 
   const graphNodesRef = useRef(graphNodes);
+  const graphRef = useRef<GraphCanvasHandle | null>(null);
   useEffect(() => {
     graphNodesRef.current = graphNodes;
   }, [graphNodes]);
@@ -148,6 +137,16 @@ export function Workspace({
     });
   }, []);
 
+  const onT1GraphNodes = useCallback((list: GraphNode[]) => {
+    setGraphNodes((prev) => {
+      const next = new Map(prev);
+      for (const n of list) {
+        next.set(n.id, n);
+      }
+      return next;
+    });
+  }, []);
+
   const closeDrillDown = useCallback(() => {
     setDrillDownTarget(null);
   }, []);
@@ -156,6 +155,7 @@ export function Workspace({
     const c = new StudioWebSocket(
       workspaceId,
       (msg) => {
+        graphRef.current?.ingestMessage(msg);
         if (msg.type === "stats" && typeof msg.files === "number") {
           setStats({
             files: msg.files as number,
@@ -167,7 +167,7 @@ export function Workspace({
           });
         }
         if (msg.type === "node_added" && msg.node && typeof msg.node === "object") {
-          const rec = recordFromNodePayload(
+          const rec = recordFromGraphPayload(
             msg.node as Record<string, unknown>
           );
           if (rec) {
@@ -277,6 +277,12 @@ export function Workspace({
     setToast("No editor file open (shell)");
     setTimeout(() => setToast(null), 2200);
   }, []);
+
+  const onGraphDeselect = useCallback(() => {
+    if (drillDownTarget) {
+      closeDrillDown();
+    }
+  }, [drillDownTarget, closeDrillDown]);
 
   const pName = projectLabel(projectPath);
   const headBadge = drillDownTarget
@@ -405,27 +411,34 @@ export function Workspace({
             </div>
             <div
               className={
-                "flex min-h-0 min-w-0 flex-1 items-center justify-center rounded-lg border-2 border-dashed border-omnix-accent-indigo/25 bg-[rgba(2,6,21,0.35)] p-6" +
+                "relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border border-omnix-accent-indigo/20 bg-[rgba(2,6,21,0.5)]" +
                 (drillDownTarget
                   ? " pr-[min(40%,32rem)] transition-[padding] max-md:pr-0"
                   : "")
               }
             >
-              <div className="max-w-md text-center">
-                <p className="text-sm text-omnix-text-muted">
-                  Graph canvas <span className="text-omnix-text-dim">(Day 10 shell)</span>
+              <GraphCanvas
+                ref={graphRef}
+                drillDownNodeId={
+                  drillDownTarget?.mode === "node" ? drillDownTarget.nodeId : null
+                }
+                onFunctionNodeClick={openDrillDownNode}
+                onT1GraphNodes={onT1GraphNodes}
+                onFileOrDirClick={() => {
+                  /* X-RAY in Day 12; engine also logs */
+                }}
+                onDeselect={onGraphDeselect}
+              />
+              {graphHint.length > 0 && (
+                <div className="pointer-events-none absolute bottom-2 left-2 z-10 max-w-[min(100%,20rem)] rounded border border-omnix-accent-indigo/20 bg-omnix-bg/80 px-2 py-1 font-mono text-[9px] text-omnix-text-dim/90">
+                  recent: {graphHint.join(" · ")}
+                </div>
+              )}
+              {isDebugOn() && (
+                <p className="pointer-events-none absolute left-2 top-2 z-10 font-mono text-[9px] text-omnix-text-dim/70">
+                  ws: {wsState}
                 </p>
-                {graphHint.length > 0 && (
-                  <p className="mt-2 font-mono text-xs text-omnix-text-dim/90">
-                    recent: {graphHint.join(" · ")}
-                  </p>
-                )}
-                {isDebugOn() && (
-                  <p className="mt-1 font-mono text-[9px] text-omnix-text-dim/70">
-                    ws: {wsState}
-                  </p>
-                )}
-              </div>
+              )}
             </div>
           </main>
 
