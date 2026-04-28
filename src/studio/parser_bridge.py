@@ -86,6 +86,20 @@ def _edge_to_msg(e: EdgeRow) -> dict[str, Any]:
     }
 
 
+def _sha_short(sha: str, n: int = 12) -> str:
+    return sha[:n] if len(sha) >= n else sha
+
+
+def _delta_nonempty(d: dict[str, Any]) -> bool:
+    return bool(
+        (d.get("added_nodes") or [])
+        or (d.get("removed_node_ids") or [])
+        or (d.get("node_modified") or [])
+        or (d.get("added_edges") or [])
+        or (d.get("removed_edge_ids") or [])
+    )
+
+
 async def broadcast_to_workspace(workspace: Workspace, m: dict[str, Any]) -> None:
     raw = json.dumps(m, default=str)
     t = m.get("type", "?")
@@ -100,6 +114,25 @@ async def broadcast_to_workspace(workspace: Workspace, m: dict[str, Any]) -> Non
     for w in dead:
         with contextlib.suppress(Exception):
             workspace.remove_ws(w)  # type: ignore[union-attr, misc]
+
+
+async def _broadcast_logged(
+    workspace: Workspace, m: dict[str, Any], relp: str
+) -> None:
+    nws = len(workspace._websockets)  # type: ignore[attr-defined]
+    mt = m.get("type")
+    _LOG.info(
+        "broadcast type=%s path=%s ws_count=%d",
+        mt,
+        relp,
+        nws,
+        extra={
+            "type": mt,
+            "path": relp,
+            "ws_count": nws,
+        },
+    )
+    await broadcast_to_workspace(workspace, m)
 
 
 class ParserBridge:
@@ -123,12 +156,20 @@ class ParserBridge:
         self._pending.add(relp)
         if self._handle is not None:
             self._handle.cancel()  # type: ignore[union-attr, misc]
+            _LOG.debug(
+                "debounce_reset",
+                extra={
+                    "path": relp,
+                    "pending_count": len(self._pending),
+                },
+            )
         self._handle = self._loop.call_later(0.1, self._flush)  # type: ignore[assignment, misc]
 
     def _flush(self) -> None:
         self._handle = None
         to_send = list(self._pending)
         self._pending.clear()
+        _LOG.debug("flush", extra={"paths": list(to_send)})
         for relp in to_send:
             with contextlib.suppress(asyncio.QueueFull, RuntimeError):
                 _LOG.debug("bridge enqueue: %s", relp)
@@ -149,7 +190,7 @@ class ParserBridge:
             try:
                 await self._process_one(relp)
             except Exception:  # noqa: BLE001
-                _LOG.exception("bridge process %s", relp)
+                _LOG.exception("pump_exception", extra={"path": relp})
 
     async def _process_one(self, relp: str) -> None:
         _LOG.debug("parse bridge: processing %s", relp)
@@ -177,6 +218,21 @@ class ParserBridge:
                 and str(existing[0]) == sha
                 and abs(float(existing[1]) - mtime) < 1e-6
             ):
+                _LOG.info(
+                    "hash_skip path=%s sha=%s mtime=%s row_sha=%s row_mtime=%s",
+                    relp,
+                    _sha_short(sha),
+                    mtime,
+                    _sha_short(str(existing[0])),
+                    float(existing[1]),
+                    extra={
+                        "path": relp,
+                        "sha": _sha_short(sha),
+                        "mtime": mtime,
+                        "row_sha": _sha_short(str(existing[0])),
+                        "row_mtime": float(existing[1]),
+                    },
+                )
                 return
             old_nodes = _list_nodes_in_file(c, relp)
             oids = {n.id for n in old_nodes}
@@ -185,8 +241,14 @@ class ParserBridge:
             t_err, _g = ingest_one_path(
                 st, root, full, parse_mode=default_parse_mode(), skip_tracker=None
             )
-            if t_err is not None and t_err in ("error", "unknown_extension", "no_grammar", "binary"):
-                _LOG.debug("ingest_one_path %s: %s", relp, t_err)
+            if t_err is not None:
+                result_s = f"{t_err}:{_g}"[:200]
+                _LOG.warning(
+                    "ingest_skip_or_error path=%s result=%s",
+                    relp,
+                    result_s,
+                    extra={"path": relp, "result": result_s},
+                )
             with contextlib.suppress(OSError, ValueError, RuntimeError):
                 st.commit()
             with contextlib.suppress(OSError, ValueError, RuntimeError):
@@ -199,33 +261,74 @@ class ParserBridge:
             d = compute_file_delta(
                 relp, old_nodes, new_nodes, old_edges, new_edges
             )
+            _LOG.info(
+                "delta_computed path=%s added_nodes=%d modified_nodes=%d "
+                "removed_node_ids=%d added_edges=%d removed_edge_ids=%d",
+                relp,
+                len(d.get("added_nodes") or []),
+                len(d.get("node_modified") or []),
+                len(d.get("removed_node_ids") or []),
+                len(d.get("added_edges") or []),
+                len(d.get("removed_edge_ids") or []),
+                extra={
+                    "path": relp,
+                    "added_nodes": len(d.get("added_nodes") or []),
+                    "modified_nodes": len(d.get("node_modified") or []),
+                    "removed_node_ids": len(d.get("removed_node_ids") or []),
+                    "added_edges": len(d.get("added_edges") or []),
+                    "removed_edge_ids": len(d.get("removed_edge_ids") or []),
+                },
+            )
             w.mark_activity()
             if not old_nodes:
-                await broadcast_to_workspace(w, msg_file_added(relp))
+                await _broadcast_logged(w, msg_file_added(relp), relp)
             for eid in sorted(d.get("removed_edge_ids") or []):
                 with contextlib.suppress(TypeError, ValueError):
-                    await broadcast_to_workspace(w, msg_edge_removed(int(eid)))
+                    await _broadcast_logged(w, msg_edge_removed(int(eid)), relp)
             for nid in d.get("removed_node_ids") or []:
-                await broadcast_to_workspace(w, msg_node_removed(str(nid)))
+                await _broadcast_logged(w, msg_node_removed(str(nid)), relp)
             for mo in d.get("node_modified") or []:
                 with contextlib.suppress(TypeError, KeyError):
-                    await broadcast_to_workspace(
-                        w, msg_node_modified(
+                    await _broadcast_logged(
+                        w,
+                        msg_node_modified(
                             str(mo["node_id"]),
                             {k: v for k, v in (mo.get("changes") or {}).items()},
-                        )
+                        ),
+                        relp,
                     )
             for n in d.get("added_nodes") or []:
-                await broadcast_to_workspace(w, msg_node_added(node_row_to_dict(n)))
+                await _broadcast_logged(w, msg_node_added(node_row_to_dict(n)), relp)
             for e in d.get("added_edges") or []:
-                await broadcast_to_workspace(w, msg_edge_added(_edge_to_msg(e)))
+                await _broadcast_logged(w, msg_edge_added(_edge_to_msg(e)), relp)
+            if (
+                not _delta_nonempty(d)
+                and old_nodes
+                and new_nodes
+                and existing is not None
+                and str(existing[0]) != sha
+            ):
+                _LOG.info(
+                    "synthetic_node_modified path=%s reason=content_changed_graph_snapshot_unchanged",
+                    relp,
+                    extra={"path": relp},
+                )
+                prefer = ("function", "method", "class")
+                target = next((n for n in new_nodes if n.type in prefer), None)
+                if target is None:
+                    target = new_nodes[0]
+                await _broadcast_logged(
+                    w,
+                    msg_node_modified(str(target.id), {}),
+                    relp,
+                )
             ncount, ecount = len(new_nodes), len(new_edges)
             with contextlib.suppress(OSError, ValueError, RuntimeError):
                 st.set_file_hash(relp, sha, mtime, node_count=ncount, edge_count=ecount)  # noqa: E501
             with contextlib.suppress(OSError, ValueError, RuntimeError):
                 st.commit()
             s = w.stats_dict()
-            await broadcast_to_workspace(
+            await _broadcast_logged(
                 w,
                 msg_stats(
                     s["files"],
@@ -235,6 +338,7 @@ class ParserBridge:
                     s["dark_matter"],
                     s["entangled"],
                 ),
+                relp,
             )
 
 
@@ -250,13 +354,13 @@ async def _handle_file_deleted(
     with contextlib.suppress(OSError, ValueError, RuntimeError):
         store.commit()
     w.mark_activity()
-    await broadcast_to_workspace(w, msg_file_removed(relp))
+    await _broadcast_logged(w, msg_file_removed(relp), relp)
     for e in oedges:
-        await broadcast_to_workspace(w, msg_edge_removed(int(e.id)))
+        await _broadcast_logged(w, msg_edge_removed(int(e.id)), relp)
     for n in oldn:
-        await broadcast_to_workspace(w, msg_node_removed(n.id))
+        await _broadcast_logged(w, msg_node_removed(n.id), relp)
     s = w.stats_dict()
-    await broadcast_to_workspace(
+    await _broadcast_logged(
         w,
         msg_stats(
             s["files"],
@@ -266,4 +370,5 @@ async def _handle_file_deleted(
             s["dark_matter"],
             s["entangled"],
         ),
+        relp,
     )

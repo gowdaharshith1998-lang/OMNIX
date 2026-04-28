@@ -5,31 +5,37 @@
 Items below were observed during slice 3 backend diagnosis but are
 out of slice 3 scope. Address during T3 or polish window.
 
-- [debt-13] Backend live-emission gap: real file edits in workspace
-  do not produce node_added or node_modified WS broadcasts to
-  subscribed tabs. Watcher fires (verified — DB mtime updates), but
-  bridge → broadcast pipeline silently drops the event.
-  _STD_IGNORE_DIR_PARTS and _ok_path are NOT the cause (.omnix
-  already filtered). Likely candidates: (a) ParserBridge debounce
-  never flushes due to repeated event cancellation, (b)
-  compute_file_delta returns empty dict for the edit type, (c)
-  evolution.finalize writes create their own loop, (d) workspace ID
-  mismatch between watcher event broadcast target and tab's
-  subscribe registration. To diagnose: full trace of
-  ParserBridge._pump body + _ingest_block + evolution write paths.
-  Block: prevents visual verification of slices 3, 4, 5 (all delta
-  types). Recommended T3 work item.
+- [debt-13] ~~Backend live-emission gap~~ **RESOLVED (T3, 2026-04-28).**
+  Diagnosis (Case B): `compute_file_delta` correctly returned an empty
+  dict when file bytes changed but graph nodes/edges matched the prior
+  snapshot (e.g. editing only a literal inside a function leaves the same
+  NodeRow signatures). The bridge still ran ingest and updated `file_hashes`;
+  subsequent watcher noise correctly hit `hash_skip`. The user-visible gap
+  was no WS verb for “disk content changed, AST snapshot unchanged.” Fix:
+  `parser_bridge._process_one` emits a synthetic `node_modified` for one
+  representative node (prefer function/method/class) when a prior
+  `file_hashes` row exists, stored sha differs from disk sha, the delta is
+  empty, and the file still has nodes—unblocking StudioGraph rim flash and
+  parity with slices 3–6d expectations. Instrumentation: structured INFO logs
+  (`hash_skip`, `delta_computed`, `broadcast`, `synthetic_node_modified`,
+  `ingest_skip_or_error`, `pump_exception`); opt-in stderr handler for
+  `omnix.studio.parser_bridge` when `OMNIX_STUDIO_DEBUG=1`. Tests:
+  `tests/studio/test_t3_live_emission.py` (edit → synthetic modified, add
+  function → node_added, delete → node_removed).
 
-- [debt-14] _stats_ticker fires unconditionally every 0.5s while WS
-  open (server.py:_stats_ticker). At idle this produces ~2 stats
-  msgs/sec to every connected tab. Should be (a) >=5s interval AND
-  (b) gated on stats_dict() change since last tick. Cosmetic but
-  floods DevTools console at debug verbosity.
+- [debt-14] _stats_ticker (`server.py` 466–487) emits stats every ~0.5s to
+  all subscribed sockets — high-frequency flood that could swamp the delta
+  channel under load. Consider: backpressure, reduce cadence, or batch with
+  delta emits. Not blocking; defer.
 
-- [debt-15] WebSocket subscribe handshake returns HTTP 403 when tab
-  holds a stale workspace_id from a previous server session. Studio
-  frontend should detect 403 on reconnect, drop cached workspace_id,
-  redirect to picker. Currently silently retries forever.
+- [debt-15] Subscribe path (`server.py` 512–517) returns 403 on stale
+  `workspace_id` without rich error info — hard to debug in the browser
+  console. Add structured error payload. Defer.
+
+- [debt-32] `compute_file_delta` (`delta.py` 45–47) docstring mentions
+  `modified_edges` but the return dict (91–98) omits it. Doc/code drift.
+  Either implement or remove from docstring. Defer until edge_modified
+  design lands (slice 7).
 
 - [debt-16] ".omnix" string literal hardcoded in multiple places
   (paths.py:25, watcher.py:21). Promote to shared OMNIX_DIR_NAME
@@ -195,4 +201,11 @@ because the latter flips true on first `open` **before** `bootstrap_complete` an
 suppress the overlay during the real first load. `?t1=1` / T1 mode gates the overlay off
 (no live bootstrap). Layout matches slice 6c: `fixed right-3 top-16 z-[35]` (below
 StatsPanel at `top-5`).
+
+## T3 closure (2026-04-28)
+
+Debt-13 backend live emission: synthetic `node_modified` when disk sha differs from
+`file_hashes` but `compute_file_delta` is empty; structured ParserBridge logging (opt-in
+`OMNIX_STUDIO_DEBUG=1`). New integration tests `tests/studio/test_t3_live_emission.py`.
+Test counts: pytest 305 (+3 vs pre-T3), vitest 38 unchanged.
 

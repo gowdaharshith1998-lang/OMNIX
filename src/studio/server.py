@@ -12,6 +12,16 @@ if os.environ.get("OMNIX_STUDIO_DEBUG") == "1":
     for _noisy in ("watchdog", "watchdog.observers", "watchdog.observers.inotify_buffer"):
         logging.getLogger(_noisy).setLevel(logging.WARNING)
     logging.getLogger("omnix.studio").setLevel(logging.DEBUG)
+    _pb = logging.getLogger("omnix.studio.parser_bridge")
+    _pb.setLevel(logging.INFO)
+    if not _pb.handlers:
+        _pb_h = logging.StreamHandler()
+        _pb_h.setLevel(logging.INFO)
+        _pb_h.setFormatter(
+            logging.Formatter("%(levelname)s:%(name)s:%(message)s")
+        )
+        _pb.addHandler(_pb_h)
+        _pb.propagate = False
 
 import asyncio
 import contextlib
