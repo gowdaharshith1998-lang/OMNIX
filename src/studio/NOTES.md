@@ -123,11 +123,21 @@ server.py routes inventory.
 
 - [debt-27] `scripts/build_studio_viewer_engine.py` generates `viewerEngine.ts`
   from `src/web/index.html` plus small string patches. Studio-only hooks
-  (`_flashNodeRim`, `_fadeAndRemoveNode`, `_bornNode`, etc.) are **not** in the
+  (`_flashNodeRim`, `_fadeAndRemoveNode`, `_bornNode`, `_bornEdge`, etc.) are **not** in the
   generator — they live only in `viewerEngine.ts`. Running `main()` on the
   script overwrites those slices unless the pipeline is extended to splice in
   Studio hooks from a patch file or forked template. Decide whether to wire
   generator + Studio overlay or stop regenerating until reconciled.
+  Slice 6a verification (2026): grep of `build_studio_viewer_engine.py` shows no
+  `_bornEdge` / slice 6 references — unchanged risk profile vs slice 5.
+
+- [debt-30] Optional follow-up: if live CALLS edges feel visually abrupt (no gsap
+  on edge geometry), add a short gsap alpha/stroke reveal after `_bornEdge`;
+  slice 6a relies on physarum painter-only fade-in.
+
+- [debt-31] Live CALLS dedup uses **unordered** synth pair (matches static
+  `buildPlanetEdgeList`). Directional A→B vs B→A as distinct edges is **not**
+  implemented; file a feature slice if product wants asymmetric CALLS.
 
 ### Inventory of T1 vs live divergence
 

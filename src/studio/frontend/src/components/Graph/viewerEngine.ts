@@ -3497,6 +3497,67 @@ export function installOmnixViewerEngine(studio) {
     return true;
   };
 
+  /** T2 v2 slice 6a — live edge_added: CALLS link between existing planet cells (synth ids). */
+  studio._bornEdge = function (fromSynthId, toSynthId) {
+    if (!fromSynthId || !toSynthId || fromSynthId === toSynthId) return false;
+    if (viewLevel !== 'planet' || !selectedFile) return false;
+
+    const planetLayer =
+      world && world.children && world.children.find(c => c._omnixType === 'planet');
+    if (!planetLayer || !planetLayer._nodes || !planetLayer._sim || !planetLayer._edges)
+      return false;
+
+    let fromPn = null;
+    let toPn = null;
+    for (let i = 0; i < planetLayer._nodes.length; i++) {
+      const pn = planetLayer._nodes[i];
+      if (!pn || !pn.symbol) continue;
+      if (pn.symbol.id === fromSynthId) fromPn = pn;
+      if (pn.symbol.id === toSynthId) toPn = pn;
+      if (fromPn && toPn) break;
+    }
+    if (!fromPn || !toPn) {
+      // eslint-disable-next-line no-console
+      console.debug('[t2-slice6a] _bornEdge missing pnRef for endpoint', {
+        fromSynthId,
+        toSynthId,
+      });
+      return false;
+    }
+
+    function pairKey(a, b) {
+      return a < b ? a + ':' + b : b + ':' + a;
+    }
+    const newKey = pairKey(fromSynthId, toSynthId);
+    const edges = planetLayer._edges;
+    for (let ei = 0; ei < edges.length; ei++) {
+      const ed = edges[ei];
+      const s = ed.source;
+      const t = ed.target;
+      if (!s || !t || !s.symbol || !t.symbol) continue;
+      const sid = s.symbol.id;
+      const tid = t.symbol.id;
+      if (pairKey(sid, tid) === newKey) {
+        // eslint-disable-next-line no-console
+        console.debug('[t2-slice6a] _bornEdge duplicate unordered pair', newKey);
+        return false;
+      }
+    }
+
+    edges.push({
+      source: fromPn,
+      target: toPn,
+      type: 'CALLS',
+      color: 0x4ade80,
+      _curveOffset: (Math.random() - 0.5) * 36,
+    });
+
+    planetLayer._sim.force('link').links(edges);
+    planetLayer._sim.alpha(0.3).restart();
+
+    return true;
+  };
+
   function drawTraceLine(gfx, fromNode, toNode, index) {
     const color = 0xa855f7;
     const alpha = Math.max(0.12, 0.55 - index * 0.05);

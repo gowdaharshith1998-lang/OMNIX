@@ -36,6 +36,8 @@ type StudioHandle = {
     nodeData: Record<string, unknown>,
     opts?: { durationMs?: number }
   ) => boolean;
+  /** T2 v2 slice 6a — live edge_added; returns true if a CALLS link was added to planet force graph */
+  _bornEdge?: (fromSynthId: string, toSynthId: string) => boolean;
 };
 
 type BootstrapBuffer = {
@@ -286,8 +288,48 @@ export class StudioGraph {
       case "edge_added": {
         if (inBootstrap && m.edge && typeof m.edge === "object") {
           this._bootstrapBuffer.edges.push(m.edge as Record<string, unknown>);
-        } else if (!inBootstrap) {
-          this._logDispatch(m, t);
+          break;
+        }
+        if (!this._bootstrapBuffer.completed) {
+          // eslint-disable-next-line no-console
+          console.debug(
+            "[t2-slice6a] edge_added pre-bootstrap-complete (live dropped)",
+            m
+          );
+          break;
+        }
+        const edge = m.edge;
+        if (!edge || typeof edge !== "object") {
+          // eslint-disable-next-line no-console
+          console.debug("[t2-slice6a] edge_added missing edge payload", m);
+          break;
+        }
+        const eo = edge as Record<string, unknown>;
+        // Workspace endpoint ids (not synth ids); resolve via _wsIdToSynthId.
+        const fromWs = eo.from_id;
+        const toWs = eo.to_id;
+        if (typeof fromWs !== "string" || typeof toWs !== "string") {
+          // eslint-disable-next-line no-console
+          console.debug("[t2-slice6a] edge_added missing from_id/to_id", m);
+          break;
+        }
+        const fromSynth = this._wsIdToSynthId.get(fromWs);
+        const toSynth = this._wsIdToSynthId.get(toWs);
+        if (!fromSynth || !toSynth) {
+          // eslint-disable-next-line no-console
+          console.debug("[t2-slice6a] edge_added unresolved endpoint", {
+            fromWs,
+            toWs,
+          });
+          break;
+        }
+        const ok = this._studio._bornEdge?.(fromSynth, toSynth);
+        if (!ok) {
+          // eslint-disable-next-line no-console
+          console.debug("[t2-slice6a] edge_added unresolved or duplicate", {
+            fromWs,
+            toWs,
+          });
         }
         break;
       }
