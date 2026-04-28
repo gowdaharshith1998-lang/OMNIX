@@ -157,3 +157,29 @@ Live mode (Studio at :7778) currently passes through bridge:
   - cluster_id: MISSING — debt-24
   - Timeline: 404 — debt-21
 
+## Slice 6c — reconnect policy: Option B (preserve + rebootstrap-in-place)
+
+Decision rationale: The existing pipeline already implements Option B implicitly.
+`StudioGraph` stays mounted across socket drops; `bootstrap_start` cleanly resets
+`_bootstrapBuffer` (`StudioGraph.ts` 235–246); the server runs `_run_bootstrap` on
+every successful subscribe (`server.py` 519–521); `_wsIdToSynthId` rebuilds in
+`_renderBufferedSnapshot` (`StudioGraph.ts` 187–200).
+
+Slice 6c formalizes the policy with regression tests proving mid-session bootstrap
+cycles plus a small UX indicator showing reconnect status. **Not** a behavior change.
+
+Future devs: Do **not** introduce A-shaped destroy-and-rebuild on socket close.
+Viewer state (`camera`, `viewLevel`, `selectedFile`) intentionally survives reconnect;
+rebuilding `StudioGraph` resets all of it.
+
+Option C (delta-resume with server-side delta log + sequence numbers) is the
+eventual right answer for bandwidth efficiency but punted to post-Day 24.
+
+Refs: slice 6c RECON manifest (Studio tab); slice 6 RECON Concern C.
+
+### Generator check (debt-27)
+
+Slice 6c verification (2026): `scripts/build_studio_viewer_engine.py` contains **no**
+slice 6c / reconnect-indicator strings — unchanged risk profile vs slice 6b; Studio-only
+UI lives in `Workspace.tsx` / `ReconnectIndicator.tsx`.
+

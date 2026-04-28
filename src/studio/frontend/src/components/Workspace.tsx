@@ -11,6 +11,10 @@ import { LeftIconStrip } from "./LeftIconStrip";
 import { NewFileModal } from "./NewFileModal";
 import { QuickFilePicker } from "./QuickFilePicker";
 import { StatsPanel } from "./StatsPanel";
+import {
+  ReconnectIndicator,
+  type ReconnectIndicatorMode,
+} from "./ReconnectIndicator";
 import type { DrillDownTarget, GraphNode } from "@/types/drilldown";
 
 type Props = {
@@ -87,6 +91,11 @@ export function Workspace({
 
   const graphNodesRef = useRef(graphNodes);
   const graphRef = useRef<GraphCanvasHandle | null>(null);
+  /** After first successful WS open; used to distinguish initial connect vs reconnect (slice 6c). */
+  const hasConnectedBeforeRef = useRef(false);
+  const [reconnectedPhase, setReconnectedPhase] = useState<
+    "hidden" | "shown" | "fade"
+  >("hidden");
   useEffect(() => {
     graphNodesRef.current = graphNodes;
   }, [graphNodes]);
@@ -162,9 +171,12 @@ export function Workspace({
       (s) => {
         if (s === "connecting") setWsState("connecting");
         if (s === "open") {
+          const wasReconnect = hasConnectedBeforeRef.current;
           // eslint-disable-next-line no-console
           console.log("[t2-slice1] ws open");
           setWsState("open");
+          hasConnectedBeforeRef.current = true;
+          if (wasReconnect) setReconnectedPhase("shown");
         }
         if (s === "closed") setWsState("closed");
       },
@@ -176,6 +188,29 @@ export function Workspace({
     c.connect();
     return () => c.close();
   }, [workspaceId]);
+
+  const isReconnecting =
+    (wsState === "connecting" || wsState === "closed") &&
+    hasConnectedBeforeRef.current;
+
+  useEffect(() => {
+    if (isReconnecting) setReconnectedPhase("hidden");
+  }, [isReconnecting]);
+
+  useEffect(() => {
+    if (reconnectedPhase !== "shown") return;
+    const t1 = setTimeout(() => setReconnectedPhase("fade"), 800);
+    const t2 = setTimeout(() => setReconnectedPhase("hidden"), 1000);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [reconnectedPhase]);
+
+  let reconnectIndicatorMode: ReconnectIndicatorMode = "hidden";
+  if (isReconnecting) reconnectIndicatorMode = "reconnecting";
+  else if (reconnectedPhase === "shown") reconnectIndicatorMode = "reconnected";
+  else if (reconnectedPhase === "fade") reconnectIndicatorMode = "reconnected-fade";
 
   useEffect(() => {
     if (drillDownTarget?.mode !== "node") return;
@@ -353,6 +388,8 @@ export function Workspace({
       <div className="pointer-events-none fixed right-5 top-5 z-30" aria-label="Graph stats">
         <StatsPanel stats={stats} />
       </div>
+
+      <ReconnectIndicator mode={reconnectIndicatorMode} />
 
       <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
         <div className="relative min-h-0 w-full min-w-0 flex-1">
