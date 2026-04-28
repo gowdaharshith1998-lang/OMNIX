@@ -116,6 +116,19 @@ server.py routes inventory.
   Severity: visible visual artifact after every node_removed; minor
   at low removal frequency, ugly at high frequency.
 
+- [debt-26] `viewerEngine` planet cell construction is duplicated between
+  `createPlanetView` (bootstrap) and `_bornNode` (T2 v2 slice 5 live add).
+  Extract a shared `buildPlanetNodeRef(fileData, fp, sym, j, …)` in a
+  dedicated refactor commit to avoid drift.
+
+- [debt-27] `scripts/build_studio_viewer_engine.py` generates `viewerEngine.ts`
+  from `src/web/index.html` plus small string patches. Studio-only hooks
+  (`_flashNodeRim`, `_fadeAndRemoveNode`, `_bornNode`, etc.) are **not** in the
+  generator — they live only in `viewerEngine.ts`. Running `main()` on the
+  script overwrites those slices unless the pipeline is extended to splice in
+  Studio hooks from a patch file or forked template. Decide whether to wire
+  generator + Studio overlay or stop regenerating until reconciled.
+
 ### Inventory of T1 vs live divergence
 
 T1 bundled (analyze viewer at :7777):

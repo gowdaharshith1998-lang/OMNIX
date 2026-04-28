@@ -30,6 +30,12 @@ type StudioHandle = {
     nodeId: string,
     opts?: { durationMs?: number }
   ) => void;
+  /** T2 v2 slice 5 — live node_added “born” animation; returns true if a cell was created */
+  _bornNode?: (
+    wsId: string,
+    nodeData: Record<string, unknown>,
+    opts?: { durationMs?: number }
+  ) => boolean;
 };
 
 type BootstrapBuffer = {
@@ -224,8 +230,55 @@ export class StudioGraph {
       case "node_added": {
         if (inBootstrap && m.node && typeof m.node === "object") {
           this._bootstrapBuffer.nodes.push(m.node as Record<string, unknown>);
-        } else if (!inBootstrap) {
-          this._logDispatch(m, t);
+          break;
+        }
+        if (!this._bootstrapBuffer.completed) {
+          // eslint-disable-next-line no-console
+          console.debug(
+            "[t2-slice5] node_added pre-bootstrap (live dropped)",
+            m
+          );
+          break;
+        }
+        if (!m.node || typeof m.node !== "object") {
+          // eslint-disable-next-line no-console
+          console.debug("[t2-slice5] node_added missing node payload", m);
+          break;
+        }
+        const raw = m.node as Record<string, unknown>;
+        const viewerShape = wsNodeToViewerShape(raw);
+        const meta = viewerShape.metadata;
+        const wsId =
+          meta &&
+          typeof meta === "object" &&
+          !Array.isArray(meta) &&
+          typeof (meta as Record<string, unknown>).ws_id === "string"
+            ? String((meta as Record<string, unknown>).ws_id)
+            : typeof raw.id === "string"
+              ? raw.id
+              : null;
+        if (!wsId) {
+          // eslint-disable-next-line no-console
+          console.debug("[t2-slice5] node_added missing ws id", m);
+          break;
+        }
+        if (this._wsIdToSynthId.has(wsId)) {
+          // eslint-disable-next-line no-console
+          console.debug("[t2-slice5] duplicate node_added for", wsId);
+          break;
+        }
+        const synthId =
+          typeof viewerShape.id === "string" ? viewerShape.id : null;
+        if (!synthId) {
+          // eslint-disable-next-line no-console
+          console.debug("[t2-slice5] node_added could not resolve synth id", m);
+          break;
+        }
+        const ok = this._studio._bornNode?.(wsId, viewerShape, {
+          durationMs: 400,
+        });
+        if (ok === true) {
+          this._wsIdToSynthId.set(wsId, synthId);
         }
         break;
       }

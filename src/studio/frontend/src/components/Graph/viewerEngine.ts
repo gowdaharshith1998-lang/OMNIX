@@ -1420,6 +1420,21 @@ export function installOmnixViewerEngine(studio) {
     }
     for (let j = 0; j < toRemove.length; j++) {
       const ch = toRemove[j];
+      if (ch._nodes && Array.isArray(ch._nodes)) {
+        for (let ni = 0; ni < ch._nodes.length; ni++) {
+          const pn = ch._nodes[ni];
+          if (pn && pn.container) {
+            if (pn.container._omnixBornTween) {
+              try {
+                pn.container._omnixBornTween.kill();
+              } catch (_e) { /* */ }
+              delete pn.container._omnixBornTween;
+            }
+            gsap.killTweensOf(pn.container);
+            gsap.killTweensOf(pn.container.scale);
+          }
+        }
+      }
       if (ch._sim) {
         ch._sim.stop();
         ch._sim = null;
@@ -3293,6 +3308,193 @@ export function installOmnixViewerEngine(studio) {
         }
       },
     });
+  };
+
+  studio._bornNode = function (_wsId, nodeData, opts) {
+    opts = opts || {};
+    const ms = opts.durationMs != null ? opts.durationMs : 400;
+    if (!nodeData || typeof nodeData.id !== 'string') return false;
+    if (viewLevel !== 'planet' || !selectedFile) return false;
+    const t = typeof nodeData.type === 'string' ? nodeData.type : '';
+    if (t !== 'function' && t !== 'class' && t !== 'method') return false;
+    const nodeFile = typeof nodeData.file === 'string' ? nodeData.file : '';
+    const selFp = selectedFile.filePath || '';
+    if (nodeFile && selFp && nodeFile !== selFp) return false;
+
+    const planetLayer = world && world.children && world.children.find(c => c._omnixType === 'planet');
+    if (!planetLayer || !planetLayer._nodes || !planetLayer._sim) return false;
+    if (planetLayer._nodes.length >= 100) return false;
+
+    const sym = {
+      id: nodeData.id,
+      name: typeof nodeData.name === 'string' ? nodeData.name : '',
+      type: t,
+      line: typeof nodeData.line === 'number' ? nodeData.line : 0,
+      complexity:
+        typeof nodeData.val === 'number' && nodeData.val > 0 ? nodeData.val : 1,
+    };
+    for (let di = 0; di < planetLayer._nodes.length; di++) {
+      const prev = planetLayer._nodes[di];
+      if (prev && prev.symbol && prev.symbol.id === sym.id) return false;
+    }
+
+    const fileData = selectedFile;
+    const fp = fileData.filePath || resolveDirFilePath(selectedDir, fileData.name);
+    const centerX = planetLayer._planetCenterX != null
+      ? planetLayer._planetCenterX
+      : app.screen.width / 2;
+    const centerY = planetLayer._planetCenterY != null
+      ? planetLayer._planetCenterY
+      : app.screen.height / 2;
+
+    const val = sym.complexity != null && sym.complexity > 0 ? sym.complexity : 1;
+    const radius = Math.sqrt(val) * 4 + 8;
+    const classification = classifyPlanetSymbol(sym);
+    const color = classification.color;
+
+    const jx = centerX + (Math.random() - 0.5) * 140;
+    const jy = centerY + (Math.random() - 0.5) * 140;
+    const j = planetLayer._nodes.length;
+
+    const symContainer = new PIXI.Container();
+    symContainer.position.set(jx, jy);
+    symContainer.alpha = 0;
+    symContainer.scale.set(0, 0);
+    symContainer.eventMode = 'static';
+    symContainer.cursor = 'pointer';
+
+    const glow = new PIXI.Graphics();
+    glow.beginFill(color, 0.12);
+    glow.drawCircle(0, 0, radius * 2.5);
+    glow.endFill();
+    glow.alpha = 0.55;
+    symContainer.addChild(glow);
+
+    const cellFill = new PIXI.Graphics();
+    cellFill.beginFill(color, 0.25);
+    cellFill.drawCircle(0, 0, radius);
+    cellFill.endFill();
+    symContainer.addChild(cellFill);
+
+    const membraneGfx = new PIXI.Graphics();
+    symContainer.addChild(membraneGfx);
+
+    const nucleus = new PIXI.Graphics();
+    nucleus.beginFill(color, 0.9);
+    nucleus.drawCircle(0, 0, 3);
+    nucleus.endFill();
+    symContainer.addChild(nucleus);
+
+    const rawName = sym.name || '';
+    const nm =
+      rawName.length > 20 ? rawName.slice(0, 18) + '…' : rawName;
+    const label = new PIXI.Text(nm, {
+      fontFamily: 'JetBrains Mono, monospace',
+      fontSize: 11,
+      fill: 0xe2e8f0,
+      align: 'center',
+    });
+    label.alpha = 0.8;
+    label.anchor.set(0.5, 0);
+    label.position.set(0, radius + 5);
+    label.eventMode = 'none';
+    label.visible = radius > 12;
+    symContainer.addChild(label);
+
+    const symHitR = Math.max(radius * 2.8, radius + 36);
+    symContainer.hitArea = new PIXI.Circle(0, 0, symHitR);
+
+    planetLayer.addChild(symContainer);
+
+    const pnRef = {
+      container: symContainer,
+      symbol: sym,
+      x: jx,
+      y: jy,
+      vx: 0,
+      vy: 0,
+      radius,
+      color,
+      classification,
+      glow,
+      cellFill,
+      membraneGfx,
+      nucleus,
+      label,
+      index: j,
+      _hover: false,
+    };
+
+    symContainer.on('pointerdown', e => {
+      const btn = pointerEventButton(e);
+      if (btn === 2) {
+        e.stopPropagation();
+        const oe = e.data && e.data.originalEvent;
+        if (oe && oe.preventDefault) oe.preventDefault();
+        void openXrayForPlanetFunction(fileData, sym, classification, fp);
+        return;
+      }
+      if (btn !== 0) return;
+      e.stopPropagation();
+      if (
+        (sym.type === 'function' || sym.type === 'class' || sym.type === 'method') &&
+        typeof studio._options.onFunctionNodeClick === 'function' &&
+        sym &&
+        sym.id
+      ) {
+        try {
+          studio._options.onFunctionNodeClick(String(sym.id));
+        } catch (_e) { /* */ }
+        return;
+      }
+      showSymbolDetailPopup(sym, fileData);
+    });
+    symContainer.on('pointerover', () => {
+      pnRef._hover = true;
+      gsap.to(symContainer.scale, { x: 1.2, y: 1.2, duration: 0.2 });
+    });
+    symContainer.on('pointerout', () => {
+      pnRef._hover = false;
+      gsap.to(symContainer.scale, { x: 1, y: 1, duration: 0.2 });
+    });
+
+    planetLayer._nodes.push(pnRef);
+    planetNodes = planetLayer._nodes;
+
+    planetLayer._sim.nodes(planetLayer._nodes).alpha(0.3).restart();
+
+    gsap.killTweensOf(symContainer);
+    gsap.killTweensOf(symContainer.scale);
+    const bornTl = gsap.timeline({
+      onComplete: () => {
+        delete symContainer._omnixBornTween;
+        symContainer.alpha = 1;
+        symContainer.scale.set(1, 1);
+        symContainer.eventMode = 'static';
+      },
+    });
+    symContainer._omnixBornTween = bornTl;
+    bornTl.to(
+      symContainer,
+      {
+        alpha: 1,
+        duration: ms / 1000,
+        ease: 'power2.out',
+      },
+      0
+    );
+    bornTl.to(
+      symContainer.scale,
+      {
+        x: 1,
+        y: 1,
+        duration: ms / 1000,
+        ease: 'power2.out',
+      },
+      0
+    );
+
+    return true;
   };
 
   function drawTraceLine(gfx, fromNode, toNode, index) {
@@ -5852,6 +6054,24 @@ export function installOmnixViewerEngine(studio) {
     try {
       killTweens();
     } catch (_e) { /* */ }
+    if (world && world.children) {
+      for (let wi = 0; wi < world.children.length; wi++) {
+        const ch = world.children[wi];
+        if (ch._omnixType !== 'planet' || !ch._nodes) continue;
+        for (let pi = 0; pi < ch._nodes.length; pi++) {
+          const pn = ch._nodes[pi];
+          if (!pn || !pn.container) continue;
+          if (pn.container._omnixBornTween) {
+            try {
+              pn.container._omnixBornTween.kill();
+            } catch (_e) { /* */ }
+            delete pn.container._omnixBornTween;
+          }
+          gsap.killTweensOf(pn.container);
+          gsap.killTweensOf(pn.container.scale);
+        }
+      }
+    }
     if (app) {
       try {
         if (studio._mainTicker) {
