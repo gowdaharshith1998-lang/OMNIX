@@ -3255,6 +3255,46 @@ export function installOmnixViewerEngine(studio) {
     });
   };
 
+  studio._fadeAndRemoveNode = function (nodeId, opts) {
+    opts = opts || {};
+    const ms = opts.durationMs != null ? opts.durationMs : 400;
+
+    const planetLayer = world.children.find(c => c._omnixType === 'planet');
+    if (!planetLayer || !planetLayer._nodes) return;
+
+    let pnRef = null;
+    for (let i = 0; i < planetLayer._nodes.length; i++) {
+      const pn = planetLayer._nodes[i];
+      if (pn && pn.symbol && pn.symbol.id === nodeId) {
+        pnRef = pn;
+        break;
+      }
+    }
+    if (!pnRef || !pnRef.container) return;
+
+    gsap.killTweensOf(pnRef.container);
+    gsap.to(pnRef.container, {
+      alpha: 0,
+      duration: ms / 1000,
+      ease: 'power2.out',
+      onComplete: () => {
+        const currentPlanet = world.children.find(c => c._omnixType === 'planet');
+        if (currentPlanet && currentPlanet._nodes) {
+          const stillIdx = currentPlanet._nodes.indexOf(pnRef);
+          if (stillIdx !== -1) {
+            currentPlanet._nodes.splice(stillIdx, 1);
+          }
+        }
+        if (pnRef.container) {
+          if (pnRef.container.parent) {
+            pnRef.container.parent.removeChild(pnRef.container);
+          }
+          pnRef.container.destroy({ children: true });
+        }
+      },
+    });
+  };
+
   function drawTraceLine(gfx, fromNode, toNode, index) {
     const color = 0xa855f7;
     const alpha = Math.max(0.12, 0.55 - index * 0.05);

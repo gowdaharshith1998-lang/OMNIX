@@ -105,6 +105,17 @@ server.py routes inventory.
   Severity: live mode galaxy looks visibly less informative than
   analyze viewer galaxy. Significant for Day 24 demo aesthetic.
 
+- [debt-25] After node_removed splice, drawSubviewPhysarumEdges
+  (viewerEngine.ts:4524-4617 — range shifts if viewerEngine edits)
+  does not filter edges whose endpoints are no longer in pc._nodes.
+  The endpoint node object still has .x/.y properties post-splice, so
+  edges draw into empty space (orphan stub edges). Slice 4 accepts
+  this as deferred — fix is to either (a) add membership check in
+  drawSubviewPhysarumEdges loop, or (b) prune pc._edges when a node
+  is spliced. Option (b) is cleaner long-term. Cost: ~0.5d.
+  Severity: visible visual artifact after every node_removed; minor
+  at low removal frequency, ugly at high frequency.
+
 ### Inventory of T1 vs live divergence
 
 T1 bundled (analyze viewer at :7777):

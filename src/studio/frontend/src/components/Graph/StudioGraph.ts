@@ -26,6 +26,10 @@ type StudioHandle = {
     nodeId: string,
     opts?: { color?: number; durationMs?: number }
   ) => void;
+  _fadeAndRemoveNode?: (
+    nodeId: string,
+    opts?: { durationMs?: number }
+  ) => void;
 };
 
 type BootstrapBuffer = {
@@ -290,9 +294,28 @@ export class StudioGraph {
         break;
       }
 
-      case "node_removed":
-        this._logDispatch(m, t);
+      case "node_removed": {
+        const wsId =
+          typeof m.node_id === "string" ? m.node_id : null;
+        if (!wsId) {
+          // eslint-disable-next-line no-console
+          console.debug("[t2-slice4] node_removed missing node_id");
+          break;
+        }
+        const synthId = this._wsIdToSynthId.get(wsId);
+        if (synthId) {
+          // eslint-disable-next-line no-console
+          console.debug("[t2-slice4] node_removed", wsId, "->", synthId);
+          this._studio._fadeAndRemoveNode?.(synthId, {
+            durationMs: 400,
+          });
+          this._wsIdToSynthId.delete(wsId);
+        } else {
+          // eslint-disable-next-line no-console
+          console.debug("[t2-slice4] node_removed for unknown id", wsId);
+        }
         break;
+      }
 
       case "edge_removed":
       case "error":
