@@ -49,3 +49,74 @@ out of slice 3 scope. Address during T3 or polish window.
   drops them. See debt-17 for the bridge layer; deeper than just
   type preservation. Inventory to be filed in slice 6 / T3.
 
+
+## Phase 14c — feature parity audit (Day 5 evening)
+
+Comparison live mode (port 7778) vs analyze viewer (port 7777).
+Diagnosis traced through wsNodeToViewerShape, node_row_to_dict,
+server.py routes inventory.
+
+### Missing in live mode
+
+- [debt-19] wsNodeToViewerShape (graphNode.ts) does not have a
+  branch for type='dark_matter'. Falls through to default branch:
+  color #94a3b8 gray, val 1. Should be: color #8b5cf6 violet,
+  val 2, with metadata flag for dark matter renderer to pick up.
+  Backend correctly emits type='dark_matter' via node_row_to_dict.
+  Frontend bridge is the gap. Fix: ~30 LOC, ~0.5d. Severity: visible
+  in StatsPanel as "Dark Matter: 0" because no nodes pass dark
+  matter detection on frontend.
+
+- [debt-20] Same as debt-19 for entangled pairs. Backend stats track
+  entangled count via workspace.py:59 SQL. Bridge has no branch for
+  type='entangled_pair' (or whatever the type string actually is —
+  needs verification by checking sample WS payload). Fix together
+  with debt-19 in single bridge enhancement.
+
+- [debt-21] /api/timeline endpoint does not exist in server.py.
+  Frontend at viewerEngine.ts line ~4959 has applyTimelineSnapshot
+  and applyTimelineToPixiContainers code. T1 mode bundles
+  timeline_data.json; live mode has no source. Frontend logs 404
+  every page load. Defer to Phase 15: niche feature, backend would
+  need to expose git history snapshots. Severity: cosmetic.
+
+- [debt-22] /api/ai/status, /api/ai/diagnose, /api/ai/security,
+  /api/ai/architecture, /api/ai/ask endpoints all missing from
+  server.py. Frontend X-RAY panel renders "AI Agent unavailable —
+  set OMNIX_AI_KEY or install Ollama" because /api/ai/status 404s.
+  These get built natively as part of Day 15 Agent tab work. Do
+  NOT split into separate slice. Severity: AI agent panel currently
+  non-functional, but planned.
+
+- [debt-23] After debt-19/20 fix, verify viewerEngine dark matter
+  toggle (line ~5620) actually picks up the type field from bridged
+  nodes. Code path: btn-dark-matter click → toggles ql variable →
+  QF dark matter render fn iterates nodes by type. Likely works
+  once bridge passes the type, but needs visual verification.
+  Severity: blocker for debt-19 actually being visible.
+
+- [debt-24] Backend node_row_to_dict does not emit cluster_id field.
+  T1 bundled JSON has Louvain cluster ids per node which drive the
+  galaxy layout (cluster-colored, cluster-positioned). Live mode WS
+  bootstrap sends flat node dicts; galaxy renders flat-radial, not
+  clustered. Fix: extend node_row_to_dict to query cluster from DB
+  (add cluster table if not present) and include in payload. Cost:
+  ~1.5d split between backend SQL/algo and frontend layout adoption.
+  Severity: live mode galaxy looks visibly less informative than
+  analyze viewer galaxy. Significant for Day 24 demo aesthetic.
+
+### Inventory of T1 vs live divergence
+
+T1 bundled (analyze viewer at :7777):
+  - Node types: file, directory, function, method, class, dark_matter
+  - Link types: CALLS, IMPORTS, INHERITS, DECORATES, DEFINES, ENTANGLED, DARK_FORCE
+  - Per-node fields: cluster_id, val, color
+  - Timeline data: separate JSON
+
+Live mode (Studio at :7778) currently passes through bridge:
+  - Node types correctly preserved BUT only file/dir/folder/function/
+    method/class get type-aware rendering. dark_matter falls through.
+  - Link types: untested for ENTANGLED/DARK_FORCE preservation
+  - cluster_id: MISSING — debt-24
+  - Timeline: 404 — debt-21
+
