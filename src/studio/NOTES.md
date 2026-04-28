@@ -130,6 +130,9 @@ server.py routes inventory.
   generator + Studio overlay or stop regenerating until reconciled.
   Slice 6a verification (2026): grep of `build_studio_viewer_engine.py` shows no
   `_bornEdge` / slice 6 references — unchanged risk profile vs slice 5.
+  Slice 6b verification (2026): same — no `setViewContext` / slice 6b strings in
+  the generator; `studio?.setViewContext` hooks live only in hand-maintained
+  `viewerEngine.ts`.
 
 - [debt-30] Optional follow-up: if live CALLS edges feel visually abrupt (no gsap
   on edge geometry), add a short gsap alpha/stroke reveal after `_bornEdge`;

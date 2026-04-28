@@ -1412,6 +1412,7 @@ export function installOmnixViewerEngine(studio) {
   }
 
   function cleanupPlanetView() {
+    studio?.setViewContext?.('non-planet');
     planetViewTitle = null;
     const toRemove = [];
     for (let i = 0; i < world.children.length; i++) {
@@ -2156,6 +2157,7 @@ export function installOmnixViewerEngine(studio) {
     titleText.eventMode = 'none';
     planetContainer.addChild(titleText);
     planetViewTitle = titleText;
+    studio?.setViewContext?.('planet-ready');
   }
 
   function transitionToStar(dirId, clickedSimNode) {

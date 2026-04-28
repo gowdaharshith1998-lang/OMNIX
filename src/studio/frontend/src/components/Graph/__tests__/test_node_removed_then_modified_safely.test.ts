@@ -29,6 +29,14 @@ function fadeSpy(g: StudioGraph) {
     ._studio._fadeAndRemoveNode;
 }
 
+function planetReady(g: StudioGraph) {
+  (
+    g as unknown as {
+      _studio: { setViewContext?: (c: "planet-ready" | "non-planet") => void };
+    }
+  )._studio.setViewContext?.("planet-ready");
+}
+
 describe("node_removed then node_modified same ws id", () => {
   let debugSpy: ReturnType<typeof vi.spyOn>;
 
@@ -64,6 +72,7 @@ describe("node_removed then node_modified same ws id", () => {
       total_nodes: 1,
       total_edges: 0,
     });
+    planetReady(g);
 
     const map = (g as unknown as { _wsIdToSynthId: Map<string, string> })._wsIdToSynthId;
     expect(map.has("raw123")).toBe(true);

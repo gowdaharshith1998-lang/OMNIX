@@ -29,6 +29,14 @@ function fadeSpy(g: StudioGraph) {
     ._studio._fadeAndRemoveNode;
 }
 
+function planetReady(g: StudioGraph) {
+  (
+    g as unknown as {
+      _studio: { setViewContext?: (c: "planet-ready" | "non-planet") => void };
+    }
+  )._studio.setViewContext?.("planet-ready");
+}
+
 describe("node_added then node_removed quickly", () => {
   it("registers map, removes cleanly within 100ms window", () => {
     const el = document.createElement("div");
@@ -54,6 +62,7 @@ describe("node_added then node_removed quickly", () => {
       total_nodes: 1,
       total_edges: 0,
     });
+    planetReady(g);
 
     g.ingestDelta({
       type: "node_added",

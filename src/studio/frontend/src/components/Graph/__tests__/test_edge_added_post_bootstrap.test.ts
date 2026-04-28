@@ -24,6 +24,14 @@ function edgeSpy(g: StudioGraph) {
     ._bornEdge;
 }
 
+function planetReady(g: StudioGraph) {
+  (
+    g as unknown as {
+      _studio: { setViewContext?: (c: "planet-ready" | "non-planet") => void };
+    }
+  )._studio.setViewContext?.("planet-ready");
+}
+
 describe("edge_added after bootstrap", () => {
   it("calls _bornEdge with resolved synth ids when both endpoints exist", () => {
     const el = document.createElement("div");
@@ -59,6 +67,7 @@ describe("edge_added after bootstrap", () => {
       total_nodes: 2,
       total_edges: 0,
     });
+    planetReady(g);
 
     g.ingestDelta({
       type: "edge_added",

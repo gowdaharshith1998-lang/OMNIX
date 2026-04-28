@@ -22,6 +22,14 @@ function bornSpy(g: StudioGraph) {
     ._bornNode;
 }
 
+function planetReady(g: StudioGraph) {
+  (
+    g as unknown as {
+      _studio: { setViewContext?: (c: "planet-ready" | "non-planet") => void };
+    }
+  )._studio.setViewContext?.("planet-ready");
+}
+
 describe("node_added after bootstrap", () => {
   it("calls _bornNode with ws id, viewer-shaped payload, and 400ms opts", () => {
     const el = document.createElement("div");
@@ -46,6 +54,7 @@ describe("node_added after bootstrap", () => {
       total_nodes: 1,
       total_edges: 0,
     });
+    planetReady(g);
 
     g.ingestDelta({
       type: "node_added",

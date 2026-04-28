@@ -26,6 +26,14 @@ function edgeSpy(g: StudioGraph) {
     ._bornEdge;
 }
 
+function planetReady(g: StudioGraph) {
+  (
+    g as unknown as {
+      _studio: { setViewContext?: (c: "planet-ready" | "non-planet") => void };
+    }
+  )._studio.setViewContext?.("planet-ready");
+}
+
 describe("edge_added duplicate unordered pair", () => {
   it("invokes _bornEdge twice; second live dispatch still attempts viewer (viewer returns false)", () => {
     const el = document.createElement("div");
@@ -61,6 +69,7 @@ describe("edge_added duplicate unordered pair", () => {
       total_nodes: 2,
       total_edges: 0,
     });
+    planetReady(g);
 
     const edgePayload = {
       type: "edge_added" as const,

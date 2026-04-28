@@ -38,6 +38,8 @@ type StudioHandle = {
   ) => boolean;
   /** T2 v2 slice 6a — live edge_added; returns true if a CALLS link was added to planet force graph */
   _bornEdge?: (fromSynthId: string, toSynthId: string) => boolean;
+  /** T2 v2 slice 6b — viewer reports whether planet PIXI layer is ready for live deltas */
+  setViewContext?: (context: "planet-ready" | "non-planet") => void;
 };
 
 type BootstrapBuffer = {
@@ -58,6 +60,8 @@ export class StudioGraph {
 
   private _wsIdToSynthId = new Map<string, string>();
 
+  private _viewContext: "planet-ready" | "non-planet" = "non-planet";
+
   private _bootstrapBuffer: BootstrapBuffer = {
     nodes: [],
     edges: [],
@@ -73,6 +77,18 @@ export class StudioGraph {
   ) {
     this._studio = { _container: container, _options: options };
     installOmnixViewerEngine(this._studio);
+    this._studio.setViewContext = (context: "planet-ready" | "non-planet") => {
+      // eslint-disable-next-line no-console
+      console.debug("[t2-slice6b] viewContext →", context);
+      this._viewContext = context;
+    };
+  }
+
+  private _shouldDropLivePlanetDelta(): boolean {
+    return (
+      this._bootstrapBuffer.completed &&
+      this._viewContext !== "planet-ready"
+    );
   }
 
   setOptions(options: StudioGraphOptions) {
@@ -242,6 +258,16 @@ export class StudioGraph {
           );
           break;
         }
+        if (this._shouldDropLivePlanetDelta()) {
+          // eslint-disable-next-line no-console
+          console.debug(
+            "[t2-slice6b] live delta dropped, viewContext=",
+            this._viewContext,
+            "verb=",
+            t
+          );
+          return;
+        }
         if (!m.node || typeof m.node !== "object") {
           // eslint-disable-next-line no-console
           console.debug("[t2-slice5] node_added missing node payload", m);
@@ -297,6 +323,16 @@ export class StudioGraph {
             m
           );
           break;
+        }
+        if (this._shouldDropLivePlanetDelta()) {
+          // eslint-disable-next-line no-console
+          console.debug(
+            "[t2-slice6b] live delta dropped, viewContext=",
+            this._viewContext,
+            "verb=",
+            t
+          );
+          return;
         }
         const edge = m.edge;
         if (!edge || typeof edge !== "object") {
@@ -367,6 +403,16 @@ export class StudioGraph {
       }
 
       case "node_modified": {
+        if (this._shouldDropLivePlanetDelta()) {
+          // eslint-disable-next-line no-console
+          console.debug(
+            "[t2-slice6b] live delta dropped, viewContext=",
+            this._viewContext,
+            "verb=",
+            t
+          );
+          return;
+        }
         const wsId =
           typeof m.node_id === "string" ? m.node_id : null;
         if (!wsId) {
@@ -390,6 +436,16 @@ export class StudioGraph {
       }
 
       case "node_removed": {
+        if (this._shouldDropLivePlanetDelta()) {
+          // eslint-disable-next-line no-console
+          console.debug(
+            "[t2-slice6b] live delta dropped, viewContext=",
+            this._viewContext,
+            "verb=",
+            t
+          );
+          return;
+        }
         const wsId =
           typeof m.node_id === "string" ? m.node_id : null;
         if (!wsId) {

@@ -22,6 +22,14 @@ function flashSpy(g: StudioGraph) {
     ._studio._flashNodeRim;
 }
 
+function planetReady(g: StudioGraph) {
+  (
+    g as unknown as {
+      _studio: { setViewContext?: (c: "planet-ready" | "non-planet") => void };
+    }
+  )._studio.setViewContext?.("planet-ready");
+}
+
 describe("node_modified after bootstrap", () => {
   it("resolves ws_id to synth id and calls _flashNodeRim with opts", () => {
     const el = document.createElement("div");
@@ -46,6 +54,7 @@ describe("node_modified after bootstrap", () => {
       total_nodes: 1,
       total_edges: 0,
     });
+    planetReady(g);
 
     const map = (g as unknown as { _wsIdToSynthId: Map<string, string> })._wsIdToSynthId;
     expect(map.get("raw123")).toBe("x.py::foo");

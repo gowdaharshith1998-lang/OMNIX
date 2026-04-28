@@ -24,6 +24,14 @@ function fadeSpy(g: StudioGraph) {
     ._studio._fadeAndRemoveNode;
 }
 
+function planetReady(g: StudioGraph) {
+  (
+    g as unknown as {
+      _studio: { setViewContext?: (c: "planet-ready" | "non-planet") => void };
+    }
+  )._studio.setViewContext?.("planet-ready");
+}
+
 describe("node_removed after bootstrap", () => {
   it("resolves ws_id to synth id, calls _fadeAndRemoveNode, and removes map entry", () => {
     const el = document.createElement("div");
@@ -48,6 +56,7 @@ describe("node_removed after bootstrap", () => {
       total_nodes: 1,
       total_edges: 0,
     });
+    planetReady(g);
 
     const map = (g as unknown as { _wsIdToSynthId: Map<string, string> })._wsIdToSynthId;
     expect(map.get("raw123")).toBe("x.py::foo");
