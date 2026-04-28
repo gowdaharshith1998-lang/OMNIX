@@ -207,5 +207,5 @@ StatsPanel at `top-5`).
 Debt-13 backend live emission: synthetic `node_modified` when disk sha differs from
 `file_hashes` but `compute_file_delta` is empty; structured ParserBridge logging (opt-in
 `OMNIX_STUDIO_DEBUG=1`). New integration tests `tests/studio/test_t3_live_emission.py`.
-Test counts: pytest 305 (+3 vs pre-T3), vitest 38 unchanged.
+Test counts: pytest 305 (+3 vs pre-T3), vitest 38 unchanged. Fix commit on `main`: `8f68098`.
 
