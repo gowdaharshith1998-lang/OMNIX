@@ -3221,6 +3221,40 @@ export function installOmnixViewerEngine(studio) {
     });
   }
 
+  studio._flashNodeRim = function (nodeId, opts) {
+    opts = opts || {};
+    const color = opts.color != null ? opts.color : 0xffffff;
+    const ms = opts.durationMs != null ? opts.durationMs : 200;
+    const pc =
+      world &&
+      world.children &&
+      world.children.find(c => c._omnixType === 'planet');
+    if (!pc || !pc._nodes) return;
+    let pnRef = null;
+    for (let pi = 0; pi < pc._nodes.length; pi++) {
+      const pn = pc._nodes[pi];
+      if (pn && pn.symbol && pn.symbol.id === nodeId) {
+        pnRef = pn;
+        break;
+      }
+    }
+    if (!pnRef || !pnRef.container) return;
+    const radius = pnRef.radius || 18;
+    const rim = new PIXI.Graphics();
+    rim.lineStyle(2, color, 1.0);
+    rim.drawCircle(0, 0, radius * 1.15);
+    pnRef.container.addChild(rim);
+    gsap.to(rim, {
+      alpha: 0,
+      duration: ms / 1000,
+      ease: 'sine.out',
+      onComplete: () => {
+        if (rim.parent) rim.parent.removeChild(rim);
+        rim.destroy({ children: true });
+      },
+    });
+  };
+
   function drawTraceLine(gfx, fromNode, toNode, index) {
     const color = 0xa855f7;
     const alpha = Math.max(0.12, 0.55 - index * 0.05);

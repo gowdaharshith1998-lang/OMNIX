@@ -22,6 +22,10 @@ type StudioHandle = {
   _loadGraphFromData?: (data: unknown) => void;
   _ingestDelta?: (message: unknown) => void;
   _destroy?: () => void;
+  _flashNodeRim?: (
+    nodeId: string,
+    opts?: { color?: number; durationMs?: number }
+  ) => void;
 };
 
 type BootstrapBuffer = {
@@ -39,6 +43,8 @@ type BootstrapBuffer = {
  */
 export class StudioGraph {
   private _studio: StudioHandle;
+
+  private _wsIdToSynthId = new Map<string, string>();
 
   private _bootstrapBuffer: BootstrapBuffer = {
     nodes: [],
@@ -92,7 +98,12 @@ export class StudioGraph {
         console.debug("[t2-slice2]", t, id);
         break;
       }
-      case "node_modified":
+      case "node_modified": {
+        const id = m.node_id != null ? String(m.node_id) : "";
+        // eslint-disable-next-line no-console
+        console.debug("[t2-slice2]", t, id);
+        break;
+      }
       case "node_removed": {
         const id = m.node_id != null ? String(m.node_id) : "";
         // eslint-disable-next-line no-console
@@ -145,6 +156,21 @@ export class StudioGraph {
 
   private _renderBufferedSnapshot(): void {
     const rawNodes = this._bootstrapBuffer.nodes.map(wsNodeToViewerShape);
+    this._wsIdToSynthId = new Map<string, string>();
+    for (let i = 0; i < rawNodes.length; i++) {
+      const node = rawNodes[i] as Record<string, unknown>;
+      const meta = node.metadata;
+      if (
+        meta &&
+        typeof meta === "object" &&
+        !Array.isArray(meta) &&
+        typeof (meta as Record<string, unknown>).ws_id === "string" &&
+        typeof node.id === "string"
+      ) {
+        const wsId = String((meta as Record<string, unknown>).ws_id);
+        this._wsIdToSynthId.set(wsId, node.id as string);
+      }
+    }
     const rawLinks = this._bootstrapBuffer.edges.map(wsEdgeToLinkShape);
     const payload = {
       nodes: rawNodes,
@@ -241,7 +267,29 @@ export class StudioGraph {
         break;
       }
 
-      case "node_modified":
+      case "node_modified": {
+        const wsId =
+          typeof m.node_id === "string" ? m.node_id : null;
+        if (!wsId) {
+          // eslint-disable-next-line no-console
+          console.debug("[t2-slice3] node_modified missing node_id");
+          break;
+        }
+        const synthId = this._wsIdToSynthId.get(wsId);
+        if (synthId) {
+          // eslint-disable-next-line no-console
+          console.debug("[t2-slice3] node_modified", wsId, "->", synthId);
+          this._studio._flashNodeRim?.(synthId, {
+            color: 0xffffff,
+            durationMs: 200,
+          });
+        } else {
+          // eslint-disable-next-line no-console
+          console.debug("[t2-slice3] node_modified for unknown id", wsId);
+        }
+        break;
+      }
+
       case "node_removed":
         this._logDispatch(m, t);
         break;
