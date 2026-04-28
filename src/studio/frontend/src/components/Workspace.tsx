@@ -11,6 +11,7 @@ import { LeftIconStrip } from "./LeftIconStrip";
 import { NewFileModal } from "./NewFileModal";
 import { QuickFilePicker } from "./QuickFilePicker";
 import { StatsPanel } from "./StatsPanel";
+import { BootstrapIndicator } from "./BootstrapIndicator";
 import {
   ReconnectIndicator,
   type ReconnectIndicatorMode,
@@ -93,6 +94,14 @@ export function Workspace({
   const graphRef = useRef<GraphCanvasHandle | null>(null);
   /** After first successful WS open; used to distinguish initial connect vs reconnect (slice 6c). */
   const hasConnectedBeforeRef = useRef(false);
+  /** First live bootstrap_complete only (never reset — slice 6d). */
+  const hasBootstrappedRef = useRef(false);
+  const bootstrapHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  const [bootstrapPhase, setBootstrapPhase] = useState<
+    "pending" | "shown" | "hiding" | "hidden"
+  >("pending");
   const [reconnectedPhase, setReconnectedPhase] = useState<
     "hidden" | "shown" | "fade"
   >("hidden");
@@ -166,6 +175,18 @@ export function Workspace({
     const c = new StudioWebSocket(
       workspaceId,
       (msg) => {
+        const m = msg as Record<string, unknown>;
+        if (m.type === "bootstrap_complete" && !hasBootstrappedRef.current) {
+          hasBootstrappedRef.current = true;
+          setBootstrapPhase("hiding");
+          if (bootstrapHideTimerRef.current != null) {
+            clearTimeout(bootstrapHideTimerRef.current);
+          }
+          bootstrapHideTimerRef.current = setTimeout(() => {
+            bootstrapHideTimerRef.current = null;
+            setBootstrapPhase("hidden");
+          }, 200);
+        }
         graphRef.current?.ingestMessage(msg);
       },
       (s) => {
@@ -186,8 +207,18 @@ export function Workspace({
       }
     );
     c.connect();
-    return () => c.close();
+    return () => {
+      if (bootstrapHideTimerRef.current != null) {
+        clearTimeout(bootstrapHideTimerRef.current);
+        bootstrapHideTimerRef.current = null;
+      }
+      c.close();
+    };
   }, [workspaceId]);
+
+  useEffect(() => {
+    if (isT1Mode()) setBootstrapPhase("hidden");
+  }, []);
 
   const isReconnecting =
     (wsState === "connecting" || wsState === "closed") &&
@@ -211,6 +242,27 @@ export function Workspace({
   if (isReconnecting) reconnectIndicatorMode = "reconnecting";
   else if (reconnectedPhase === "shown") reconnectIndicatorMode = "reconnected";
   else if (reconnectedPhase === "fade") reconnectIndicatorMode = "reconnected-fade";
+
+  const loadingGate =
+    (wsState === "connecting" || wsState === "open") &&
+    !hasBootstrappedRef.current &&
+    !isReconnecting;
+
+  useEffect(() => {
+    if (isT1Mode()) return;
+    if (bootstrapPhase === "pending" && loadingGate) {
+      setBootstrapPhase("shown");
+    }
+  }, [bootstrapPhase, loadingGate]);
+
+  const bootstrapIndicatorPhase =
+    isT1Mode() || bootstrapPhase === "hidden"
+      ? "hidden"
+      : bootstrapPhase === "hiding"
+        ? "hiding"
+        : loadingGate
+          ? "shown"
+          : "hidden";
 
   useEffect(() => {
     if (drillDownTarget?.mode !== "node") return;
@@ -390,6 +442,7 @@ export function Workspace({
       </div>
 
       <ReconnectIndicator mode={reconnectIndicatorMode} />
+      <BootstrapIndicator phase={bootstrapIndicatorPhase} />
 
       <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
         <div className="relative min-h-0 w-full min-w-0 flex-1">

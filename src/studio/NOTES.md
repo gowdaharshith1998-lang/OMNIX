@@ -183,3 +183,16 @@ Slice 6c verification (2026): `scripts/build_studio_viewer_engine.py` contains *
 slice 6c / reconnect-indicator strings — unchanged risk profile vs slice 6b; Studio-only
 UI lives in `Workspace.tsx` / `ReconnectIndicator.tsx`.
 
+## Slice 6d — bootstrap UX (Option A)
+
+First-load ambiguity (“still loading” vs “broken”) before the first `bootstrap_complete`
+is addressed with a small **BootstrapIndicator** overlay (`BootstrapIndicator.tsx`):
+parse `bootstrap_complete` in the existing `Workspace` WebSocket message callback (before
+`graphRef.ingestMessage`), set `hasBootstrappedRef`, fade out over 200ms, then unmount.
+
+Reconnect suppression uses **`!isReconnecting`** — not `!hasConnectedBeforeRef.current`,
+because the latter flips true on first `open` **before** `bootstrap_complete` and would
+suppress the overlay during the real first load. `?t1=1` / T1 mode gates the overlay off
+(no live bootstrap). Layout matches slice 6c: `fixed right-3 top-16 z-[35]` (below
+StatsPanel at `top-5`).
+
