@@ -5,6 +5,7 @@ import { isT1Mode } from "@/lib/t1Mode";
 import { StudioWebSocket } from "@/lib/ws";
 import { useStudioKeybindings } from "@/lib/keybindings";
 import { BottomToolbar } from "./BottomToolbar";
+import { CodeTab, type CodeTabHandle, type CodeTarget } from "./CodeTab";
 import { FindBar } from "./FindBar";
 import { LeftRail, type LeftRailDrawer } from "./LeftRail";
 import { NewFileModal } from "./NewFileModal";
@@ -16,6 +17,7 @@ import {
   type ReconnectIndicatorMode,
 } from "./ReconnectIndicator";
 import type { GraphNode } from "@/types/drilldown";
+import { applyNodeModified, recordFromGraphPayload } from "@/lib/graphNode";
 
 type Props = {
   workspaceId: string;
@@ -45,14 +47,6 @@ function projectLabel(p: string) {
   const parts = s.split("/").filter(Boolean);
   return parts.length > 0 ? (parts[parts.length - 1] as string) : s;
 }
-
-type CodeTarget = {
-  path: string;
-  lineStart?: number;
-  lineEnd?: number;
-  nodeId?: string;
-  name?: string;
-};
 
 function DrawerPlaceholder({ label }: { label: string }) {
   return (
@@ -91,6 +85,8 @@ export function Workspace({
 
   const graphNodesRef = useRef(graphNodes);
   const graphRef = useRef<GraphCanvasHandle | null>(null);
+  const codeRef = useRef<CodeTabHandle | null>(null);
+  const codePathRef = useRef<string | null>(null);
   /** After first successful WS open; used to distinguish initial connect vs reconnect (slice 6c). */
   const hasConnectedBeforeRef = useRef(false);
   /** First live bootstrap_complete only (never reset — slice 6d). */
@@ -107,6 +103,10 @@ export function Workspace({
   useEffect(() => {
     graphNodesRef.current = graphNodes;
   }, [graphNodes]);
+
+  useEffect(() => {
+    codePathRef.current = codeTarget?.path ?? null;
+  }, [codeTarget?.path]);
 
   const refreshFiles = useCallback(async () => {
     try {
@@ -151,6 +151,68 @@ export function Workspace({
     });
   }, []);
 
+  const [codeExternalEpoch, setCodeExternalEpoch] = useState(0);
+
+  const noteCodeFileTouched = useCallback((path: string | null) => {
+    const openPath = codePathRef.current;
+    if (path && openPath && path === openPath) {
+      setCodeExternalEpoch((epoch) => epoch + 1);
+    }
+  }, []);
+
+  const ingestWorkspaceMessage = useCallback(
+    (msg: Record<string, unknown>) => {
+      const kind = typeof msg.type === "string" ? msg.type : "";
+      if (kind === "node_added" && msg.node && typeof msg.node === "object") {
+        const rec = recordFromGraphPayload(msg.node as Record<string, unknown>);
+        if (rec) {
+          setGraphNodes((prev) => {
+            const next = new Map(prev);
+            next.set(rec.id, rec);
+            return next;
+          });
+          noteCodeFileTouched(rec.file_path);
+        }
+        return;
+      }
+      if (kind === "node_modified" && typeof msg.node_id === "string") {
+        const prevNode = graphNodesRef.current.get(msg.node_id);
+        if (prevNode) {
+          noteCodeFileTouched(prevNode.file_path);
+          const changes =
+            msg.changes && typeof msg.changes === "object"
+              ? (msg.changes as Parameters<typeof applyNodeModified>[1])
+              : undefined;
+          const nextNode = applyNodeModified(prevNode, changes);
+          setGraphNodes((prev) => {
+            const next = new Map(prev);
+            next.set(nextNode.id, nextNode);
+            return next;
+          });
+          noteCodeFileTouched(nextNode.file_path);
+        }
+        return;
+      }
+      if (kind === "node_removed" && typeof msg.node_id === "string") {
+        const prevNode = graphNodesRef.current.get(msg.node_id);
+        noteCodeFileTouched(prevNode?.file_path ?? null);
+        setGraphNodes((prev) => {
+          const next = new Map(prev);
+          next.delete(msg.node_id as string);
+          return next;
+        });
+        return;
+      }
+      if (
+        (kind === "file_added" || kind === "file_removed") &&
+        typeof msg.path === "string"
+      ) {
+        noteCodeFileTouched(msg.path);
+      }
+    },
+    [noteCodeFileTouched]
+  );
+
   useEffect(() => {
     if (isT1Mode()) return;
 
@@ -170,6 +232,7 @@ export function Workspace({
           }, 200);
         }
         graphRef.current?.ingestMessage(msg);
+        ingestWorkspaceMessage(m);
       },
       (s) => {
         if (s === "connecting") setWsState("connecting");
@@ -196,7 +259,7 @@ export function Workspace({
       }
       c.close();
     };
-  }, [workspaceId]);
+  }, [ingestWorkspaceMessage, workspaceId]);
 
   useEffect(() => {
     if (isT1Mode()) setBootstrapPhase("hidden");
@@ -313,11 +376,13 @@ export function Workspace({
       id: "code",
       label: "Code",
       content: (
-        <div className="flex h-full items-center justify-center p-6 text-center text-sm text-omnix-text-dim">
-          {codeTarget
-            ? `Code tab will open ${codeTarget.path}`
-            : "Select a file or symbol to open Code."}
-        </div>
+        <CodeTab
+          ref={codeRef}
+          workspaceId={workspaceId}
+          target={codeTarget}
+          externalFileEpoch={codeExternalEpoch}
+          onToast={showToastStable}
+        />
       ),
     },
     {
@@ -348,7 +413,7 @@ export function Workspace({
       setActiveDrawer((drawer) => (drawer === "search" ? null : "search")),
     onNewFile: () => setNewFile(true),
     onCmdSWhenNoDrill: onDrillSaveShell,
-    onSaveDrill: onDrillSaveShell,
+    onSaveDrill: () => codeRef.current?.save(),
   });
 
   return (
