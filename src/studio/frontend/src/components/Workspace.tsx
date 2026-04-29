@@ -7,6 +7,7 @@ import { useStudioKeybindings } from "@/lib/keybindings";
 import { BottomToolbar } from "./BottomToolbar";
 import { CodeTab, type CodeTabHandle, type CodeTarget } from "./CodeTab";
 import { FilesDrawer } from "./drawers/FilesDrawer";
+import { ReceiptsDrawer } from "./drawers/ReceiptsDrawer";
 import { FindBar } from "./FindBar";
 import { HistoryTab } from "./HistoryTab";
 import { LeftRail, type LeftRailDrawer } from "./LeftRail";
@@ -369,7 +370,7 @@ export function Workspace({
     files: <FilesDrawer workspaceId={workspaceId} onOpenFile={openDrillDownFile} />,
     search: <DrawerPlaceholder label="Search" />,
     bugs: <DrawerPlaceholder label="Bugs" />,
-    receipts: <DrawerPlaceholder label="Receipts" />,
+    receipts: <ReceiptsDrawer workspaceId={workspaceId} />,
     settings: <DrawerPlaceholder label="Settings" />,
   };
 
