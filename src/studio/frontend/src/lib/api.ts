@@ -215,3 +215,94 @@ export async function searchWorkspace(
   const j = (await r.json()) as { results: SearchResult[] };
   return j.results;
 }
+
+export type BugFailure = {
+  exception_type?: string;
+  exception_message?: string;
+  message?: string;
+  shrunk_input?: string;
+  input?: string;
+};
+
+export type BugFinding = {
+  file: string;
+  function: string;
+  lineno?: number;
+  severity_score?: number;
+  kind?: string;
+  caller_count?: number;
+  reachable_from_entries?: boolean;
+  cluster_id?: string | number | null;
+  failures?: BugFailure[];
+  reason?: string;
+  input?: string;
+  language?: string;
+  runner_used?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type BugScanSummary = {
+  findings_count?: number;
+  files_scanned?: number;
+  files_skipped?: number;
+  import_errors_count?: number;
+  timeout_skips_count?: number;
+  total_examples_run?: number;
+  wall_time_seconds?: number;
+  skipped_main_count?: number;
+  skipped_by_reason?: Record<string, number>;
+};
+
+export type BugsScanEvent =
+  | {
+      type: "bugs_scan_started";
+      scan_id: string;
+      started_at: number;
+      target_path: string;
+    }
+  | {
+      type: "bugs_scan_heartbeat";
+      scan_id: string;
+      elapsed_seconds: number;
+    }
+  | {
+      type: "bugs_scan_complete";
+      scan_id: string;
+      findings: BugFinding[];
+      summary: BugScanSummary;
+      wall_time_seconds: number;
+    }
+  | {
+      type: "bugs_scan_error";
+      scan_id: string;
+      error_message: string;
+      error_kind: string;
+    };
+
+export class BugsScanConflictError extends Error {
+  activeScanId: string;
+
+  constructor(activeScanId: string) {
+    super("Scan already in progress");
+    this.name = "BugsScanConflictError";
+    this.activeScanId = activeScanId;
+  }
+}
+
+export async function startBugsScan(
+  workspaceId: string
+): Promise<{ scan_id: string }> {
+  const r = await fetch(
+    `/api/workspace/${encodeURIComponent(workspaceId)}/bugs/scan`,
+    { method: "POST" }
+  );
+  if (r.status === 409) {
+    const j = (await r.json().catch(() => ({}))) as { active_scan_id?: string };
+    throw new BugsScanConflictError(j.active_scan_id ?? "");
+  }
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(t || "scan failed");
+  }
+  return r.json() as Promise<{ scan_id: string }>;
+}

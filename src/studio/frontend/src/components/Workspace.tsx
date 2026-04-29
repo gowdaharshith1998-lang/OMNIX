@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { GraphCanvas, type GraphCanvasHandle } from "./Graph/GraphCanvas";
-import { createFile, listFiles, type FileEntry, type SearchResult } from "@/lib/api";
+import {
+  createFile,
+  listFiles,
+  type BugsScanEvent,
+  type FileEntry,
+  type SearchResult,
+} from "@/lib/api";
 import { isT1Mode } from "@/lib/t1Mode";
 import { StudioWebSocket } from "@/lib/ws";
 import { useStudioKeybindings } from "@/lib/keybindings";
@@ -64,6 +70,15 @@ function projectLabel(p: string) {
   return parts.length > 0 ? (parts[parts.length - 1] as string) : s;
 }
 
+function isBugsScanEvent(msg: Record<string, unknown>): msg is BugsScanEvent {
+  return (
+    msg.type === "bugs_scan_started" ||
+    msg.type === "bugs_scan_heartbeat" ||
+    msg.type === "bugs_scan_complete" ||
+    msg.type === "bugs_scan_error"
+  );
+}
+
 export function Workspace({
   workspaceId,
   projectPath,
@@ -93,6 +108,7 @@ export function Workspace({
   );
   const [rightTab, setRightTab] = useState<RightPanelTabId>("xray");
   const [toast, setToast] = useState<string | null>(null);
+  const [bugsScanEvent, setBugsScanEvent] = useState<BugsScanEvent | null>(null);
   const [graphHint] = useState<string[]>([]);
   const [codeTarget, setCodeTarget] = useState<CodeTarget | null>(null);
   const [selectedXRayNode, setSelectedXRayNode] = useState<GraphNode | null>(null);
@@ -356,6 +372,9 @@ export function Workspace({
       workspaceId,
       (msg) => {
         const m = msg as Record<string, unknown>;
+        if (isBugsScanEvent(m)) {
+          setBugsScanEvent(m);
+        }
         if (m.type === "bootstrap_complete" && !hasBootstrappedRef.current) {
           hasBootstrappedRef.current = true;
           setBootstrapPhase("hiding");
@@ -522,7 +541,13 @@ export function Workspace({
         }}
       />
     ),
-    bugs: <BugsDrawer />,
+    bugs: (
+      <BugsDrawer
+        workspaceId={workspaceId}
+        scanEvent={bugsScanEvent}
+        onToast={showToastStable}
+      />
+    ),
     receipts: <ReceiptsDrawer workspaceId={workspaceId} />,
     settings: <SettingsDrawer projectPath={projectPath} />,
   };

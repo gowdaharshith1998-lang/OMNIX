@@ -378,21 +378,21 @@ describe("drawers", () => {
     expect(container.textContent).toContain("/tmp/omnix");
   });
 
-  it("BugsDrawer mounts as a non-interactive stub and tears down", () => {
-    const { root, container } = render(<BugsDrawer />);
-    expect(container.textContent).toContain("slice 14b");
-    expect(container.querySelector("button")).toBeNull();
+  it("BugsDrawer mounts with scan controls and tears down", () => {
+    const { root, container } = render(<BugsDrawer workspaceId="w" />);
+    expect(container.textContent).toContain("PBT bug scan");
+    expect(container.querySelector("button")?.textContent).toContain("SCAN");
     act(() => root.unmount());
     expect(container.textContent).toBe("");
   });
 
-  it("BugsDrawer does not expose a scan button", () => {
-    const { container } = render(<BugsDrawer />);
-    expect(container.querySelector("button")).toBeNull();
+  it("BugsDrawer exposes an idle scan button", () => {
+    const { container } = render(<BugsDrawer workspaceId="w" />);
+    expect(container.querySelector("button")?.textContent).toContain("SCAN");
   });
 
-  it("BugsDrawer names the deferred slice", () => {
-    const { container } = render(<BugsDrawer />);
-    expect(container.textContent).toContain("14b");
+  it("BugsDrawer shows the empty findings state", () => {
+    const { container } = render(<BugsDrawer workspaceId="w" />);
+    expect(container.textContent).toContain("No findings yet");
   });
 });
