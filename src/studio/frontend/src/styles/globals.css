@@ -96,6 +96,7 @@ body {
 }
 
 .omnix-right-panel.is-collapsed {
+  overflow: visible;
   transform: translateX(calc(100% - 32px));
 }
 
