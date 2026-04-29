@@ -507,7 +507,7 @@ export function Workspace({
           graphEdges={graphEdges}
           stats={stats}
           onSuggestedAction={() =>
-            showToastStable("action wiring lands in slice 15", 1800)
+            showToastStable("action wiring lands in slice 15", 5000)
           }
         />
       ),
