@@ -157,7 +157,10 @@ describe("RightPanel", () => {
         onResizeEnd={vi.fn()}
       />
     );
-    act(() => container.querySelectorAll("button")[1]?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    const historyTab = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "History"
+    );
+    act(() => historyTab?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     expect(onSelect).toHaveBeenCalledWith("history");
   });
 
