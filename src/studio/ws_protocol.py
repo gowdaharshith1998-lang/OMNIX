@@ -105,6 +105,55 @@ def msg_pong(ts: float) -> dict[str, Any]:
     return {"type": "pong", "ts": float(ts)}
 
 
+def msg_bugs_scan_started(
+    scan_id: str, started_at: float, target_path: str
+) -> dict[str, Any]:
+    return {
+        "type": "bugs_scan_started",
+        "ts": _ts(),
+        "scan_id": str(scan_id),
+        "started_at": float(started_at),
+        "target_path": str(target_path),
+    }
+
+
+def msg_bugs_scan_heartbeat(scan_id: str, elapsed_seconds: float) -> dict[str, Any]:
+    return {
+        "type": "bugs_scan_heartbeat",
+        "ts": _ts(),
+        "scan_id": str(scan_id),
+        "elapsed_seconds": float(elapsed_seconds),
+    }
+
+
+def msg_bugs_scan_complete(
+    scan_id: str,
+    findings: list[dict[str, Any]],
+    summary: dict[str, Any],
+    wall_time_seconds: float,
+) -> dict[str, Any]:
+    return {
+        "type": "bugs_scan_complete",
+        "ts": _ts(),
+        "scan_id": str(scan_id),
+        "findings": findings,
+        "summary": summary,
+        "wall_time_seconds": float(wall_time_seconds),
+    }
+
+
+def msg_bugs_scan_error(
+    scan_id: str, error_message: str, error_kind: str
+) -> dict[str, Any]:
+    return {
+        "type": "bugs_scan_error",
+        "ts": _ts(),
+        "scan_id": str(scan_id),
+        "error_message": str(error_message),
+        "error_kind": str(error_kind),
+    }
+
+
 ALL_SERVER_TYPES: frozenset[str] = frozenset(
     {
         "bootstrap_start",
@@ -119,6 +168,10 @@ ALL_SERVER_TYPES: frozenset[str] = frozenset(
         "stats",
         "error",
         "pong",
+        "bugs_scan_started",
+        "bugs_scan_heartbeat",
+        "bugs_scan_complete",
+        "bugs_scan_error",
     }
 )
 

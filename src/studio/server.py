@@ -28,6 +28,7 @@ import contextlib
 import json
 import time
 import hashlib
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,7 @@ from src.parser import evolution
 from src.parser.grammar_detect import detect_for_path
 from src.parser.ingest_dispatch import ingest_unified_codebase
 from src.omnix_version import __version__
+from src.studio.bugs_scan import run_scan_for_workspace
 from src.studio.parser_bridge import ParserBridge, broadcast_to_workspace
 from src.studio.recent import add_recent, list_recent
 from src.studio.watcher import ProjectWatcher
@@ -502,6 +504,32 @@ async def api_workspace_close(body: CloseBody) -> dict[str, bool]:  # noqa: D103
     await w.stop()  # type: ignore[union-attr, misc, no-untyped-def]
     MANAGER.remove(body.workspace_id)
     return {"closed": True}
+
+
+async def _run_bugs_scan_task(workspace_id: str, w: Workspace, scan_id: str) -> None:
+    try:
+        await run_scan_for_workspace(w, scan_id)
+    finally:
+        MANAGER.finish_bug_scan(workspace_id, scan_id)
+
+
+@app.post("/api/workspace/{workspace_id}/bugs/scan")
+async def api_workspace_bugs_scan(workspace_id: str) -> JSONResponse:
+    w = MANAGER.get(workspace_id)
+    if w is None:
+        raise HTTPException(404, "unknown workspace_id")
+    scan_id = uuid.uuid4().hex
+    active_scan_id = MANAGER.try_begin_bug_scan(workspace_id, scan_id)
+    if active_scan_id is not None:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": "Scan already in progress",
+                "active_scan_id": active_scan_id,
+            },
+        )
+    asyncio.create_task(_run_bugs_scan_task(workspace_id, w, scan_id))  # noqa: RUF006
+    return JSONResponse(status_code=202, content={"scan_id": scan_id})
 
 
 def _file_matches_prefix(rel: str, pfx: str) -> bool:

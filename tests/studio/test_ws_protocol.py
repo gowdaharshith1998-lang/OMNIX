@@ -3,7 +3,16 @@ from __future__ import annotations
 
 import pytest
 
-from src.studio.ws_protocol import WsError, msg_bootstrap_start, msg_node_added, validate_serialized
+from src.studio.ws_protocol import (
+    WsError,
+    msg_bootstrap_start,
+    msg_bugs_scan_complete,
+    msg_bugs_scan_error,
+    msg_bugs_scan_heartbeat,
+    msg_bugs_scan_started,
+    msg_node_added,
+    validate_serialized,
+)
 from src.studio import ws_protocol as wsp
 
 
@@ -30,3 +39,14 @@ def test_invalid_type_raises() -> None:  # noqa: D103
             {"type": "not_a_real_omnix_message_type_12345", "ts": 1.0},
             from_server=True,  # noqa: E501
         )
+
+
+def test_bugs_scan_messages_serialize() -> None:
+    messages = [
+        msg_bugs_scan_started("s1", 123.0, "/tmp/project"),
+        msg_bugs_scan_heartbeat("s1", 5.0),
+        msg_bugs_scan_complete("s1", [{"file": "a.py"}], {"findings_count": 1}, 6.0),
+        msg_bugs_scan_error("s1", "boom", "runner_error"),
+    ]
+    for message in messages:
+        assert validate_serialized(message, from_server=True) == message["type"]

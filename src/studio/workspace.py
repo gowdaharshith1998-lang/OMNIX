@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import os
 import sqlite3
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -122,6 +123,8 @@ class Workspace:
 @dataclass
 class WorkspaceManager:
     workspaces: dict[str, Workspace] = field(default_factory=dict)
+    active_bug_scans: dict[str, str] = field(default_factory=dict)
+    _bug_scan_guard: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def get(self, wid: str) -> Workspace | None:
         return self.workspaces.get(wid)
@@ -131,6 +134,21 @@ class WorkspaceManager:
 
     def remove(self, wid: str) -> None:
         self.workspaces.pop(wid, None)
+        with self._bug_scan_guard:
+            self.active_bug_scans.pop(wid, None)
+
+    def try_begin_bug_scan(self, wid: str, scan_id: str) -> str | None:
+        with self._bug_scan_guard:
+            active = self.active_bug_scans.get(wid)
+            if active:
+                return active
+            self.active_bug_scans[wid] = scan_id
+            return None
+
+    def finish_bug_scan(self, wid: str, scan_id: str) -> None:
+        with self._bug_scan_guard:
+            if self.active_bug_scans.get(wid) == scan_id:
+                self.active_bug_scans.pop(wid, None)
 
 
 MANAGER = WorkspaceManager()
