@@ -31,6 +31,7 @@ import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import re
 
 import sqlite3
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
@@ -229,12 +230,54 @@ def _receipt_target(body: dict[str, Any]) -> str:
     return ""
 
 
+_RECEIPT_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,200}$")
+_RECEIPT_VERIFY_CACHE: dict[str, tuple[float, float, bool]] = {}
+
+
+def _load_axiom_public_key() -> bytes | None:
+    """Load ~/.omnix/keys/public.pem (ML-DSA-65)."""
+    try:
+        from axiom import keystore  # type: ignore[import-not-found]
+    except Exception:
+        return None
+    pub = (Path.home() / ".omnix" / "keys" / "public.pem").expanduser()
+    if not pub.is_file():
+        return None
+    try:
+        return keystore.public_from_pem(pub.read_text(encoding="ascii"))
+    except (OSError, ValueError):
+        return None
+
+
+def _verify_receipt_detached_sig(
+    *, pk: bytes | None, json_path: Path, sig_path: Path
+) -> bool:
+    """Verify detached signature over raw JSON bytes on disk."""
+    if pk is None:
+        return False
+    try:
+        from axiom import keystore, verify as vfy  # type: ignore[import-not-found]
+    except Exception:
+        return False
+    try:
+        raw = json_path.read_bytes()
+        sig_pem = sig_path.read_text(encoding="ascii")
+        sig = keystore.signature_from_pem(sig_pem)
+    except (OSError, ValueError, UnicodeDecodeError):
+        return False
+    try:
+        return bool(vfy.verify_bytes(pk, raw, b"", sig))
+    except Exception:
+        return False
+
+
 def _iter_receipts(
     *, since: float | None, until: float | None, limit: int
 ) -> list[dict[str, Any]]:
     root = (Path.home() / ".omnix" / "receipts").expanduser()
     if not root.is_dir():
         return []
+    pk = _load_axiom_public_key()
     rows: list[dict[str, Any]] = []
     for path in root.glob("*.json"):
         try:
@@ -255,14 +298,32 @@ def _iter_receipts(
         body = body0 if isinstance(body0, dict) else {}
         source = _receipt_source(path, body)
         has_sig = path.with_suffix(".sig").is_file()
+        verified = False
+        sig_path = path.with_suffix(".sig")
+        if has_sig:
+            try:
+                sig_mtime = float(sig_path.stat().st_mtime)
+            except OSError:
+                sig_mtime = 0.0
+            key = str(path)
+            cached = _RECEIPT_VERIFY_CACHE.get(key)
+            if cached and cached[0] == float(mtime) and cached[1] == float(sig_mtime):
+                verified = bool(cached[2])
+            else:
+                verified = _verify_receipt_detached_sig(
+                    pk=pk, json_path=path, sig_path=sig_path
+                )
+                _RECEIPT_VERIFY_CACHE[key] = (float(mtime), float(sig_mtime), bool(verified))
         rows.append(
             {
+                "receipt_id": str(path.stem),
                 "kind": _receipt_kind(source, body),
                 "target": _receipt_target(body),
                 "hash_prefix": hashlib.sha256(raw).hexdigest()[:12] if raw else "",
                 # NOTE: "ML-DSA-65" currently indicates signature file presence only (not verified).
                 "sig_alg": "ML-DSA-65" if has_sig else "unsigned",
                 "has_signature": bool(has_sig),
+                "verified": bool(verified) if has_sig else False,
                 "mtime_iso": datetime.fromtimestamp(mtime, timezone.utc)
                 .isoformat()
                 .replace("+00:00", "Z"),
@@ -292,6 +353,35 @@ def api_workspace_receipts(
             limit=lim,
         )
     }
+
+
+@app.get("/api/workspace/{workspace_id}/receipts/{receipt_id}")
+def api_workspace_receipt_by_id(
+    workspace_id: str,
+    receipt_id: str,
+) -> dict[str, Any]:
+    w = MANAGER.get(workspace_id)
+    if w is None:
+        raise HTTPException(404, "unknown workspace_id")
+    rid = (receipt_id or "").strip()
+    if not rid or not _RECEIPT_ID_RE.match(rid):
+        raise HTTPException(400, "invalid receipt_id")
+    root = (Path.home() / ".omnix" / "receipts").expanduser()
+    p = (root / f"{rid}.json").resolve()
+    try:
+        # Prevent traversal: resolved path must stay under receipts root.
+        _ = p.relative_to(root.resolve())
+    except ValueError:
+        raise HTTPException(400, "invalid receipt_id") from None
+    if not p.is_file():
+        raise HTTPException(404, "receipt not found")
+    try:
+        body0 = json.loads(p.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, json.JSONDecodeError):
+        raise HTTPException(500, "receipt unreadable") from None
+    if not isinstance(body0, dict):
+        raise HTTPException(500, "receipt payload invalid") from None
+    return {"receipt": body0}
 
 
 def _edge_dict(

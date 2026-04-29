@@ -7342,6 +7342,8 @@
     }
 
     function focusViaExistingGraphSearch(query) {
+      // TODO: expose a stable `studio.focusNode(id)` API in the graph IIFE and call it directly.
+      // The synthetic DOM events here are a compatibility shim.
       const input = document.getElementById('search-input');
       if (!input) return false;
       try {
@@ -7536,8 +7538,17 @@
         const hasSig =
           (r && (r.has_signature === true || r.signature_present === true)) ||
           String((r && r.sig_alg) || '') !== 'unsigned';
-        const btxt = hasSig ? 'Signature present' : 'No signature';
-        bad.innerHTML = '<span style="color:' + (hasSig ? 'var(--sb-ok)' : 'var(--sb-warn)') + '">' + btxt + '</span>';
+        const verified = Boolean(r && r.verified === true);
+        let btxt = 'Unsigned';
+        let col = 'var(--sb-dim)';
+        if (hasSig && verified) {
+          btxt = 'Verified';
+          col = 'var(--sb-ok)';
+        } else if (hasSig && !verified) {
+          btxt = 'Signature invalid';
+          col = 'var(--sb-warn)';
+        }
+        bad.innerHTML = '<span style="color:' + col + '">' + btxt + '</span>';
         const det = document.createElement('details');
         det.style.cssText = 'grid-column: 1 / -1; padding-top:6px;';
         const sum = document.createElement('summary');
@@ -7551,6 +7562,36 @@
         } catch (e) {
           pre.textContent = String(r);
         }
+        det.addEventListener('toggle', () => {
+          try {
+            if (!det.open) return;
+            if (det.getAttribute('data-sb-loaded') === '1') return;
+            const wid = getStudioWorkspaceId();
+            const rid = (r && (r.receipt_id || r.receiptId)) ? String(r.receipt_id || r.receiptId) : '';
+            if (!wid || !rid) {
+              pre.textContent = 'Receipt id unavailable.';
+              return;
+            }
+            const url = fabricPath('/api/workspace/' + encodeURIComponent(wid) + '/receipts/' + encodeURIComponent(rid));
+            if (!url) {
+              pre.textContent = 'Receipt API unavailable.';
+              return;
+            }
+            pre.textContent = 'Loading…';
+            fetch(url, { method: 'GET' })
+              .then((res) => (res.ok ? res.json() : Promise.reject(new Error('http'))))
+              .then((j) => {
+                det.setAttribute('data-sb-loaded', '1');
+                const body = j && j.receipt ? j.receipt : j;
+                pre.textContent = JSON.stringify(body, null, 2);
+              })
+              .catch(() => {
+                pre.textContent = 'Failed to load receipt.';
+              });
+          } catch (_e4) {
+            /* */
+          }
+        });
         det.appendChild(sum);
         det.appendChild(pre);
         row.appendChild(t);
