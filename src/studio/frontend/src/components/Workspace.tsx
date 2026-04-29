@@ -700,7 +700,7 @@ export function Workspace({
 
       {toast && (
         <div
-          className="omnix-glass pointer-events-none fixed bottom-12 left-1/2 z-[60] -translate-x-1/2 rounded-md border border-omnix-accent-indigo/25 px-3 py-1.5 text-xs text-omnix-text-primary shadow-omnix-glass"
+          className="omnix-glass pointer-events-none fixed bottom-24 left-1/2 z-[60] -translate-x-1/2 rounded-md border border-omnix-accent-indigo/25 px-3 py-1.5 text-xs text-omnix-text-primary shadow-omnix-glass"
         >
           {toast}
         </div>
