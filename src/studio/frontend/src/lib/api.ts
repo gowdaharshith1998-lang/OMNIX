@@ -50,6 +50,13 @@ export type FileEntry = {
   modified: number;
 };
 
+export type FileTreeNode = {
+  name: string;
+  type: "dir" | "file";
+  size?: number;
+  children?: FileTreeNode[];
+};
+
 export async function listFiles(
   workspaceId: string,
   prefix = ""
@@ -62,6 +69,15 @@ export async function listFiles(
   if (!r.ok) throw new Error("list files");
   const j = (await r.json()) as { files: FileEntry[] };
   return j.files;
+}
+
+export async function getFileTree(workspaceId: string): Promise<FileTreeNode> {
+  const r = await fetch(
+    `/api/workspace/${encodeURIComponent(workspaceId)}/files/tree`
+  );
+  if (!r.ok) throw new Error("file tree");
+  const j = (await r.json()) as { tree: FileTreeNode };
+  return j.tree;
 }
 
 export async function createFile(

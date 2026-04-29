@@ -432,6 +432,74 @@ def _iter_listable_files(
     return out
 
 
+_TREE_SKIP_NAMES = {"__pycache__", "node_modules", ".git", ".omnix-cache"}
+
+
+def _is_tree_skipped(root: Path, rel: str) -> bool:
+    parts = [p for p in rel.split("/") if p]
+    if any(p.startswith(".") for p in parts):
+        return True
+    if any(p in _TREE_SKIP_NAMES for p in parts):
+        return True
+    return is_studio_ignored(root, rel)
+
+
+def _empty_tree_dir(name: str) -> dict[str, Any]:
+    return {"name": name, "type": "dir", "children": []}
+
+
+def _insert_tree_file(root_node: dict[str, Any], parts: list[str], size: int) -> None:
+    cur = root_node
+    for part in parts[:-1]:
+        children = cur.setdefault("children", [])
+        hit = next(
+            (
+                c
+                for c in children
+                if isinstance(c, dict) and c.get("name") == part and c.get("type") == "dir"
+            ),
+            None,
+        )
+        if hit is None:
+            hit = _empty_tree_dir(part)
+            children.append(hit)
+        cur = hit
+    children = cur.setdefault("children", [])
+    children.append({"name": parts[-1], "type": "file", "size": int(size)})
+
+
+def _sort_tree(node: dict[str, Any]) -> None:
+    children = node.get("children")
+    if not isinstance(children, list):
+        return
+    children.sort(key=lambda c: (0 if c.get("type") == "dir" else 1, str(c.get("name", ""))))
+    for child in children:
+        if isinstance(child, dict) and child.get("type") == "dir":
+            _sort_tree(child)
+
+
+def _build_file_tree(root: Path, *, max_depth: int = 6) -> dict[str, Any]:
+    root = root.resolve()
+    tree = _empty_tree_dir(root.name or root.as_posix())
+    for f in root.rglob("*"):
+        if not f.is_file():
+            continue
+        try:
+            rel = f.relative_to(root).as_posix()
+        except (OSError, ValueError):
+            continue
+        parts = [p for p in rel.split("/") if p]
+        if not parts or len(parts) > max_depth or _is_tree_skipped(root, rel):
+            continue
+        try:
+            size = f.stat().st_size
+        except OSError:
+            size = 0
+        _insert_tree_file(tree, parts, int(size))
+    _sort_tree(tree)
+    return tree
+
+
 @app.get("/api/workspace/{workspace_id}/files")
 def api_list_files(  # noqa: D103
     workspace_id: str,
@@ -449,6 +517,14 @@ def api_list_files(  # noqa: D103
             lim,  # noqa: E501
         )
     }
+
+
+@app.get("/api/workspace/{workspace_id}/files/tree")
+def api_files_tree(workspace_id: str) -> dict[str, dict[str, Any]]:
+    w = MANAGER.get(workspace_id)
+    if w is None:
+        raise HTTPException(404, "unknown workspace_id")
+    return {"tree": _build_file_tree(w.root)}
 
 
 @app.post("/api/workspace/{workspace_id}/file")

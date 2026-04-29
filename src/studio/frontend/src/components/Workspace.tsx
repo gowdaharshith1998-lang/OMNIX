@@ -6,6 +6,7 @@ import { StudioWebSocket } from "@/lib/ws";
 import { useStudioKeybindings } from "@/lib/keybindings";
 import { BottomToolbar } from "./BottomToolbar";
 import { CodeTab, type CodeTabHandle, type CodeTarget } from "./CodeTab";
+import { FilesDrawer } from "./drawers/FilesDrawer";
 import { FindBar } from "./FindBar";
 import { HistoryTab } from "./HistoryTab";
 import { LeftRail, type LeftRailDrawer } from "./LeftRail";
@@ -365,7 +366,7 @@ export function Workspace({
   const pName = projectLabel(projectPath);
 
   const drawerContent: Record<LeftRailDrawer, ReactNode> = {
-    files: <DrawerPlaceholder label="Files" />,
+    files: <FilesDrawer workspaceId={workspaceId} onOpenFile={openDrillDownFile} />,
     search: <DrawerPlaceholder label="Search" />,
     bugs: <DrawerPlaceholder label="Bugs" />,
     receipts: <DrawerPlaceholder label="Receipts" />,
