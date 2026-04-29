@@ -230,7 +230,7 @@ describe("XRayTab", () => {
 
   it("auto-expands collapsed right panel on graph node click", async () => {
     localStorage.setItem(
-      "omnix.shell.widths.ws",
+      "omnix.shell.widths./tmp/proj",
       JSON.stringify({
         leftDrawer: { width: 300, openTab: null },
         rightPanel: { width: 440, collapsed: true },

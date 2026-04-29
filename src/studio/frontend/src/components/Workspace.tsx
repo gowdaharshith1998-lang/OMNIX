@@ -72,7 +72,7 @@ export function Workspace({
 }: Props) {
   const [find, setFind] = useState("");
   const [shellLayout, setShellLayout] = useState<ShellLayoutState>(() =>
-    loadShellLayout(workspaceId)
+    loadShellLayout(projectPath)
   );
   const [stats] = useState({
     files: initialStats.files,
@@ -140,9 +140,9 @@ export function Workspace({
   const persistShellLayout = useCallback(
     (next: ShellLayoutState) => {
       setShellLayout(next);
-      saveShellLayout(workspaceId, next);
+      saveShellLayout(projectPath, next);
     },
-    [workspaceId]
+    [projectPath]
   );
 
   const setPersistentDrawer = useCallback(
