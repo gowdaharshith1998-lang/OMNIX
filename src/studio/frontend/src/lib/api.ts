@@ -175,3 +175,28 @@ export async function listReceipts(
   const j = (await r.json()) as { receipts: ReceiptEntry[] };
   return j.receipts;
 }
+
+export type SearchKind = "symbol" | "file" | "all";
+
+export type SearchResult = {
+  kind: "symbol" | "file";
+  name: string;
+  path: string;
+  line: number;
+  snippet: string;
+};
+
+export async function searchWorkspace(
+  workspaceId: string,
+  query: string,
+  kind: SearchKind = "all",
+  limit = 50
+): Promise<SearchResult[]> {
+  const q = new URLSearchParams({ q: query, kind, limit: String(limit) });
+  const r = await fetch(
+    `/api/workspace/${encodeURIComponent(workspaceId)}/search?${q}`
+  );
+  if (!r.ok) throw new Error("search");
+  const j = (await r.json()) as { results: SearchResult[] };
+  return j.results;
+}

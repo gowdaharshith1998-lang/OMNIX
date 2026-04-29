@@ -8,6 +8,7 @@ import { BottomToolbar } from "./BottomToolbar";
 import { CodeTab, type CodeTabHandle, type CodeTarget } from "./CodeTab";
 import { FilesDrawer } from "./drawers/FilesDrawer";
 import { ReceiptsDrawer } from "./drawers/ReceiptsDrawer";
+import { SearchDrawer } from "./drawers/SearchDrawer";
 import { FindBar } from "./FindBar";
 import { HistoryTab } from "./HistoryTab";
 import { LeftRail, type LeftRailDrawer } from "./LeftRail";
@@ -368,7 +369,22 @@ export function Workspace({
 
   const drawerContent: Record<LeftRailDrawer, ReactNode> = {
     files: <FilesDrawer workspaceId={workspaceId} onOpenFile={openDrillDownFile} />,
-    search: <DrawerPlaceholder label="Search" />,
+    search: (
+      <SearchDrawer
+        workspaceId={workspaceId}
+        query={find}
+        onQueryChange={setFind}
+        onOpenResult={(result) => {
+          setCodeTarget({
+            path: result.path,
+            lineStart: result.line || undefined,
+            lineEnd: result.line || undefined,
+            name: result.name,
+          });
+          setRightTab("code");
+        }}
+      />
+    ),
     bugs: <DrawerPlaceholder label="Bugs" />,
     receipts: <ReceiptsDrawer workspaceId={workspaceId} />,
     settings: <DrawerPlaceholder label="Settings" />,

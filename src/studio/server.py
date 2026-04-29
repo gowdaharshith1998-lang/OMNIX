@@ -662,6 +662,53 @@ def api_get_node(  # noqa: D103
         "line_end": n0.end_line,
     }
 
+
+@app.get("/api/workspace/{workspace_id}/search")
+def api_search(
+    workspace_id: str,
+    q: str = "",
+    kind: str = "all",
+    limit: int = 50,
+) -> dict[str, list[dict[str, Any]]]:
+    w = MANAGER.get(workspace_id)
+    if w is None:
+        raise HTTPException(404, "unknown workspace_id")
+    query = q.strip()
+    if not query:
+        return {"results": []}
+    if kind not in {"symbol", "file", "all"}:
+        raise HTTPException(400, "kind must be symbol, file, or all")
+    lim = max(1, min(int(limit), 100))
+    like = f"%{query.lower()}%"
+    types: tuple[str, ...]
+    if kind == "file":
+        types = ("file",)
+    elif kind == "symbol":
+        types = ("function", "method", "class")
+    else:
+        types = ("file", "function", "method", "class")
+    ph = ",".join("?" * len(types))
+    sql = (
+        "SELECT name, type, file_path, start_line FROM nodes "
+        f"WHERE type IN ({ph}) AND "
+        "(lower(name) LIKE ? OR lower(file_path) LIKE ?) "
+        "ORDER BY file_path, start_line, name LIMIT ?"
+    )
+    c = w.store.sqlite_connection()
+    rows: list[dict[str, Any]] = []
+    for row in c.execute(sql, (*types, like, like, lim)):
+        typ = str(row["type"])
+        rows.append(
+            {
+                "kind": "file" if typ == "file" else "symbol",
+                "name": str(row["name"] or ""),
+                "path": str(row["file_path"] or ""),
+                "line": int(row["start_line"] or 0),
+                "snippet": "",
+            }
+        )
+    return {"results": rows}
+
 async def _stats_ticker(w: Workspace, stop: asyncio.Event) -> None:
     while w._websockets:  # type: ignore[union-attr, misc, no-untyped-def]
         if stop.is_set():
