@@ -140,4 +140,27 @@ describe("BugsDrawer", () => {
       3500
     );
   });
+
+  it("wires DEEPEN to the slice 15 toast stub", () => {
+    const onToast = vi.fn();
+    const event: BugsScanEvent = {
+      type: "bugs_scan_complete",
+      scan_id: "scan-5",
+      findings: [{ file: "buggy.py", function: "unsafe_div", severity_score: 12 }],
+      summary: { findings_count: 1 },
+      wall_time_seconds: 0.2,
+    };
+    const { container } = render(
+      <BugsDrawer workspaceId="ws1" scanEvent={event} onToast={onToast} />
+    );
+    const deepen = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "DEEPEN"
+    );
+
+    act(() => {
+      deepen?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(onToast).toHaveBeenCalledWith("agent sessions arrive in slice 15", 2200);
+  });
 });

@@ -263,6 +263,15 @@ export function BugsDrawer({ workspaceId, scanEvent, onToast }: Props) {
                       input {inputText(finding)}
                     </div>
                   )}
+                  <div className="mt-2 flex justify-end">
+                    <button
+                      type="button"
+                      className="rounded border border-[var(--omnix-shell-border)] px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-omnix-text-muted hover:text-omnix-text-primary"
+                      onClick={() => onToast?.("agent sessions arrive in slice 15", 2200)}
+                    >
+                      DEEPEN
+                    </button>
+                  </div>
                 </article>
               );
             })}
