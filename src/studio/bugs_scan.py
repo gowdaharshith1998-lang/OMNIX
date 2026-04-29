@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 import time
 from typing import Any
@@ -18,6 +19,8 @@ from src.studio.ws_protocol import (
 )
 
 HEARTBEAT_SECONDS = 5.0
+STUDIO_RSS_CAP_BYTES = 1024 * 1024 * 1024
+_RSS_CAP_ENV_LOCK = threading.Lock()
 
 
 def _schedule_broadcast(
@@ -69,12 +72,22 @@ async def run_scan_for_workspace(
         started_at=started_at,
     )
     try:
-        exit_code, output_text, detail = await asyncio.to_thread(
-            run_find_bugs,
-            codebase_path=str(workspace.root),
-            graph_db=str(workspace.store.db_path),
-            json_mode=True,
-        )
+        await asyncio.to_thread(_RSS_CAP_ENV_LOCK.acquire)
+        prior_cap = os.environ.get("OMNIX_FIND_BUGS_RSS_CAP_BYTES")
+        os.environ["OMNIX_FIND_BUGS_RSS_CAP_BYTES"] = str(STUDIO_RSS_CAP_BYTES)
+        try:
+            exit_code, output_text, detail = await asyncio.to_thread(
+                run_find_bugs,
+                codebase_path=str(workspace.root),
+                graph_db=str(workspace.store.db_path),
+                json_mode=True,
+            )
+        finally:
+            if prior_cap is None:
+                os.environ.pop("OMNIX_FIND_BUGS_RSS_CAP_BYTES", None)
+            else:
+                os.environ["OMNIX_FIND_BUGS_RSS_CAP_BYTES"] = prior_cap
+            _RSS_CAP_ENV_LOCK.release()
         if exit_code == 2 or detail is None:
             message = output_text.strip() or "find-bugs scan failed"
             await broadcast_to_workspace(

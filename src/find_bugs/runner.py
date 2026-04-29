@@ -33,14 +33,28 @@ from .severity import compute_severity, rank_findings
 from .walker import scan_codebase_sources
 
 VERIFY_TIMEOUT_S = 30.0
-MAX_RSS_PER_VERIFY = 512 * 1024 * 1024  # 512 MB
+DEFAULT_MAX_RSS_PER_VERIFY = 512 * 1024 * 1024  # 512 MB
+MAX_RSS_PER_VERIFY = int(
+    os.environ.get("OMNIX_FIND_BUGS_RSS_CAP_BYTES", str(DEFAULT_MAX_RSS_PER_VERIFY))
+)
+
+
+def _max_rss_per_verify() -> int:
+    raw = os.environ.get("OMNIX_FIND_BUGS_RSS_CAP_BYTES")
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            return MAX_RSS_PER_VERIFY
+    return MAX_RSS_PER_VERIFY
 
 
 def _set_subprocess_limits() -> None:
     # Address-space cap (best-effort RSS ceiling) so pathological allocations
     # raise MemoryError inside the worker instead of kernel OOM-killing us.
+    cap = _max_rss_per_verify()
     resource.setrlimit(
-        resource.RLIMIT_AS, (MAX_RSS_PER_VERIFY, MAX_RSS_PER_VERIFY)
+        resource.RLIMIT_AS, (cap, cap)
     )
 
 
@@ -702,7 +716,7 @@ def run_find_bugs(
                             ),
                             "cluster_id": cc.get(graph_id_for(relp, fn)),
                             "input": "(unknown)",
-                            "reason": f"function exhausted memory limit ({int(MAX_RSS_PER_VERIFY / (1024 * 1024))} MB)",
+                            "reason": f"function exhausted memory limit ({int(_max_rss_per_verify() / (1024 * 1024))} MB)",
                             "failures": [
                                 {
                                     "shrunk_input": "(unknown)",
@@ -746,7 +760,7 @@ def run_find_bugs(
                             ),
                             "cluster_id": cc.get(graph_id_for(relp, fn)),
                             "input": "(unknown)",
-                            "reason": f"function exhausted memory limit ({int(MAX_RSS_PER_VERIFY / (1024 * 1024))} MB)",
+                            "reason": f"function exhausted memory limit ({int(_max_rss_per_verify() / (1024 * 1024))} MB)",
                             "failures": [
                                 {
                                     "shrunk_input": "(unknown)",
@@ -807,7 +821,7 @@ def run_find_bugs(
                             ),
                             "cluster_id": cc.get(graph_id_for(relp, fn)),
                             "input": shr,
-                            "reason": f"function exhausted memory limit ({int(MAX_RSS_PER_VERIFY / (1024 * 1024))} MB)",
+                            "reason": f"function exhausted memory limit ({int(_max_rss_per_verify() / (1024 * 1024))} MB)",
                             "failures": _first_three(mem_fails),
                         }
                     )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -118,6 +119,39 @@ def test_bugs_scan_route_broadcasts_runner_errors(
             assert err["error_kind"] == "runner_error"
             assert "graph database" in err["error_message"]
             _wait_for(lambda: workspace_id not in MANAGER.active_bug_scans)
+    finally:
+        _cleanup_workspace(workspace_id)
+
+
+def test_bugs_scan_uses_1gb_rss_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Studio raises RLIMIT_AS to 1GB for crypto/ML PBT scans; CLI default stays 512MB."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    workspace_id = _open_managed_workspace(project, tmp_path, monkeypatch)
+    seen_caps: list[str | None] = []
+    messages: list[dict[str, Any]] = []
+    cap_env = "OMNIX_FIND_BUGS_RSS_CAP_BYTES"
+    monkeypatch.delenv(cap_env, raising=False)
+
+    def fake_run_find_bugs(**_kwargs: Any) -> tuple[int, str, dict[str, Any]]:
+        seen_caps.append(os.environ.get(cap_env))
+        return (0, "{}\n", {"summary": {"wall_time_seconds": 0.01}, "findings": []})
+
+    async def fake_broadcast(_workspace: Any, message: dict[str, Any]) -> None:
+        messages.append(message)
+
+    monkeypatch.setattr("src.studio.bugs_scan.run_find_bugs", fake_run_find_bugs)
+    monkeypatch.setattr("src.studio.bugs_scan.broadcast_to_workspace", fake_broadcast)
+    try:
+        with TestClient(app) as client:
+            res = client.post(f"/api/workspace/{workspace_id}/bugs/scan")
+            assert res.status_code == 202
+            _wait_for(lambda: any(m.get("type") == "bugs_scan_complete" for m in messages))
+            _wait_for(lambda: workspace_id not in MANAGER.active_bug_scans)
+            assert seen_caps == [str(1024 * 1024 * 1024)]
+            assert cap_env not in os.environ
     finally:
         _cleanup_workspace(workspace_id)
 
