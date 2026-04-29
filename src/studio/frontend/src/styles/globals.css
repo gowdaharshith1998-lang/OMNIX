@@ -99,6 +99,13 @@ body {
   transform: translateX(calc(100% - 24px));
 }
 
+.omnix-right-panel.is-collapsed .omnix-tab-strip,
+.omnix-right-panel.is-collapsed .omnix-right-panel-body,
+.omnix-right-panel.is-collapsed .omnix-resize-handle-right {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .omnix-tab-strip {
   display: flex;
   min-height: 42px;
@@ -128,6 +135,7 @@ body {
   position: absolute;
   left: 0;
   top: 42px;
+  z-index: 10;
   width: 24px;
   height: 96px;
   cursor: pointer;
