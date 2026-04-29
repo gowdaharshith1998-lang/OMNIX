@@ -1,36 +1,81 @@
 import { useEffect, useMemo, useState } from "react";
-import { listReceipts, type ReceiptEntry } from "@/lib/api";
+import { getReceiptById, listReceipts, type ReceiptEntry } from "@/lib/api";
 
 type Props = {
   workspaceId: string;
 };
 
+type ReceiptDetailState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "loaded"; payload: unknown }
+  | { status: "error"; message: string };
+
 function sourceLabel(receipt: ReceiptEntry) {
   return `${receipt.source} / ${receipt.sig_alg}`;
+}
+
+function receiptKey(receipt: ReceiptEntry) {
+  return receipt.receipt_id || `${receipt.path}:${receipt.hash_prefix}`;
+}
+
+function hasSignature(receipt: ReceiptEntry) {
+  return Boolean(receipt.has_signature) || receipt.sig_alg !== "unsigned";
+}
+
+function signatureLabel(receipt: ReceiptEntry) {
+  if (!hasSignature(receipt)) return "unsigned";
+  if (receipt.verified) return "verified";
+  return "signature invalid";
+}
+
+function signatureClass(receipt: ReceiptEntry) {
+  if (!hasSignature(receipt)) return "border-slate-500/30 text-omnix-text-dim";
+  if (receipt.verified) return "border-emerald-400/35 text-emerald-300";
+  return "border-amber-400/35 text-amber-300";
+}
+
+function detailText(state: ReceiptDetailState | undefined) {
+  if (!state || state.status === "idle") return "";
+  if (state.status === "loading") return "Loading receipt...";
+  if (state.status === "error") return state.message;
+  try {
+    return JSON.stringify(state.payload, null, 2);
+  } catch {
+    return String(state.payload);
+  }
 }
 
 export function ReceiptsDrawer({ workspaceId }: Props) {
   const [receipts, setReceipts] = useState<ReceiptEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [details, setDetails] = useState<Record<string, ReceiptDetailState>>({});
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setErr(null);
-    void listReceipts(workspaceId, { limit: 200 })
-      .then((rows) => {
-        if (!cancelled) setReceipts(rows);
-      })
-      .catch((e) => {
-        if (!cancelled) setErr(e instanceof Error ? e.message : "load failed");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    const timer = setTimeout(() => {
+      setLoading(true);
+      setErr(null);
+      void listReceipts(workspaceId, { limit: 200 })
+        .then((rows) => {
+          if (!cancelled) setReceipts(rows);
+        })
+        .catch((e) => {
+          if (!cancelled) setErr(e instanceof Error ? e.message : "load failed");
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    }, 150);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
+  }, [workspaceId]);
+
+  useEffect(() => {
+    setDetails({});
   }, [workspaceId]);
 
   const bySource = useMemo(() => {
@@ -52,6 +97,37 @@ export function ReceiptsDrawer({ workspaceId }: Props) {
     a.download = "omnix-receipts.json";
     a.click();
     URL.revokeObjectURL(a.href);
+  };
+
+  const loadDetail = (receipt: ReceiptEntry) => {
+    const key = receiptKey(receipt);
+    const receiptId = receipt.receipt_id;
+    if (!receiptId) {
+      setDetails((prev) => ({
+        ...prev,
+        [key]: { status: "error", message: "Receipt id unavailable." },
+      }));
+      return;
+    }
+    const existing = details[key];
+    if (existing?.status === "loading" || existing?.status === "loaded") return;
+    setDetails((prev) => ({ ...prev, [key]: { status: "loading" } }));
+    void getReceiptById(workspaceId, receiptId)
+      .then((payload) => {
+        setDetails((prev) => ({
+          ...prev,
+          [key]: { status: "loaded", payload },
+        }));
+      })
+      .catch((e) => {
+        setDetails((prev) => ({
+          ...prev,
+          [key]: {
+            status: "error",
+            message: e instanceof Error ? e.message : "Failed to load receipt.",
+          },
+        }));
+      });
   };
 
   if (loading) return <div className="p-4 text-sm text-omnix-text-dim">Loading receipts...</div>;
@@ -84,19 +160,41 @@ export function ReceiptsDrawer({ workspaceId }: Props) {
               <div className="space-y-2">
                 {rows.map((receipt) => (
                   <div
-                    key={`${receipt.path}:${receipt.hash_prefix}`}
+                    key={receiptKey(receipt)}
                     className="rounded-lg border border-[var(--omnix-shell-border)] bg-[rgba(5,8,16,0.5)] p-2.5"
                   >
-                    <div className="truncate font-mono text-xs text-omnix-text-primary">
-                      {receipt.kind}
-                    </div>
-                    <div className="mt-1 truncate font-mono text-[10px] text-omnix-text-dim">
-                      {receipt.target || sourceLabel(receipt)}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate font-mono text-xs text-omnix-text-primary">
+                          {receipt.kind}
+                        </div>
+                        <div className="mt-1 truncate font-mono text-[10px] text-omnix-text-dim">
+                          {receipt.target || sourceLabel(receipt)}
+                        </div>
+                      </div>
+                      <span
+                        className={`shrink-0 rounded-full border px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] ${signatureClass(receipt)}`}
+                      >
+                        {signatureLabel(receipt)}
+                      </span>
                     </div>
                     <div className="mt-2 flex items-center justify-between gap-2 font-mono text-[10px] text-omnix-text-muted">
                       <span>{receipt.hash_prefix}</span>
                       <span>{new Date(receipt.mtime_iso).toLocaleTimeString()}</span>
                     </div>
+                    <details
+                      className="mt-2"
+                      onToggle={(event) => {
+                        if (event.currentTarget.open) loadDetail(receipt);
+                      }}
+                    >
+                      <summary className="cursor-pointer select-none font-mono text-[10px] uppercase tracking-[0.12em] text-omnix-cyan">
+                        JSON
+                      </summary>
+                      <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded border border-slate-700/60 bg-slate-950/50 p-2 font-mono text-[10px] leading-relaxed text-omnix-text-muted">
+                        {detailText(details[receiptKey(receipt)])}
+                      </pre>
+                    </details>
                   </div>
                 ))}
               </div>

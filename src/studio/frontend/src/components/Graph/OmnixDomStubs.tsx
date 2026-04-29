@@ -1,5 +1,5 @@
 /**
- * Hidden DOM the analyze script expects (ids + minimal structure from src/web/index.html).
+ * Hidden DOM contracts still used by the transplanted graph engine.
  * The PIXI view mounts in a separate sibling container.
  */
 export function OmnixDomStubs() {

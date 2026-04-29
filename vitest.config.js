@@ -7,7 +7,6 @@ export default defineConfig({
     include: [
       'tests/vault/**/*.test.js',
       'tests/vault/**/*.spec.js',
-      'tests/sidebar/**/*.test.js',
     ],
     hookTimeout: 60_000,
     testTimeout: 120_000,

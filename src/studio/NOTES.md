@@ -79,19 +79,17 @@ server.py routes inventory.
   needs verification by checking sample WS payload). Fix together
   with debt-19 in single bridge enhancement.
 
-- [debt-21] /api/timeline endpoint does not exist in server.py.
-  Frontend at viewerEngine.ts line ~4959 has applyTimelineSnapshot
-  and applyTimelineToPixiContainers code. T1 mode bundles
-  timeline_data.json; live mode has no source. Frontend logs 404
-  every page load. Defer to Phase 15: niche feature, backend would
-  need to expose git history snapshots. Severity: cosmetic.
+- [debt-21] /api/timeline is currently a quiet compatibility endpoint
+  returning an empty snapshot list. Frontend at viewerEngine.ts line ~4959
+  has applyTimelineSnapshot and applyTimelineToPixiContainers code, but
+  live mode has no real git-history source yet. Defer real timeline data
+  to Phase 15. Severity: cosmetic.
 
-- [debt-22] /api/ai/status, /api/ai/diagnose, /api/ai/security,
+- [debt-22] /api/ai/status is currently a quiet compatibility endpoint
+  that reports unavailable. /api/ai/diagnose, /api/ai/security,
   /api/ai/architecture, /api/ai/ask endpoints all missing from
-  server.py. Frontend X-RAY panel renders "AI Agent unavailable —
-  set OMNIX_AI_KEY or install Ollama" because /api/ai/status 404s.
-  These get built natively as part of Day 15 Agent tab work. Do
-  NOT split into separate slice. Severity: AI agent panel currently
+  server.py. These get built natively as part of Day 15 Agent tab work.
+  Do NOT split into separate slice. Severity: AI agent panel currently
   non-functional, but planned.
 
 - [debt-23] After debt-19/20 fix, verify viewerEngine dark matter
@@ -127,18 +125,10 @@ server.py routes inventory.
   Extract a shared `buildPlanetNodeRef(fileData, fp, sym, j, …)` in a
   dedicated refactor commit to avoid drift.
 
-- [debt-27] `scripts/build_studio_viewer_engine.py` generates `viewerEngine.ts`
-  from `src/web/index.html` plus small string patches. Studio-only hooks
-  (`_flashNodeRim`, `_fadeAndRemoveNode`, `_bornNode`, `_bornEdge`, etc.) are **not** in the
-  generator — they live only in `viewerEngine.ts`. Running `main()` on the
-  script overwrites those slices unless the pipeline is extended to splice in
-  Studio hooks from a patch file or forked template. Decide whether to wire
-  generator + Studio overlay or stop regenerating until reconciled.
-  Slice 6a verification (2026): grep of `build_studio_viewer_engine.py` shows no
-  `_bornEdge` / slice 6 references — unchanged risk profile vs slice 5.
-  Slice 6b verification (2026): same — no `setViewContext` / slice 6b strings in
-  the generator; `studio?.setViewContext` hooks live only in hand-maintained
-  `viewerEngine.ts`.
+- [debt-27] Closed by slice 14.5: `scripts/build_studio_viewer_engine.py`
+  and `src/web/index.html` were deleted with the legacy viewer. `viewerEngine.ts`
+  is now explicitly hand-maintained until debt-16 removes the remaining
+  superseded viewer helpers.
 
 - [debt-30] Optional follow-up: if live CALLS edges feel visually abrupt (no gsap
   on edge geometry), add a short gsap alpha/stroke reveal after `_bornEdge`;
@@ -150,18 +140,18 @@ server.py routes inventory.
 
 ### Inventory of T1 vs live divergence
 
-T1 bundled (analyze viewer at :7777):
+T1 bundled sample mode:
   - Node types: file, directory, function, method, class, dark_matter
   - Link types: CALLS, IMPORTS, INHERITS, DECORATES, DEFINES, ENTANGLED, DARK_FORCE
   - Per-node fields: cluster_id, val, color
-  - Timeline data: separate JSON
+  - Timeline data: no active live source; /api/timeline is an empty compatibility stub
 
 Live mode (Studio at :7778) currently passes through bridge:
   - Node types correctly preserved BUT only file/dir/folder/function/
     method/class get type-aware rendering. dark_matter falls through.
   - Link types: untested for ENTANGLED/DARK_FORCE preservation
   - cluster_id: MISSING — debt-24
-  - Timeline: 404 — debt-21
+  - Timeline: empty compatibility endpoint — debt-21
 
 ## Slice 6c — reconnect policy: Option B (preserve + rebootstrap-in-place)
 
@@ -185,9 +175,7 @@ Refs: slice 6c RECON manifest (Studio tab); slice 6 RECON Concern C.
 
 ### Generator check (debt-27)
 
-Slice 6c verification (2026): `scripts/build_studio_viewer_engine.py` contains **no**
-slice 6c / reconnect-indicator strings — unchanged risk profile vs slice 6b; Studio-only
-UI lives in `Workspace.tsx` / `ReconnectIndicator.tsx`.
+Closed by slice 14.5; `viewerEngine.ts` is hand-maintained in React Studio.
 
 ## Slice 6d — bootstrap UX (Option A)
 

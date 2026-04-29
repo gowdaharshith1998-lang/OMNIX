@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { openWorkspace } from "@/lib/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { getStudioInitial, openWorkspace } from "@/lib/api";
 import { Welcome } from "./components/Welcome";
 import { Workspace } from "./components/Workspace";
 
@@ -17,7 +17,9 @@ export default function App() {
     };
   } | null>(null);
 
-  const onOpenPath = (path: string) => {
+  const initialOpenAttemptedRef = useRef(false);
+
+  const onOpenPath = useCallback((path: string) => {
     setErr(null);
     setBusy(true);
     void (async () => {
@@ -34,7 +36,24 @@ export default function App() {
         setBusy(false);
       }
     })();
-  };
+  }, []);
+
+  useEffect(() => {
+    if (initialOpenAttemptedRef.current) return;
+    initialOpenAttemptedRef.current = true;
+    let cancelled = false;
+    void getStudioInitial()
+      .then((initial) => {
+        const path = initial.path?.trim();
+        if (!cancelled && path) onOpenPath(path);
+      })
+      .catch(() => {
+        // No initial path means the welcome screen remains the manual fallback.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [onOpenPath]);
 
   if (session) {
     return (

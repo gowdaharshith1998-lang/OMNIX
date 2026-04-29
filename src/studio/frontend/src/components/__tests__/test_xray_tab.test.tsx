@@ -20,6 +20,15 @@ const wsHarness = vi.hoisted(() => {
   };
 });
 
+const graphNavHarness = vi.hoisted(() => ({
+  canGoBack: false,
+  goBack: vi.fn(),
+  reset() {
+    this.canGoBack = false;
+    this.goBack.mockClear();
+  },
+}));
+
 vi.mock("@/lib/ws", () => ({
   StudioWebSocket: vi.fn(function StudioWebSocket(
     _workspaceId: string,
@@ -36,14 +45,44 @@ vi.mock("@/lib/ws", () => ({
 
 vi.mock("@/components/Graph/GraphCanvas", () => ({
   GraphCanvas: React.forwardRef(function MockGraphCanvas(
-    props: { onFunctionNodeClick: (nodeId: string) => void },
-    ref: React.Ref<{ ingestMessage: (msg: unknown) => void }>
+    props: {
+      onFunctionNodeClick: (nodeId: string) => void;
+      onNavigationStateChange: (canGoBack: boolean) => void;
+    },
+    ref: React.Ref<{
+      ingestMessage: (msg: unknown) => void;
+      canGoBack: () => boolean;
+      goBack: () => void;
+    }>
   ) {
-    React.useImperativeHandle(ref, () => ({ ingestMessage: vi.fn() }));
+    React.useImperativeHandle(ref, () => ({
+      ingestMessage: vi.fn(),
+      canGoBack: () => graphNavHarness.canGoBack,
+      goBack: () => {
+        graphNavHarness.canGoBack = false;
+        graphNavHarness.goBack();
+        props.onNavigationStateChange(false);
+      },
+    }));
     return React.createElement(
-      "button",
-      { type: "button", onClick: () => props.onFunctionNodeClick("n1") },
-      "graph node"
+      React.Fragment,
+      null,
+      React.createElement(
+        "button",
+        { type: "button", onClick: () => props.onFunctionNodeClick("n1") },
+        "graph node"
+      ),
+      React.createElement(
+        "button",
+        {
+          type: "button",
+          onClick: () => {
+            graphNavHarness.canGoBack = true;
+            props.onNavigationStateChange(true);
+          },
+        },
+        "enter graph drill"
+      )
     );
   }),
 }));
@@ -107,6 +146,7 @@ afterEach(() => {
   });
   document.body.textContent = "";
   wsHarness.reset();
+  graphNavHarness.reset();
   vi.clearAllMocks();
 });
 
@@ -226,6 +266,27 @@ describe("XRayTab", () => {
     act(() => graphButton?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     expect(container.textContent).toContain("X-RAY");
     expect(container.textContent).toContain("govern");
+  });
+
+  it("replaces breadcrumb with graph back button and handles Escape", async () => {
+    const { container } = render(
+      <Workspace workspaceId="ws" projectPath="/tmp/proj" initialStats={stats} onBack={vi.fn()} />
+    );
+    await flush();
+    const enterDrill = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "enter graph drill"
+    );
+    act(() => enterDrill?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    await flush();
+    expect(container.querySelector('[aria-label="Back in graph"]')).not.toBeNull();
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    await flush();
+
+    expect(graphNavHarness.goBack).toHaveBeenCalled();
+    expect(container.textContent).toContain("OMNIX");
   });
 
   it("auto-expands collapsed right panel on graph node click", async () => {

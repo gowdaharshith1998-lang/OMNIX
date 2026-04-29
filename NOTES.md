@@ -2,13 +2,19 @@
 
 ## Slice 14 Debt
 
+- Slice 14.5: `omnix analyze <path>` now serves the React Studio directly
+  and auto-opens the workspace through `/api/studio/initial`. The legacy
+  static viewer (`src/web/index.html`), its sidebar tests, and the
+  viewer-engine generator were removed. `src/web/vault/` and
+  `src/web/graph_data_axiom_v2.json` remain load-bearing and must stay.
+
 - debt-16: viewerEngine.ts X-Ray helpers (buildXrayHTML, detectIssues, buildHealthBar,
   buildXrayAiSection, buildXrayFunctionHTML) superseded by XRayTab.tsx + lib/xray_*.ts.
   Delete in slice 17 cleanup pass once XRayTab.tsx has been live one week without regression.
 
 ## Integration #11 (MEGA) — Evolution + database (ITER 4, 2026-04-25)
 
-- **Per-codebase DB (Q2):** `omnix analyze` writes `<analyzed_root>/omnix.db` (graph nodes/edges + evolution tables). This is the canonical store for that tree. `omnix find-bugs` uses that same file or creates `<codebase>/omnix.db` on first run; it does **not** fall back to `~/.omnix/omnix.db` unless you set `OMNIX_GRAPH_DB` to that path explicitly.
+- **Per-codebase DB (Q2):** Studio analysis writes `<analyzed_root>/.omnix/omnix.db` (graph nodes/edges + evolution tables). This is the canonical Studio store for that tree. `omnix find-bugs` uses its codebase-local graph DB or creates one on first run; it does **not** fall back to `~/.omnix/omnix.db` unless you set `OMNIX_GRAPH_DB` to that path explicitly.
 - **Schema:** `src/parser/evolution_schema.py` is applied idempotently from `GraphStore` (same SQLite file as the graph). Tables: `grammar_profile`, `query_pattern`, `pattern_mutation`, `unknown_extensions`.
 - **Mutations:** Batched in `src/parser/evolution.py` — in-run observations only; `finalize_evolution_run(conn)` runs one `BEGIN`/`COMMIT` for SQL. Signed evolution JSON is written next to a **detached** ML-DSA-65 `.sig` file named `same_basename.sig` (so `SIG="${RECEIPT%.json}.sig"` works). If `~/.omnix/keys/secret.pem` is missing, promote/decay steps that require a receipt are **skipped** (P16); a warning is logged; no unsigned pattern changes for those steps.
 - **P21:** Builtin rows in `query_pattern` with `added_by=builtin_hint` are never auto-decayed; only `auto_learned` patterns are eligible.

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { GraphCanvas, type GraphCanvasHandle } from "./Graph/GraphCanvas";
-import { createFile, listFiles, type FileEntry } from "@/lib/api";
+import { createFile, listFiles, type FileEntry, type SearchResult } from "@/lib/api";
 import { isT1Mode } from "@/lib/t1Mode";
 import { StudioWebSocket } from "@/lib/ws";
 import { useStudioKeybindings } from "@/lib/keybindings";
@@ -96,6 +96,7 @@ export function Workspace({
   const [graphHint] = useState<string[]>([]);
   const [codeTarget, setCodeTarget] = useState<CodeTarget | null>(null);
   const [selectedXRayNode, setSelectedXRayNode] = useState<GraphNode | null>(null);
+  const [graphCanGoBack, setGraphCanGoBack] = useState(false);
   const [graphNodes, setGraphNodes] = useState<Map<string, GraphNode>>(
     () => new Map()
   );
@@ -231,6 +232,31 @@ export function Workspace({
     });
     selectXRayNode(n);
   }, [selectXRayNode]);
+
+  const handleGraphBack = useCallback(() => {
+    if (!graphRef.current?.canGoBack()) return false;
+    graphRef.current.goBack();
+    setGraphCanGoBack(graphRef.current.canGoBack());
+    return true;
+  }, []);
+
+  const findNodeForSearchResult = useCallback((result: SearchResult) => {
+    const normalizedPath = result.path.replace(/\\/g, "/");
+    const nodes = Array.from(graphNodesRef.current.values());
+    return (
+      nodes.find(
+        (node) =>
+          node.file_path === normalizedPath &&
+          node.line_start === result.line &&
+          node.name === result.name
+      ) ??
+      nodes.find(
+        (node) => node.file_path === normalizedPath && node.line_start === result.line
+      ) ??
+      nodes.find((node) => node.file_path === normalizedPath && node.name === result.name) ??
+      findNodeForPath(normalizedPath)
+    );
+  }, [findNodeForPath]);
 
   const onT1GraphNodes = useCallback((list: GraphNode[]) => {
     setGraphNodes((prev) => {
@@ -472,6 +498,7 @@ export function Workspace({
   }, []);
 
   const pName = projectLabel(projectPath);
+  const searchFallbackNodes = useMemo(() => Array.from(graphNodes.values()), [graphNodes]);
 
   const drawerContent: Record<LeftRailDrawer, ReactNode> = {
     files: <FilesDrawer workspaceId={workspaceId} onOpenFile={openCodeFile} />,
@@ -479,15 +506,19 @@ export function Workspace({
       <SearchDrawer
         workspaceId={workspaceId}
         query={find}
+        fallbackNodes={searchFallbackNodes}
         onQueryChange={setFind}
         onOpenResult={(result) => {
+          const node = findNodeForSearchResult(result);
           setCodeTarget({
+            nodeId: node?.id,
             path: result.path,
             lineStart: result.line || undefined,
-            lineEnd: result.line || undefined,
-            name: result.name,
+            lineEnd: (node?.line_end ?? result.line) || undefined,
+            name: result.name || node?.name,
           });
-          setRightTab("code");
+          if (node) selectXRayNode(node);
+          else setRightTab("code");
         }}
       />
     ),
@@ -543,6 +574,7 @@ export function Workspace({
         setNewFile(false);
         return true;
       }
+      if (handleGraphBack()) return true;
       return false;
     },
     onTogglePicker: () =>
@@ -581,20 +613,33 @@ export function Workspace({
           className="omnix-glass pointer-events-auto mx-auto flex w-max max-w-full items-center justify-center gap-1.5 rounded-full border border-omnix-accent-indigo/25 px-4 py-2 font-mono text-xs"
           id="breadcrumb"
         >
-          <button
-            type="button"
-            onClick={onBack}
-            className="text-omnix-text-muted transition hover:rounded-md hover:bg-[rgba(99,102,241,0.15)] hover:text-omnix-text-primary"
-          >
-            OMNIX
-          </button>
-          <span className="text-omnix-text-sep select-none">›</span>
-          <span
-            className="max-w-[min(50vw,24rem)] truncate text-omnix-text-primary"
-            title={projectPath}
-          >
-            {pName}
-          </span>
+          {graphCanGoBack ? (
+            <button
+              type="button"
+              aria-label="Back in graph"
+              onClick={handleGraphBack}
+              className="text-omnix-text-primary transition hover:rounded-md hover:bg-[rgba(99,102,241,0.15)]"
+            >
+              &lt; Back
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={onBack}
+                className="text-omnix-text-muted transition hover:rounded-md hover:bg-[rgba(99,102,241,0.15)] hover:text-omnix-text-primary"
+              >
+                OMNIX
+              </button>
+              <span className="text-omnix-text-sep select-none">›</span>
+              <span
+                className="max-w-[min(50vw,24rem)] truncate text-omnix-text-primary"
+                title={projectPath}
+              >
+                {pName}
+              </span>
+            </>
+          )}
         </div>
       </nav>
 
@@ -622,6 +667,7 @@ export function Workspace({
                 onT1GraphEdges={onT1GraphEdges}
                 onFileOrDirClick={openXRayFileOrDir}
                 onDeselect={() => undefined}
+                onNavigationStateChange={setGraphCanGoBack}
               />
               {graphHint.length > 0 && (
                 <div className="pointer-events-none absolute bottom-2 left-2 z-10 max-w-[min(100%,20rem)] rounded border border-omnix-accent-indigo/20 bg-omnix-bg/80 px-2 py-1 font-mono text-[9px] text-omnix-text-dim/90">

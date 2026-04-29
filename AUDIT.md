@@ -1,6 +1,12 @@
 # OMNIX AUDIT REPORT
 Date: 2026-04-14
 
+> Archived historical audit. Slice 14.5 retired the legacy static viewer
+> described here (`src/web/index.html`, `/api/graph`, generated graph/timeline
+> JSON targets, and `tests/sidebar/**`). Current `omnix analyze` serves React
+> Studio from `src/studio/frontend/dist/` against the Studio SQLite/WebSocket
+> pipeline.
+
 ## Summary
 - Total Python source files (excluding `__pycache__`): **19** (~3,737 lines via `wc`)
 - Total HTML files: **1** (`src/web/index.html`, 4,915 lines)

@@ -151,10 +151,13 @@ export async function putFile(
 export type ReceiptSource = "fabric" | "scan" | "evolution" | "studio" | "future";
 
 export type ReceiptEntry = {
+  receipt_id?: string;
   kind: string;
   target: string;
   hash_prefix: string;
   sig_alg: string;
+  has_signature?: boolean;
+  verified?: boolean;
   mtime_iso: string;
   source: ReceiptSource;
   path: string;
@@ -174,6 +177,18 @@ export async function listReceipts(
   if (!r.ok) throw new Error("list receipts");
   const j = (await r.json()) as { receipts: ReceiptEntry[] };
   return j.receipts;
+}
+
+export async function getReceiptById(
+  workspaceId: string,
+  receiptId: string
+): Promise<unknown> {
+  const r = await fetch(
+    `/api/workspace/${encodeURIComponent(workspaceId)}/receipts/${encodeURIComponent(receiptId)}`
+  );
+  if (!r.ok) throw new Error("get receipt");
+  const j = (await r.json()) as { receipt?: unknown };
+  return j.receipt ?? j;
 }
 
 export type SearchKind = "symbol" | "file" | "all";

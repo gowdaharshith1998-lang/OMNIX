@@ -83,6 +83,14 @@ async function flush() {
   });
 }
 
+async function flushReceiptDebounce() {
+  await act(async () => {
+    vi.advanceTimersByTime(150);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
 afterEach(() => {
   document.body.textContent = "";
   vi.useRealTimers();
@@ -268,8 +276,9 @@ describe("drawers", () => {
   });
 
   it("ReceiptsDrawer mounts, interacts, and tears down", async () => {
+    vi.useFakeTimers();
     const { root, container } = render(<ReceiptsDrawer workspaceId="w" />);
-    await flush();
+    await flushReceiptDebounce();
     expect(container.textContent).toContain("audit log");
     act(() => container.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     act(() => root.unmount());
@@ -277,15 +286,17 @@ describe("drawers", () => {
   });
 
   it("ReceiptsDrawer groups by source", async () => {
+    vi.useFakeTimers();
     const { container } = render(<ReceiptsDrawer workspaceId="w" />);
-    await flush();
+    await flushReceiptDebounce();
     expect(container.textContent).toContain("fabric");
   });
 
   it("ReceiptsDrawer handles empty receipts", async () => {
+    vi.useFakeTimers();
     apiMock.listReceipts.mockResolvedValueOnce([]);
     const { container } = render(<ReceiptsDrawer workspaceId="w" />);
-    await flush();
+    await flushReceiptDebounce();
     expect(container.textContent).toContain("No receipts found");
   });
 

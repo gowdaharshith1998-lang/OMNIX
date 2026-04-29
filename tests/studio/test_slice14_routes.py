@@ -13,6 +13,17 @@ from src.studio.server import app
 from src.studio.workspace import MANAGER, open_workspace
 
 
+def test_studio_legacy_viewer_compat_routes_are_quiet() -> None:
+    client = TestClient(app)
+    assert client.get("/favicon.ico").status_code == 204
+    ai = client.get("/api/ai/status")
+    assert ai.status_code == 200
+    assert ai.json()["available"] is False
+    timeline = client.get("/api/timeline")
+    assert timeline.status_code == 200
+    assert timeline.json() == {"snapshots": []}
+
+
 def _open_managed_workspace(
     root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> str:

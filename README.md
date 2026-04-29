@@ -13,7 +13,7 @@ python omnix.py analyze /path/to/your/project
 
 Browser opens. Explore your codebase in 3D.
 
-Use `python omnix.py analyze /path --no-open` to only build `<path>/omnix.db` and `src/web/graph_data.json` without starting the server.
+Use `python omnix.py analyze /path --no-open` to start the React Studio server without launching a browser. Studio ingests into `<path>/.omnix/omnix.db`; the legacy `src/web/graph_data.json` export path is retired.
 
 ## What It Does
 

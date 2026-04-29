@@ -4,17 +4,57 @@ import {
   type SearchKind,
   type SearchResult,
 } from "@/lib/api";
+import type { GraphNode } from "@/types/drilldown";
 
 type Props = {
-  workspaceId: string;
+  workspaceId?: string | null;
   query: string;
+  fallbackNodes?: GraphNode[];
   onQueryChange: (query: string) => void;
   onOpenResult: (result: SearchResult) => void;
 };
 
+const EMPTY_GRAPH_NODES: GraphNode[] = [];
+
+function nodeKind(node: GraphNode): SearchResult["kind"] | null {
+  if (node.type === "file") return "file";
+  if (node.type === "function" || node.type === "method" || node.type === "class") {
+    return "symbol";
+  }
+  return null;
+}
+
+function searchFallbackNodes(
+  nodes: GraphNode[],
+  query: string,
+  kind: SearchKind,
+  limit: number
+) {
+  const q = query.toLowerCase();
+  const rows: SearchResult[] = [];
+  for (const node of nodes) {
+    const mappedKind = nodeKind(node);
+    if (!mappedKind) continue;
+    if (kind !== "all" && kind !== mappedKind) continue;
+    const path = node.file_path ?? "";
+    const haystack = `${node.name} ${node.id} ${path}`.toLowerCase();
+    if (!haystack.includes(q)) continue;
+    rows.push({
+      kind: mappedKind,
+      name: node.name,
+      path,
+      line: node.line_start || 0,
+      snippet: "",
+    });
+    if (rows.length >= limit) break;
+  }
+  return rows;
+}
+
 export function SearchDrawer({
   workspaceId,
   query,
+  fallbackNodes = EMPTY_GRAPH_NODES,
   onQueryChange,
   onOpenResult,
 }: Props) {
@@ -35,6 +75,11 @@ export function SearchDrawer({
     const timer = setTimeout(() => {
       setLoading(true);
       setErr(null);
+      if (!workspaceId) {
+        setResults(searchFallbackNodes(fallbackNodes, q, kind, 50));
+        setLoading(false);
+        return;
+      }
       void searchWorkspace(workspaceId, q, kind, 50)
         .then((rows) => {
           if (!cancelled) setResults(rows);
@@ -45,12 +90,12 @@ export function SearchDrawer({
         .finally(() => {
           if (!cancelled) setLoading(false);
         });
-    }, 160);
+    }, 150);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [kind, query, workspaceId]);
+  }, [fallbackNodes, kind, query, workspaceId]);
 
   return (
     <div className="p-3">

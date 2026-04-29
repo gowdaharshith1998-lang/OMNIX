@@ -12,6 +12,8 @@ import { StudioGraph, type StudioGraphOptions } from "./StudioGraph";
 
 export type GraphCanvasHandle = {
   ingestMessage: (msg: unknown) => void;
+  canGoBack: () => boolean;
+  goBack: () => void;
 };
 
 type Props = {
@@ -19,6 +21,7 @@ type Props = {
   onFunctionNodeClick: (nodeId: string) => void;
   onFileOrDirClick: (filePath: string) => void;
   onDeselect: () => void;
+  onNavigationStateChange: (canGoBack: boolean) => void;
   /** T1: merge static `graph_data*.json` nodes so DrillDown can resolve function/class id → file + lines. */
   onT1GraphNodes?: (nodes: GraphNode[]) => void;
   onT1GraphEdges?: (edges: GraphEdge[]) => void;
@@ -36,6 +39,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
       onFunctionNodeClick,
       onFileOrDirClick,
       onDeselect,
+      onNavigationStateChange,
       onT1GraphNodes,
       onT1GraphEdges,
     }: Props,
@@ -48,6 +52,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
       onFunctionNodeClick,
       onFileOrDirClick,
       onDeselect,
+      onNavigationStateChange,
     });
     const t1OnNodesRef = useRef<Props["onT1GraphNodes"]>(onT1GraphNodes);
     const t1OnEdgesRef = useRef<Props["onT1GraphEdges"]>(onT1GraphEdges);
@@ -57,8 +62,9 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
         onFunctionNodeClick,
         onFileOrDirClick,
         onDeselect,
+        onNavigationStateChange,
       };
-    }, [onFunctionNodeClick, onFileOrDirClick, onDeselect]);
+    }, [onFunctionNodeClick, onFileOrDirClick, onDeselect, onNavigationStateChange]);
 
     useEffect(() => {
       t1OnNodesRef.current = onT1GraphNodes;
@@ -71,6 +77,10 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
     useImperativeHandle(ref, () => ({
       ingestMessage: (msg: unknown) => {
         graphRef.current?.ingestDelta(msg);
+      },
+      canGoBack: () => Boolean(graphRef.current?.canGoBack()),
+      goBack: () => {
+        graphRef.current?.goBack();
       },
     }));
 
@@ -88,6 +98,9 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
         },
         get onDeselect() {
           return optionsRef.current.onDeselect;
+        },
+        get onNavigationStateChange() {
+          return optionsRef.current.onNavigationStateChange;
         },
         get onDrilldownCatalog() {
           return t1OnNodesRef.current;

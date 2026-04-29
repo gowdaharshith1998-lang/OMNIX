@@ -4,30 +4,8 @@
 from __future__ import annotations
 
 import argparse
-import json
-import mimetypes
 import os
 import sys
-
-
-def _static_content_type(rel: str) -> str:
-    ext = os.path.splitext(rel)[1].lower()
-    overrides = {
-        ".js": "application/javascript",
-        ".mjs": "application/javascript",
-        ".css": "text/css",
-        ".json": "application/json",
-        ".html": "text/html",
-        ".svg": "image/svg+xml",
-        ".wasm": "application/wasm",
-    }
-    if ext in overrides:
-        base = overrides[ext]
-        if ext == ".html":
-            return f"{base}; charset=utf-8"
-        return base
-    guessed, _ = mimetypes.guess_type(rel)
-    return guessed or "application/octet-stream"
 
 
 def main() -> None:
@@ -38,6 +16,8 @@ def main() -> None:
     analyze.add_argument("path", help="Path to codebase")
     analyze.add_argument(
         "--no-open",
+        "--no-browser",
+        dest="no_open",
         action="store_true",
         help="Do not launch a browser (still serves on --port)",
     )
@@ -215,324 +195,23 @@ def main() -> None:
     if _st is not None and not (0.0 <= _st <= 1.0):
         parser.error("--skip-threshold must be between 0.0 and 1.0")
 
-    root = os.path.dirname(os.path.abspath(__file__))
-    if root not in sys.path:
-        sys.path.insert(0, root)
-
-    from src.parser.dark_matter_parser import parse_dark_matter
-    from src.parser.entanglement_parser import parse_entanglements
-    from src.parser.git_parser import parse_git_history
-    from src.graph.store import GraphStore
-    from src.graph.exporter import export_json
-    from src.omnix_version import __version__ as omnix_v
-    from src.parser import evolution
-    from src.parser.ingest_dispatch import ingest_unified_codebase
-    from src.parser.skip_tracking import exit_code_for_skips, format_skip_banner
-
     target = os.path.abspath(args.path)
-    # Per-codebase graph + evolution: DB lives under the analyzed tree (Q2 / ITER 4).
-    db_path = os.path.join(target, "omnix.db")
-    graph_json = os.path.join(root, "src", "web", "graph_data.json")
-    timeline_json = os.path.join(root, "src", "web", "timeline_data.json")
-    web_root = os.path.join(root, "src", "web")
-
-    print(f"🔍 OMNIX analyzing {target}...")
-
-    evolution.begin_evolution_run()
-    store = GraphStore(db_path)
-    _ingest_tot = ingest_unified_codebase(
-        target,
-        store,
-        force=bool(getattr(args, "force", False)),
-        omnix_version=omnix_v,
-    )
-    _ = evolution.finalize_evolution_run(store.sqlite_connection())
-    py_count = int(_ingest_tot.by_grammar.get("python", 0))
-    ts_count = int(_ingest_tot.by_grammar.get("typescript", 0))
-
-    dm_count = parse_dark_matter(target, store)
-    ent_count = parse_entanglements(target, store)
-
-    timeline = parse_git_history(target, store)
-    if timeline:
-        with open(timeline_json, "w", encoding="utf-8") as f:
-            json.dump(timeline, f)
-        print(
-            f"⏳ Timeline saved: {timeline['first_date']} → {timeline['last_date']}"
-        )
-
-    print(f"📊 Parsed {py_count} Python + {ts_count} TypeScript files", end="")
-    if int(getattr(_ingest_tot, "cached", 0) or 0) > 0:
-        print(
-            f" (unchanged, skipped: {int(_ingest_tot.cached)} files in Merkle cache)",
-            end="",
-        )
-    print()
-    _skip_banner = format_skip_banner(_ingest_tot.skip)
-    if _skip_banner:
-        print(_skip_banner)
-    ratio_thr = float(
-        args.skip_threshold if args.skip_threshold is not None else (0.5 if args.strict else 1.0)
-    )
-    analyze_rc = exit_code_for_skips(
-        strict=bool(args.strict),
-        ratio_threshold=ratio_thr,
-        agg=_ingest_tot.skip,
-    )
-    print(f"🌀 {dm_count} dark matter nodes detected")
-    print(f"⚡ {ent_count} entangled pairs detected")
-    print(f"🧬 {store.node_count()} nodes, {store.edge_count()} edges")
-
-    export_json(store, graph_json)
-    store.close()
-
-    from src.agents.orchestrator import AgentOrchestrator
-
-    orchestrator = AgentOrchestrator(target, db_path)
-
-    if orchestrator.available:
-        print(f"🧠 AI Agent ready: {orchestrator.provider_info}")
-    else:
-        print(
-            "🧠 AI Agent: no provider detected (set OMNIX_AI_KEY or install Ollama)"
-        )
-
-    if args.no_open:
-        print(f"💾 Graph written to {graph_json}")
-        if analyze_rc != 0:
-            print(
-                "⚠️  Analyze coverage gate: exiting with code 2 (--strict / --skip-threshold).",
-                file=sys.stderr,
-            )
-        sys.exit(analyze_rc)
-
-    if analyze_rc != 0:
-        print(
-            "⚠️  Analyze coverage gate: exiting with code 2 (--strict / --skip-threshold).",
-            file=sys.stderr,
-        )
-        sys.exit(analyze_rc)
-
     import threading
     import webbrowser
-    from http.server import BaseHTTPRequestHandler, HTTPServer
 
-    class OmnixHandler(BaseHTTPRequestHandler):
-        def _write_body(self, data: bytes) -> None:
-            if not getattr(self, "_omit_response_body", False):
-                self.wfile.write(data)
+    if root_om not in sys.path:
+        sys.path.insert(0, root_om)
+    from src.studio.server import run as studio_run  # type: ignore[import-not-found]
 
-        def _send_json(self, data: object) -> None:
-            response = json.dumps(data).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(response)))
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self._write_body(response)
-
-        def do_HEAD(self) -> None:
-            self._omit_response_body = True
-            try:
-                self.do_GET()
-            finally:
-                self._omit_response_body = False
-
-        def do_GET(self) -> None:
-            from urllib.parse import urlparse
-
-            path = urlparse(self.path).path
-            if path == "/favicon.ico":
-                self.send_response(204)
-                self.end_headers()
-                return
-            if path == "/api/graph":
-                try:
-                    with open(graph_json, "rb") as f:
-                        data = f.read()
-                except OSError:
-                    self.send_error(404, "graph_data.json missing — run analyze first")
-                    return
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Content-Length", str(len(data)))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                self._write_body(data)
-                return
-
-            if path == "/api/ai/status":
-                data = {
-                    "available": orchestrator.available,
-                    "provider": orchestrator.provider_info,
-                    "memory_stats": orchestrator.memory.get_stats(
-                        orchestrator.codebase_id
-                    ),
-                }
-                self._send_json(data)
-                return
-
-            if path == "/api/fabric/status":
-                from src.fabric.handler import handle_fabric_status_get
-
-                handle_fabric_status_get(self)
-                return
-            if path == "/api/fabric/telemetry":
-                from src.fabric.handler import handle_fabric_telemetry_get
-
-                handle_fabric_telemetry_get(self)
-                return
-            if path == "/api/fabric/spend":
-                from src.fabric.handler import handle_fabric_spend_get
-
-                handle_fabric_spend_get(self)
-                return
-
-            if path == "/api/timeline":
-                try:
-                    with open(timeline_json, "rb") as f:
-                        data = f.read()
-                except OSError:
-                    self.send_error(
-                        404, "timeline_data.json missing — run analyze on a git repo"
-                    )
-                    return
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Content-Length", str(len(data)))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                self._write_body(data)
-                return
-
-            if path == "/" or path == "":
-                path = "/index.html"
-            rel = path.lstrip("/")
-            if rel.replace("..", "") != rel:
-                self.send_error(400, "Invalid path")
-                return
-            fp = os.path.join(web_root, rel)
-            if not os.path.isfile(fp):
-                self.send_error(404, "Not found")
-                return
-            with open(fp, "rb") as f:
-                body = f.read()
-            ctype = _static_content_type(rel)
-            self.send_response(200)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self._write_body(body)
-
-        def do_POST(self) -> None:
-            from urllib.parse import urlparse
-
-            path = urlparse(self.path).path
-            content_length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(content_length) if content_length else b""
-
-            try:
-                data = json.loads(body.decode("utf-8")) if body else {}
-            except json.JSONDecodeError:
-                data = {}
-
-            if not isinstance(data, dict):
-                data = {}
-
-            if path == "/api/fabric/dispatch":
-                from src.fabric.handler import handle_fabric_dispatch_post
-
-                handle_fabric_dispatch_post(self, data)
-                return
-
-            if path == "/api/vault/scan":
-                from pathlib import Path
-
-                from src.scan.handler import handle_vault_scan_post
-
-                handle_vault_scan_post(self, project_root=Path(target))
-                return
-            if path == "/api/vault/scan/consume":
-                from src.scan.handler import handle_vault_scan_consume_post
-
-                handle_vault_scan_consume_post(self, data)
-                return
-
-            if path == "/api/ai/diagnose":
-                dir_path = str(data.get("directory", ""))
-                issue = data.get("issue")
-                result = (
-                    orchestrator.diagnose(dir_path, str(issue) if issue else None)
-                    if orchestrator.available
-                    else {"error": "AI not available"}
-                )
-                self._send_json(result)
-                return
-
-            if path == "/api/ai/security":
-                dir_path = data.get("directory")
-                result = (
-                    orchestrator.security_scan(
-                        str(dir_path) if dir_path is not None else None
-                    )
-                    if orchestrator.available
-                    else {"error": "AI not available"}
-                )
-                self._send_json(result)
-                return
-
-            if path == "/api/ai/architecture":
-                result = (
-                    orchestrator.explain_architecture()
-                    if orchestrator.available
-                    else {"error": "AI not available"}
-                )
-                self._send_json(result)
-                return
-
-            if path == "/api/ai/ask":
-                question = str(data.get("question", ""))
-                dir_path = data.get("directory")
-                result = (
-                    orchestrator.ask(
-                        question,
-                        str(dir_path) if dir_path is not None else None,
-                    )
-                    if orchestrator.available
-                    else {"error": "AI not available"}
-                )
-                self._send_json(result)
-                return
-
-            if path == "/api/ai/feedback":
-                diagnosis_id = str(data.get("id", ""))
-                correct = bool(data.get("correct", True))
-                orchestrator.memory.mark_correct(diagnosis_id, correct)
-                self._send_json({"ok": True})
-                return
-
-            self.send_error(404)
-
-        def do_OPTIONS(self) -> None:
-            self.send_response(200)
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type")
-            self.end_headers()
-
-        def log_message(self, format: str, *args) -> None:
-            return
-
-    os.chdir(web_root)
-    server = HTTPServer(("127.0.0.1", args.port), OmnixHandler)
     url = f"http://127.0.0.1:{args.port}/"
 
     print(f"🌐 OMNIX running at {url}")
 
-    threading.Timer(0.4, lambda: webbrowser.open(url)).start()
+    if not args.no_open:
+        threading.Timer(0.4, lambda: webbrowser.open(url)).start()
 
     try:
-        server.serve_forever()
+        studio_run(project_path=target, port=args.port)
     except KeyboardInterrupt:
         print("\n✨ OMNIX stopped")
 

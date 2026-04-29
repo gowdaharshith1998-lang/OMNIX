@@ -36,7 +36,7 @@ import re
 import sqlite3
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -165,6 +165,21 @@ async def _start_background_ingest(w: Workspace, loop: asyncio.AbstractEventLoop
 @app.get("/api/health")
 def api_health() -> dict[str, str]:
     return {"status": "ok", "version": __version__}
+
+
+@app.get("/favicon.ico", response_class=Response)
+def favicon() -> Response:
+    return Response(status_code=204)
+
+
+@app.get("/api/ai/status")
+def api_ai_status() -> dict[str, Any]:
+    return {"available": False, "provider": "", "memory_stats": {}}
+
+
+@app.get("/api/timeline")
+def api_timeline() -> dict[str, list[Any]]:
+    return {"snapshots": []}
 
 
 @app.get("/api/recent")

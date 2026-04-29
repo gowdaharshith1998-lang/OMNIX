@@ -12,6 +12,7 @@ export type StudioGraphOptions = {
   onFunctionNodeClick?: (nodeId: string) => void;
   onFileOrDirClick?: (filePath: string) => void;
   onDeselect?: () => void;
+  onNavigationStateChange?: (canGoBack: boolean) => void;
   /** Same role as T1 `onT1GraphNodes`: DrillDown catalog after full graph snapshot. */
   onDrilldownCatalog?: (nodes: GraphNode[]) => void;
   /** X-Ray catalog after full graph snapshot. */
@@ -42,6 +43,8 @@ type StudioHandle = {
   _bornEdge?: (fromSynthId: string, toSynthId: string) => boolean;
   /** T2 v2 slice 6b — viewer reports whether planet PIXI layer is ready for live deltas */
   setViewContext?: (context: "planet-ready" | "non-planet") => void;
+  _canGoBack?: () => boolean;
+  _goBack?: () => void;
 };
 
 type BootstrapBuffer = {
@@ -107,6 +110,14 @@ export class StudioGraph {
       links,
       stats: stats ?? {},
     });
+  }
+
+  canGoBack(): boolean {
+    return Boolean(this._studio._canGoBack?.());
+  }
+
+  goBack(): void {
+    this._studio._goBack?.();
   }
 
   private _logDispatch(m: Record<string, unknown>, t: string) {
