@@ -27,6 +27,8 @@ import asyncio
 import contextlib
 import json
 import time
+import hashlib
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -174,6 +176,117 @@ def api_studio_initial() -> dict[str, str | None]:
     envp = (os.environ.get("OMNIX_STUDIO_INITIAL") or "").strip()
     p = (INITIAL_STUDIO_PATH or envp or None)  # type: ignore[has-type, assignment, misc, no-redef, union-attr]
     return {"path": p}  # type: ignore[return-value, no-any-return]
+
+
+def _parse_receipt_bound(raw: str | None) -> float | None:
+    if raw is None or not raw.strip():
+        return None
+    s = raw.strip()
+    with contextlib.suppress(ValueError):
+        return float(s)
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(s).timestamp()
+    except ValueError:
+        raise HTTPException(400, "invalid receipt time bound") from None
+
+
+def _receipt_source(path: Path, body: dict[str, Any]) -> str:
+    stem = path.stem.lower()
+    event = str(body.get("event") or body.get("kind") or "").lower()
+    if stem.startswith("call_") or "fabric" in event or body.get("call_id") is not None:
+        return "fabric"
+    if stem.startswith("scan") or event.startswith("vault.scan"):
+        return "scan"
+    if stem.startswith("evolution_") or "evolution" in event:
+        return "evolution"
+    return "future"
+
+
+def _receipt_kind(source: str, body: dict[str, Any]) -> str:
+    raw = body.get("event") or body.get("kind") or body.get("type")
+    if isinstance(raw, str) and raw:
+        return raw
+    if source == "fabric":
+        return "fabric.call"
+    if source == "scan":
+        return "vault.scan"
+    if source == "evolution":
+        return "grammar.evolution"
+    return "receipt"
+
+
+def _receipt_target(body: dict[str, Any]) -> str:
+    for key in ("target", "file", "path", "grammar", "grammar_name", "provider", "model"):
+        value = body.get(key)
+        if isinstance(value, str) and value:
+            return value
+    provider = body.get("provider")
+    model = body.get("model")
+    if provider or model:
+        return " / ".join(str(x) for x in (provider, model) if x)
+    return ""
+
+
+def _iter_receipts(
+    *, since: float | None, until: float | None, limit: int
+) -> list[dict[str, Any]]:
+    root = (Path.home() / ".omnix" / "receipts").expanduser()
+    if not root.is_dir():
+        return []
+    rows: list[dict[str, Any]] = []
+    for path in root.glob("*.json"):
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        mtime = float(st.st_mtime)
+        if since is not None and mtime < since:
+            continue
+        if until is not None and mtime > until:
+            continue
+        try:
+            raw = path.read_bytes()
+            body0 = json.loads(raw.decode("utf-8", errors="replace"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            body0 = {}
+            raw = b""
+        body = body0 if isinstance(body0, dict) else {}
+        source = _receipt_source(path, body)
+        rows.append(
+            {
+                "kind": _receipt_kind(source, body),
+                "target": _receipt_target(body),
+                "hash_prefix": hashlib.sha256(raw).hexdigest()[:12] if raw else "",
+                "sig_alg": "ML-DSA-65" if path.with_suffix(".sig").is_file() else "unsigned",
+                "mtime_iso": datetime.fromtimestamp(mtime, timezone.utc).isoformat().replace("+00:00", "Z"),
+                "source": source,
+                "path": str(path),
+            }
+        )
+    rows.sort(key=lambda r: str(r.get("mtime_iso") or ""), reverse=True)
+    return rows[:limit]
+
+
+@app.get("/api/workspace/{workspace_id}/receipts")
+def api_workspace_receipts(
+    workspace_id: str,
+    since: str | None = None,
+    until: str | None = None,
+    limit: int = 100,
+) -> dict[str, list[dict[str, Any]]]:
+    w = MANAGER.get(workspace_id)
+    if w is None:
+        raise HTTPException(404, "unknown workspace_id")
+    lim = max(1, min(int(limit), 500))
+    return {
+        "receipts": _iter_receipts(
+            since=_parse_receipt_bound(since),
+            until=_parse_receipt_bound(until),
+            limit=lim,
+        )
+    }
 
 
 def _edge_dict(

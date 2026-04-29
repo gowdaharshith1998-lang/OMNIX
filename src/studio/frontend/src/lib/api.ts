@@ -131,3 +131,31 @@ export async function putFile(
     new_last_modified: number;
   }>;
 }
+
+export type ReceiptSource = "fabric" | "scan" | "evolution" | "studio" | "future";
+
+export type ReceiptEntry = {
+  kind: string;
+  target: string;
+  hash_prefix: string;
+  sig_alg: string;
+  mtime_iso: string;
+  source: ReceiptSource;
+  path: string;
+};
+
+export async function listReceipts(
+  workspaceId: string,
+  opts: { since?: string; until?: string; limit?: number } = {}
+): Promise<ReceiptEntry[]> {
+  const q = new URLSearchParams();
+  if (opts.since) q.set("since", opts.since);
+  if (opts.until) q.set("until", opts.until);
+  if (opts.limit) q.set("limit", String(opts.limit));
+  const r = await fetch(
+    `/api/workspace/${encodeURIComponent(workspaceId)}/receipts?${q}`
+  );
+  if (!r.ok) throw new Error("list receipts");
+  const j = (await r.json()) as { receipts: ReceiptEntry[] };
+  return j.receipts;
+}

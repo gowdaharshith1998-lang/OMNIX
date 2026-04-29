@@ -7,6 +7,7 @@ import { useStudioKeybindings } from "@/lib/keybindings";
 import { BottomToolbar } from "./BottomToolbar";
 import { CodeTab, type CodeTabHandle, type CodeTarget } from "./CodeTab";
 import { FindBar } from "./FindBar";
+import { HistoryTab } from "./HistoryTab";
 import { LeftRail, type LeftRailDrawer } from "./LeftRail";
 import { NewFileModal } from "./NewFileModal";
 import { RightPanel, type RightPanelTab, type RightPanelTabId } from "./RightPanel";
@@ -388,11 +389,7 @@ export function Workspace({
     {
       id: "history",
       label: "History",
-      content: (
-        <div className="p-4 text-sm text-omnix-text-dim">
-          Receipt-backed history lands in this slice.
-        </div>
-      ),
+      content: <HistoryTab workspaceId={workspaceId} />,
     },
   ];
 
