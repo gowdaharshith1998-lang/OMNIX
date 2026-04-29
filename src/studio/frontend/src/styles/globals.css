@@ -96,7 +96,7 @@ body {
 }
 
 .omnix-right-panel.is-collapsed {
-  transform: translateX(calc(100% - 24px));
+  transform: translateX(calc(100% - 32px));
 }
 
 .omnix-right-panel.is-collapsed .omnix-tab-strip,
@@ -136,15 +136,16 @@ body {
   left: 0;
   top: 42px;
   z-index: 10;
-  width: 24px;
+  width: 32px;
   height: 96px;
   cursor: pointer;
-  border: 1px solid var(--omnix-shell-border);
+  border: 1px solid rgba(99, 102, 241, 0.6);
   border-left: 0;
   border-radius: 0 10px 10px 0;
-  background: var(--omnix-shell-panel);
-  color: var(--omnix-text-primary);
+  background: rgba(99, 102, 241, 0.22);
+  color: white;
   font-size: 20px;
+  box-shadow: 0 0 18px rgba(99, 102, 241, 0.35);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
 }
