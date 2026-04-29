@@ -254,13 +254,18 @@ def _iter_receipts(
             raw = b""
         body = body0 if isinstance(body0, dict) else {}
         source = _receipt_source(path, body)
+        has_sig = path.with_suffix(".sig").is_file()
         rows.append(
             {
                 "kind": _receipt_kind(source, body),
                 "target": _receipt_target(body),
                 "hash_prefix": hashlib.sha256(raw).hexdigest()[:12] if raw else "",
-                "sig_alg": "ML-DSA-65" if path.with_suffix(".sig").is_file() else "unsigned",
-                "mtime_iso": datetime.fromtimestamp(mtime, timezone.utc).isoformat().replace("+00:00", "Z"),
+                # NOTE: "ML-DSA-65" currently indicates signature file presence only (not verified).
+                "sig_alg": "ML-DSA-65" if has_sig else "unsigned",
+                "has_signature": bool(has_sig),
+                "mtime_iso": datetime.fromtimestamp(mtime, timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z"),
                 "source": source,
                 "path": str(path),
             }

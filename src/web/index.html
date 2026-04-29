@@ -806,7 +806,7 @@
         </section>
         <section class="sb-p-sheet sb-pad" id="sb-p-search" data-sb-panel="search" role="region" aria-hidden="true" aria-label="Search">
           <h2 class="sb-h-sec">Search</h2>
-          <p class="sb-p-body">Coming in Integration <strong>#8</strong> — graph-grounded semantic search.</p>
+          <p class="sb-p-body">Search by name, file, symbol. Results jump the graph.</p><div class="sb-pad" style="padding-left:0;padding-top:8px" id="sb-search-wrap"><input id="sb-search-input" class="sb-in" type="search" placeholder="name, file, symbol…" autocomplete="off" spellcheck="false" /><div id="sb-search-status" style="color:var(--sb-dim);font-size:12px;padding-top:8px">Type to search.</div><div id="sb-search-results" aria-label="Search results" style="padding-top:8px"></div></div>
         </section>
         <section class="sb-p-sheet sb-pad" id="sb-p-graph" data-sb-panel="graph" role="region" aria-hidden="true" aria-label="Graph">
           <h2 class="sb-h-sec">Graph</h2>
@@ -7066,6 +7066,9 @@
       if (tab === 'receipts') {
         void refreshReceipts();
       }
+      if (tab === 'search') {
+        void ensureSearchWired();
+      }
     }
     function closePanel() {
       setState(false, null);
@@ -7326,6 +7329,165 @@
       return '';
     }
 
+    function setSearchStatus(text, kind) {
+      const st = document.getElementById('sb-search-status');
+      if (!st) return;
+      st.textContent = String(text || '');
+      const k = String(kind || '');
+      if (k === 'error') {
+        st.style.color = 'var(--sb-warn)';
+      } else {
+        st.style.color = 'var(--sb-dim)';
+      }
+    }
+
+    function focusViaExistingGraphSearch(query) {
+      const input = document.getElementById('search-input');
+      if (!input) return false;
+      try {
+        input.value = String(query || '');
+      } catch (e) {
+        /* */
+      }
+      try {
+        input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+      } catch (e2) {
+        /* */
+      }
+      try {
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true, cancelable: true }));
+      } catch (e3) {
+        /* */
+      }
+      return true;
+    }
+
+    function renderSearchResults(rows) {
+      const host = document.getElementById('sb-search-results');
+      if (!host) return;
+      host.textContent = '';
+      if (!Array.isArray(rows) || rows.length === 0) {
+        const p = document.createElement('p');
+        p.className = 'sb-pad';
+        p.textContent = 'No matches.';
+        p.style.cssText = 'padding-left:0;color:var(--sb-dim);font-size:14px;';
+        host.appendChild(p);
+        return;
+      }
+      rows.forEach((r) => {
+        const name = (r && r.name) || '';
+        const kind = (r && (r.kind || r.type)) || '';
+        const path = (r && (r.path || r.file)) || '';
+        const line = r && (r.line || r.start_line);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'sb-k-b';
+        btn.style.cssText = 'width:100%;text-align:left;margin:0 0 6px 0;';
+        btn.innerHTML =
+          '<div style="display:flex;gap:8px;align-items:baseline;justify-content:space-between">' +
+          '<span style="color:var(--sb-text);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:80%">' +
+          String(name || '—') +
+          '</span>' +
+          '<span style="color:var(--sb-dim);font-size:11px;flex:0 0 auto">' +
+          String(kind || '') +
+          '</span>' +
+          '</div>' +
+          '<div style="color:var(--sb-dim);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%">' +
+          String(path || '') +
+          (line ? ':' + String(line) : '') +
+          '</div>';
+        btn.addEventListener('click', () => {
+          const q = (name && path) ? (name + ' ' + path) : (name || path || '');
+          focusViaExistingGraphSearch(q);
+        });
+        host.appendChild(btn);
+      });
+    }
+
+    let searchWired = false;
+    let searchTimer = 0;
+    let graphIndex = null;
+
+    async function ensureGraphIndex() {
+      if (graphIndex) return graphIndex;
+      const url = fabricPath('/api/graph');
+      if (!url) return null;
+      const res = await fetch(url, { method: 'GET', cache: 'no-store' });
+      if (!res.ok) return null;
+      const j = await res.json();
+      if (!j || !Array.isArray(j.nodes)) return null;
+      graphIndex = j;
+      return j;
+    }
+
+    async function runSidebarSearch(q) {
+      const query = String(q || '').trim();
+      if (!query) {
+        setSearchStatus('Type to search.', 'ok');
+        renderSearchResults([]);
+        return;
+      }
+      const wid = getStudioWorkspaceId();
+      if (wid) {
+        const url = fabricPath('/api/workspace/' + encodeURIComponent(wid) + '/search?q=' + encodeURIComponent(query) + '&limit=50&kind=all');
+        if (!url) {
+          setSearchStatus('Search API unavailable.', 'error');
+          renderSearchResults([]);
+          return;
+        }
+        setSearchStatus('Searching…', 'ok');
+        try {
+          const res = await fetch(url, { method: 'GET' });
+          if (!res.ok) throw new Error('search');
+          const j = await res.json();
+          const rows = (j && j.results) || [];
+          setSearchStatus((rows && rows.length ? rows.length : 0) + ' matches', 'ok');
+          renderSearchResults(rows);
+          return;
+        } catch (e) {
+          setSearchStatus('Search failed.', 'error');
+          renderSearchResults([]);
+          return;
+        }
+      }
+
+      // Analyze-mode fallback: search graph_data.json via /api/graph (lexical).
+      setSearchStatus('Searching graph…', 'ok');
+      try {
+        const idx = await ensureGraphIndex();
+        if (!idx) throw new Error('graph');
+        const hay = query.toLowerCase();
+        const hits = [];
+        for (let i = 0; i < idx.nodes.length; i += 1) {
+          const n = idx.nodes[i];
+          const h = ((n && n.name) || '') + ' ' + ((n && n.id) || '') + ' ' + ((n && n.file) || '');
+          if (String(h).toLowerCase().includes(hay)) {
+            hits.push({ name: n.name || n.id, type: n.type || '', file: n.file || '', line: n.line || 0 });
+            if (hits.length >= 50) break;
+          }
+        }
+        setSearchStatus(hits.length + ' matches', 'ok');
+        renderSearchResults(hits);
+      } catch (_e2) {
+        setSearchStatus('Search unavailable.', 'error');
+        renderSearchResults([]);
+      }
+    }
+
+    async function ensureSearchWired() {
+      if (searchWired) return;
+      const input = document.getElementById('sb-search-input');
+      if (!input) return;
+      searchWired = true;
+      input.addEventListener('input', () => {
+        if (searchTimer) window.clearTimeout(searchTimer);
+        searchTimer = window.setTimeout(() => {
+          void runSidebarSearch(input.value || '');
+        }, 150);
+      });
+      setSearchStatus('Type to search.', 'ok');
+    }
+
     function setReceiptsStatus(text, kind) {
       const st = document.getElementById('sb-receipts-status');
       if (!st) return;
@@ -7371,9 +7533,11 @@
         mid.appendChild(target);
         const bad = document.createElement('div');
         bad.className = 'sb-c-bad';
-        const signed = String((r && r.sig_alg) || '') !== 'unsigned';
-        const btxt = signed ? '✓ Signed' : '⚠ Unsigned';
-        bad.innerHTML = '<span style="color:' + (signed ? 'var(--sb-ok)' : 'var(--sb-warn)') + '">' + btxt + '</span>';
+        const hasSig =
+          (r && (r.has_signature === true || r.signature_present === true)) ||
+          String((r && r.sig_alg) || '') !== 'unsigned';
+        const btxt = hasSig ? 'Signature present' : 'No signature';
+        bad.innerHTML = '<span style="color:' + (hasSig ? 'var(--sb-ok)' : 'var(--sb-warn)') + '">' + btxt + '</span>';
         const det = document.createElement('details');
         det.style.cssText = 'grid-column: 1 / -1; padding-top:6px;';
         const sum = document.createElement('summary');

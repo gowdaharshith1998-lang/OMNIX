@@ -27,8 +27,12 @@ describe('placeholders and Receipts link', () => {
     const win = newSidebarTestWindow();
     open(win, 'search');
     const n = win.document.getElementById('sb-p-search');
-    expect(n && n.textContent).toMatch(/Coming in Integration #8/);
-    expect(n && n.textContent).toMatch(/semantic search/i);
+    const input = win.document.getElementById('sb-search-input');
+    const results = win.document.getElementById('sb-search-results');
+    expect(input).not.toBeNull();
+    expect(results).not.toBeNull();
+    expect(n && n.textContent).not.toMatch(/Coming in Integration/i);
+    expect(input && input.getAttribute('placeholder')).toMatch(/name|file|symbol/i);
   });
 
   it('Graph — Integration #4 and description', () => {
