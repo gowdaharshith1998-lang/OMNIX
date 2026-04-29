@@ -57,7 +57,7 @@ body {
   top: 0;
   z-index: 65;
   display: flex;
-  width: min(360px, calc(100vw - 48px));
+  width: var(--left-drawer-width, 300px);
   height: 100%;
   flex-direction: column;
   border-right: 1px solid var(--omnix-shell-border);
@@ -80,8 +80,9 @@ body {
   top: 0;
   z-index: 55;
   display: flex;
-  width: min(520px, 38vw);
-  min-width: 420px;
+  width: var(--right-panel-width, 440px);
+  min-width: 360px;
+  max-width: 640px;
   height: 100%;
   flex-direction: column;
   border-left: 1px solid var(--omnix-shell-border);
@@ -150,6 +151,48 @@ body {
   min-height: 0;
   flex: 1;
   overflow: hidden;
+}
+
+.omnix-resize-handle {
+  position: absolute;
+  top: 0;
+  z-index: 5;
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.omnix-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: transparent;
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.omnix-resize-handle:hover::after,
+.omnix-resize-handle:active::after {
+  background: var(--omnix-accent-indigo);
+  box-shadow: 0 0 14px rgba(99, 102, 241, 0.55);
+}
+
+.omnix-resize-handle-left {
+  right: -2px;
+}
+
+.omnix-resize-handle-left::after {
+  right: 1px;
+}
+
+.omnix-resize-handle-right {
+  left: -2px;
+}
+
+.omnix-resize-handle-right::after {
+  left: 1px;
 }
 
 .xray-tab {

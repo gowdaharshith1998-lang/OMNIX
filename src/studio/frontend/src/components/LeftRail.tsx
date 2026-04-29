@@ -1,4 +1,9 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import {
+  LEFT_DRAWER_MAX,
+  LEFT_DRAWER_MIN,
+  clampWidth,
+} from "@/lib/persisted_widths";
 
 export type LeftRailDrawer = "files" | "search" | "bugs" | "receipts" | "settings";
 
@@ -89,8 +94,10 @@ const IcoCog = (props: { className?: string }) => (
 
 type Props = {
   active: LeftRailDrawer | null;
+  drawerWidth: number;
   onSelect: (drawer: LeftRailDrawer) => void;
   onClose: () => void;
+  onResizeEnd: (width: number) => void;
   children?: ReactNode;
 };
 
@@ -109,7 +116,35 @@ const items: Array<{
   { id: "settings", label: "Settings", icon: IcoCog },
 ];
 
-export function LeftRail({ active, onSelect, onClose, children }: Props) {
+export function LeftRail({
+  active,
+  drawerWidth,
+  onSelect,
+  onClose,
+  onResizeEnd,
+  children,
+}: Props) {
+  const startResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const pointerId = event.pointerId;
+    event.currentTarget.setPointerCapture?.(pointerId);
+    const move = (moveEvent: globalThis.PointerEvent) => {
+      const next = clampWidth(moveEvent.clientX - 48, LEFT_DRAWER_MIN, LEFT_DRAWER_MAX);
+      document.documentElement.style.setProperty("--left-drawer-width", `${next}px`);
+    };
+    const up = (upEvent: globalThis.PointerEvent) => {
+      const next = clampWidth(upEvent.clientX - 48, LEFT_DRAWER_MIN, LEFT_DRAWER_MAX);
+      document.documentElement.style.setProperty("--left-drawer-width", `${next}px`);
+      onResizeEnd(next);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  };
+
   return (
     <>
       <nav className="omnix-left-rail" aria-label="OMNIX activity">
@@ -138,6 +173,7 @@ export function LeftRail({ active, onSelect, onClose, children }: Props) {
         className={`omnix-left-drawer ${active ? "is-open" : ""}`}
         aria-label={active ? `${active} drawer` : "OMNIX drawer"}
         aria-hidden={active ? "false" : "true"}
+        style={{ "--left-drawer-width": `${drawerWidth}px` } as CSSProperties}
       >
         <div className="flex items-center justify-between border-b border-[var(--omnix-shell-border)] px-3 py-2.5">
           <div className="font-display text-xs font-bold uppercase tracking-[0.22em] text-omnix-text-primary">
@@ -153,6 +189,15 @@ export function LeftRail({ active, onSelect, onClose, children }: Props) {
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-auto">{children}</div>
+        {active && (
+          <div
+            className="omnix-resize-handle omnix-resize-handle-left"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize left drawer"
+            onPointerDown={startResize}
+          />
+        )}
       </aside>
     </>
   );

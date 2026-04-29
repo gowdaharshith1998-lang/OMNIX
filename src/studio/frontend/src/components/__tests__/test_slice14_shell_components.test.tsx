@@ -134,7 +134,9 @@ describe("RightPanel", () => {
           { id: "history", label: "History", content: <div>history body</div> },
         ]}
         activeTab="code"
+        width={440}
         onSelectTab={vi.fn()}
+        onResizeEnd={vi.fn()}
       />
     );
     expect(container.textContent).toContain("Code");
@@ -150,7 +152,9 @@ describe("RightPanel", () => {
           { id: "history", label: "History", content: <div>history body</div> },
         ]}
         activeTab="code"
+        width={440}
         onSelectTab={onSelect}
+        onResizeEnd={vi.fn()}
       />
     );
     act(() => container.querySelectorAll("button")[1]?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
@@ -159,7 +163,7 @@ describe("RightPanel", () => {
 
   it("tears down cleanly", () => {
     const { root, container } = render(
-      <RightPanel tabs={[{ id: "code", label: "Code", content: <div /> }]} activeTab="code" onSelectTab={vi.fn()} />
+      <RightPanel tabs={[{ id: "code", label: "Code", content: <div /> }]} activeTab="code" width={440} onSelectTab={vi.fn()} onResizeEnd={vi.fn()} />
     );
     act(() => root.unmount());
     expect(container.textContent).toBe("");
@@ -168,19 +172,19 @@ describe("RightPanel", () => {
 
 describe("LeftRail", () => {
   it("mounts five surfaces", () => {
-    const { container } = render(<LeftRail active={null} onSelect={vi.fn()} onClose={vi.fn()} />);
+    const { container } = render(<LeftRail active={null} drawerWidth={300} onSelect={vi.fn()} onClose={vi.fn()} onResizeEnd={vi.fn()} />);
     expect(container.querySelectorAll(".omnix-rail-btn")).toHaveLength(5);
   });
 
   it("interacts by opening a drawer", () => {
     const onSelect = vi.fn();
-    const { container } = render(<LeftRail active={null} onSelect={onSelect} onClose={vi.fn()} />);
+    const { container } = render(<LeftRail active={null} drawerWidth={300} onSelect={onSelect} onClose={vi.fn()} onResizeEnd={vi.fn()} />);
     act(() => container.querySelector('[aria-label="Files"]')?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     expect(onSelect).toHaveBeenCalledWith("files");
   });
 
   it("tears down cleanly", () => {
-    const { root, container } = render(<LeftRail active={"files" as LeftRailDrawer} onSelect={vi.fn()} onClose={vi.fn()} />);
+    const { root, container } = render(<LeftRail active={"files" as LeftRailDrawer} drawerWidth={300} onSelect={vi.fn()} onClose={vi.fn()} onResizeEnd={vi.fn()} />);
     act(() => root.unmount());
     expect(container.textContent).toBe("");
   });

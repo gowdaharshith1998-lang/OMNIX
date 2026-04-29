@@ -29,6 +29,11 @@ import {
   recordEdgeFromGraphPayload,
   recordFromGraphPayload,
 } from "@/lib/graphNode";
+import {
+  loadShellLayout,
+  saveShellLayout,
+  type ShellLayoutState,
+} from "@/lib/persisted_widths";
 
 type Props = {
   workspaceId: string;
@@ -66,6 +71,9 @@ export function Workspace({
   onBack,
 }: Props) {
   const [find, setFind] = useState("");
+  const [shellLayout, setShellLayout] = useState<ShellLayoutState>(() =>
+    loadShellLayout(workspaceId)
+  );
   const [stats] = useState({
     files: initialStats.files,
     functions: initialStats.functions,
@@ -77,7 +85,9 @@ export function Workspace({
   const [wsState, setWsState] = useState<WsState>("idle");
   const [, setFiles] = useState<FileEntry[]>([]);
   const [newFile, setNewFile] = useState(false);
-  const [activeDrawer, setActiveDrawer] = useState<LeftRailDrawer | null>(null);
+  const [activeDrawer, setActiveDrawer] = useState<LeftRailDrawer | null>(
+    shellLayout.leftDrawer.openTab
+  );
   const [rightTab, setRightTab] = useState<RightPanelTabId>("xray");
   const [toast, setToast] = useState<string | null>(null);
   const [graphHint] = useState<string[]>([]);
@@ -112,6 +122,36 @@ export function Workspace({
   useEffect(() => {
     codePathRef.current = codeTarget?.path ?? null;
   }, [codeTarget?.path]);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty(
+      "--left-drawer-width",
+      `${shellLayout.leftDrawer.width}px`
+    );
+    document.documentElement.style.setProperty(
+      "--right-panel-width",
+      `${shellLayout.rightPanel.width}px`
+    );
+  }, [shellLayout.leftDrawer.width, shellLayout.rightPanel.width]);
+
+  const persistShellLayout = useCallback(
+    (next: ShellLayoutState) => {
+      setShellLayout(next);
+      saveShellLayout(workspaceId, next);
+    },
+    [workspaceId]
+  );
+
+  const setPersistentDrawer = useCallback(
+    (drawer: LeftRailDrawer | null) => {
+      setActiveDrawer(drawer);
+      persistShellLayout({
+        ...shellLayout,
+        leftDrawer: { ...shellLayout.leftDrawer, openTab: drawer },
+      });
+    },
+    [persistShellLayout, shellLayout]
+  );
 
   const refreshFiles = useCallback(async () => {
     try {
@@ -477,7 +517,7 @@ export function Workspace({
     drillOpen: codeTarget != null,
     onEscape: () => {
       if (activeDrawer) {
-        setActiveDrawer(null);
+        setPersistentDrawer(null);
         return true;
       }
       if (newFile) {
@@ -487,7 +527,7 @@ export function Workspace({
       return false;
     },
     onTogglePicker: () =>
-      setActiveDrawer((drawer) => (drawer === "search" ? null : "search")),
+      setPersistentDrawer(activeDrawer === "search" ? null : "search"),
     onNewFile: () => setNewFile(true),
     onCmdSWhenNoDrill: onDrillSaveShell,
     onSaveDrill: () => codeRef.current?.save(),
@@ -497,8 +537,15 @@ export function Workspace({
     <div className="omnix-hex-bg relative h-full min-h-0 w-full font-sans text-omnix-text-primary">
       <LeftRail
         active={activeDrawer}
-        onSelect={setActiveDrawer}
-        onClose={() => setActiveDrawer(null)}
+        drawerWidth={shellLayout.leftDrawer.width}
+        onSelect={setPersistentDrawer}
+        onClose={() => setPersistentDrawer(null)}
+        onResizeEnd={(width) =>
+          persistShellLayout({
+            ...shellLayout,
+            leftDrawer: { ...shellLayout.leftDrawer, width },
+          })
+        }
       >
         {activeDrawer ? drawerContent[activeDrawer] : null}
       </LeftRail>
@@ -571,8 +618,15 @@ export function Workspace({
       <RightPanel
         tabs={rightTabs}
         activeTab={rightTab}
+        width={shellLayout.rightPanel.width}
         onSelectTab={setRightTab}
         onNewAgentTab={() => showToastStable("Agent tabs land in slice 15", 1800)}
+        onResizeEnd={(width) =>
+          persistShellLayout({
+            ...shellLayout,
+            rightPanel: { ...shellLayout.rightPanel, width },
+          })
+        }
       />
 
       <div
