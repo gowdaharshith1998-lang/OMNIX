@@ -133,7 +133,7 @@ body {
 
 .omnix-right-expand-handle {
   position: absolute;
-  left: 0;
+  left: -40px;
   top: 42px;
   z-index: 10;
   width: 32px;
