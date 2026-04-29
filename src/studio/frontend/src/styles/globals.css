@@ -89,9 +89,14 @@ body {
   background: var(--omnix-shell-panel);
   color: var(--omnix-text-primary);
   transform: translateX(0);
+  transition: transform 180ms ease;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   will-change: transform;
+}
+
+.omnix-right-panel.is-collapsed {
+  transform: translateX(calc(100% - 24px));
 }
 
 .omnix-tab-strip {
@@ -102,6 +107,38 @@ body {
   border-bottom: 1px solid var(--omnix-shell-border);
   background: rgba(5, 8, 16, 0.92);
   overflow-x: auto;
+}
+
+.omnix-panel-collapse {
+  width: 28px;
+  flex: 0 0 28px;
+  cursor: pointer;
+  border: 0;
+  border-right: 1px solid var(--omnix-shell-border);
+  background: rgba(5, 8, 16, 0.8);
+  color: var(--omnix-text-muted);
+  font-size: 18px;
+}
+
+.omnix-panel-collapse:hover {
+  color: var(--omnix-text-primary);
+}
+
+.omnix-right-expand-handle {
+  position: absolute;
+  left: 0;
+  top: 42px;
+  width: 24px;
+  height: 96px;
+  cursor: pointer;
+  border: 1px solid var(--omnix-shell-border);
+  border-left: 0;
+  border-radius: 0 10px 10px 0;
+  background: var(--omnix-shell-panel);
+  color: var(--omnix-text-primary);
+  font-size: 20px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 .omnix-tab {
@@ -457,6 +494,10 @@ body {
   }
 
   .omnix-left-drawer {
+    transition: none;
+  }
+
+  .omnix-right-panel {
     transition: none;
   }
 }

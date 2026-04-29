@@ -88,6 +88,9 @@ export function Workspace({
   const [activeDrawer, setActiveDrawer] = useState<LeftRailDrawer | null>(
     shellLayout.leftDrawer.openTab
   );
+  const [lastDrawerTab, setLastDrawerTab] = useState<LeftRailDrawer>(
+    shellLayout.leftDrawer.openTab ?? "files"
+  );
   const [rightTab, setRightTab] = useState<RightPanelTabId>("xray");
   const [toast, setToast] = useState<string | null>(null);
   const [graphHint] = useState<string[]>([]);
@@ -144,6 +147,7 @@ export function Workspace({
 
   const setPersistentDrawer = useCallback(
     (drawer: LeftRailDrawer | null) => {
+      if (drawer) setLastDrawerTab(drawer);
       setActiveDrawer(drawer);
       persistShellLayout({
         ...shellLayout,
@@ -152,6 +156,20 @@ export function Workspace({
     },
     [persistShellLayout, shellLayout]
   );
+
+  const setRightPanelCollapsed = useCallback(
+    (collapsed: boolean) => {
+      persistShellLayout({
+        ...shellLayout,
+        rightPanel: { ...shellLayout.rightPanel, collapsed },
+      });
+    },
+    [persistShellLayout, shellLayout]
+  );
+
+  const expandRightPanel = useCallback(() => {
+    if (shellLayout.rightPanel.collapsed) setRightPanelCollapsed(false);
+  }, [setRightPanelCollapsed, shellLayout.rightPanel.collapsed]);
 
   const refreshFiles = useCallback(async () => {
     try {
@@ -173,7 +191,8 @@ export function Workspace({
   const selectXRayNode = useCallback((node: GraphNode | null) => {
     setSelectedXRayNode(node);
     setRightTab("xray");
-  }, []);
+    expandRightPanel();
+  }, [expandRightPanel]);
 
   const findNodeForPath = useCallback((p: string) => {
     const normalized = p.replace(/\\/g, "/");
@@ -528,6 +547,10 @@ export function Workspace({
     },
     onTogglePicker: () =>
       setPersistentDrawer(activeDrawer === "search" ? null : "search"),
+    onToggleLeftDrawer: () =>
+      setPersistentDrawer(activeDrawer ? null : lastDrawerTab),
+    onToggleRightPanel: () =>
+      setRightPanelCollapsed(!shellLayout.rightPanel.collapsed),
     onNewFile: () => setNewFile(true),
     onCmdSWhenNoDrill: onDrillSaveShell,
     onSaveDrill: () => codeRef.current?.save(),
@@ -619,6 +642,7 @@ export function Workspace({
         tabs={rightTabs}
         activeTab={rightTab}
         width={shellLayout.rightPanel.width}
+        collapsed={shellLayout.rightPanel.collapsed}
         onSelectTab={setRightTab}
         onNewAgentTab={() => showToastStable("Agent tabs land in slice 15", 1800)}
         onResizeEnd={(width) =>
@@ -626,6 +650,9 @@ export function Workspace({
             ...shellLayout,
             rightPanel: { ...shellLayout.rightPanel, width },
           })
+        }
+        onToggleCollapsed={() =>
+          setRightPanelCollapsed(!shellLayout.rightPanel.collapsed)
         }
       />
 

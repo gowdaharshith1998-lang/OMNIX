@@ -14,6 +14,8 @@ export function useStudioKeybindings(opts: {
   drillOpen: boolean;
   onEscape: () => boolean;
   onTogglePicker: () => void;
+  onToggleLeftDrawer: () => void;
+  onToggleRightPanel: () => void;
   onNewFile: () => void;
   onCmdSWhenNoDrill: () => void;
   onSaveDrill: () => void;
@@ -32,6 +34,16 @@ export function useStudioKeybindings(opts: {
       if (k === "p") {
         e.preventDefault();
         o.onTogglePicker();
+        return;
+      }
+      if (k === "b") {
+        e.preventDefault();
+        o.onToggleLeftDrawer();
+        return;
+      }
+      if (e.key === "\\") {
+        e.preventDefault();
+        o.onToggleRightPanel();
         return;
       }
       if (k === "n") {

@@ -96,4 +96,60 @@ describe("slice 14 resize and persistence", () => {
     act(() => window.dispatchEvent(pointer("pointerup", 1190)));
     expect(onResizeEnd).toHaveBeenCalledWith(RIGHT_PANEL_MIN);
   });
+
+  it("renders right panel collapsed state", () => {
+    const { container } = render(
+      <RightPanel
+        tabs={[{ id: "xray", label: "X-Ray", content: <div>xray</div> }]}
+        activeTab="xray"
+        width={440}
+        collapsed
+        onSelectTab={vi.fn()}
+        onResizeEnd={vi.fn()}
+      />
+    );
+    expect(container.querySelector(".omnix-right-panel")?.className).toContain("is-collapsed");
+    expect(container.querySelector('[aria-label="Expand right panel"]')).not.toBeNull();
+  });
+
+  it("collapse chevron calls right panel toggle", () => {
+    const onToggle = vi.fn();
+    const { container } = render(
+      <RightPanel
+        tabs={[{ id: "xray", label: "X-Ray", content: <div>xray</div> }]}
+        activeTab="xray"
+        width={440}
+        onSelectTab={vi.fn()}
+        onResizeEnd={vi.fn()}
+        onToggleCollapsed={onToggle}
+      />
+    );
+    act(() => container.querySelector(".omnix-panel-collapse")?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(onToggle).toHaveBeenCalled();
+  });
+
+  it("floating expand handle calls right panel toggle", () => {
+    const onToggle = vi.fn();
+    const { container } = render(
+      <RightPanel
+        tabs={[{ id: "xray", label: "X-Ray", content: <div>xray</div> }]}
+        activeTab="xray"
+        width={440}
+        collapsed
+        onSelectTab={vi.fn()}
+        onResizeEnd={vi.fn()}
+        onToggleCollapsed={onToggle}
+      />
+    );
+    act(() => container.querySelector(".omnix-right-expand-handle")?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(onToggle).toHaveBeenCalled();
+  });
+
+  it("persists collapsed right panel state", () => {
+    saveShellLayout("ws", {
+      leftDrawer: { width: 300, openTab: null },
+      rightPanel: { width: 440, collapsed: true },
+    });
+    expect(loadShellLayout("ws").rightPanel.collapsed).toBe(true);
+  });
 });

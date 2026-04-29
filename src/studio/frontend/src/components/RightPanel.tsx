@@ -18,20 +18,24 @@ type Props = {
   tabs: RightPanelTab[];
   activeTab: RightPanelTabId;
   width: number;
+  collapsed?: boolean;
   onSelectTab: (tab: RightPanelTabId) => void;
   onCloseTab?: (tab: RightPanelTabId) => void;
   onNewAgentTab?: () => void;
   onResizeEnd: (width: number) => void;
+  onToggleCollapsed?: () => void;
 };
 
 export function RightPanel({
   tabs,
   activeTab,
   width,
+  collapsed = false,
   onSelectTab,
   onCloseTab,
   onNewAgentTab,
   onResizeEnd,
+  onToggleCollapsed,
 }: Props) {
   const active = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
   const startResize = (event: PointerEvent<HTMLDivElement>) => {
@@ -59,8 +63,9 @@ export function RightPanel({
 
   return (
     <aside
-      className="omnix-right-panel"
+      className={`omnix-right-panel ${collapsed ? "is-collapsed" : ""}`}
       aria-label="OMNIX right panel"
+      aria-hidden={collapsed ? "true" : "false"}
       style={{ "--right-panel-width": `${width}px` } as CSSProperties}
     >
       <div
@@ -71,6 +76,15 @@ export function RightPanel({
         onPointerDown={startResize}
       />
       <div className="omnix-tab-strip" role="tablist" aria-label="Right panel tabs">
+        <button
+          type="button"
+          className="omnix-panel-collapse"
+          onClick={onToggleCollapsed}
+          aria-label="Collapse right panel"
+          title="Collapse right panel"
+        >
+          ›
+        </button>
         {tabs.map((tab) => {
           const selected = tab.id === active?.id;
           return (
@@ -116,6 +130,16 @@ export function RightPanel({
           <div className="p-4 text-sm text-omnix-text-dim">No tab selected.</div>
         )}
       </div>
+      {collapsed && (
+        <button
+          type="button"
+          className="omnix-right-expand-handle"
+          aria-label="Expand right panel"
+          onClick={onToggleCollapsed}
+        >
+          ‹
+        </button>
+      )}
     </aside>
   );
 }
