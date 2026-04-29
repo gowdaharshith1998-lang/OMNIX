@@ -31,6 +31,13 @@ IGNORE_DIRS: frozenset[str] = frozenset(
     }
 )
 
+SKIP_RELATIVE_PATHS: frozenset[str] = frozenset(
+    {
+        # debt-18: PBT can generate multi-GB NTT polynomial inputs and SIGBUS.
+        "src/axiom/ntt.py",
+    }
+)
+
 
 def _load_gitignore(root: Path) -> list[str]:
     p = root / ".gitignore"
@@ -57,6 +64,10 @@ def _path_matches_prefix(rel: Path, prefixes: list[str]) -> bool:
     return False
 
 
+def _skip_relative_path(rel: Path) -> bool:
+    return str(rel).replace(os.sep, "/") in SKIP_RELATIVE_PATHS
+
+
 def _skip_dir_name(name: str) -> bool:
     if name in IGNORE_DIRS:
         return True
@@ -77,6 +88,8 @@ def _iter_raw_python_paths(root: Path, max_size: int) -> Iterator[Path]:
             try:
                 rel = full.relative_to(root)
             except ValueError:
+                continue
+            if _skip_relative_path(rel):
                 continue
             if _path_matches_prefix(rel, gignore):
                 continue
@@ -140,6 +153,8 @@ def scan_codebase_sources(
                 rel = full.relative_to(root)
             except ValueError:
                 continue
+            if _skip_relative_path(rel):
+                continue
             if _path_matches_prefix(rel, gignore):
                 continue
             try:
@@ -191,6 +206,8 @@ def iter_dispatch_paths(
             try:
                 rel = full.relative_to(root)
             except ValueError:
+                continue
+            if _skip_relative_path(rel):
                 continue
             if _path_matches_prefix(rel, gignore):
                 continue

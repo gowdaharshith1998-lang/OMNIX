@@ -49,6 +49,20 @@ def test_gitignore_prefix(tmp_path: Path) -> None:
     assert not any("ignore_me" in str(p) for p in out)
 
 
+def test_skips_known_pathological_relative_paths(tmp_path: Path) -> None:
+    skipped = tmp_path / "src" / "axiom" / "ntt.py"
+    skipped.parent.mkdir(parents=True)
+    skipped.write_text("def add_ntt(a, b):\n    return a + b\n", encoding="utf-8")
+    same_basename = tmp_path / "other" / "ntt.py"
+    same_basename.parent.mkdir()
+    same_basename.write_text("def safe(a, b):\n    return a + b\n", encoding="utf-8")
+
+    out = set(walker.walk_python_files(tmp_path, require_parseable=True))
+
+    assert skipped not in out
+    assert same_basename in out
+
+
 def test_skips_huge_file(tmp_path: Path) -> None:
     p = tmp_path / "huge.py"
     p.write_bytes(b"#" * 2_000_000)
