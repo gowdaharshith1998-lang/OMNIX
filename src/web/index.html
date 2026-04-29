@@ -683,7 +683,7 @@
     </div>
 
     <div class="hud glass" id="breadcrumb">
-      <span class="crumb current" data-level="galaxy">OMNIX</span>
+      <button id="bc-back" type="button" aria-label="Back" title="Back" disabled style="display:inline-flex;align-items:center;justify-content:center;gap:6px;margin-right:8px;width:28px;height:24px;border-radius:8px;border:1px solid rgba(6,182,212,0.25);background:rgba(2,6,21,0.35);color:#06b6d4;opacity:0.45;cursor:not-allowed"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 18l-6-6 6-6"/></svg></button><span class="crumb current" data-level="galaxy">OMNIX</span>
     </div>
 
     <div id="tooltip">
@@ -5889,7 +5889,7 @@
 
   function updateBreadcrumb() {
     const bc = document.getElementById('breadcrumb');
-    bc.innerHTML = '';
+    const backBtn = document.getElementById('bc-back'); bc.innerHTML = ''; if (backBtn) { bc.appendChild(backBtn); const canBack = viewLevel === 'planet' || viewLevel === 'star'; backBtn.disabled = !canBack; backBtn.style.opacity = canBack ? '1' : '0.45'; backBtn.style.cursor = canBack ? 'pointer' : 'not-allowed'; backBtn.style.color = canBack ? '#06b6d4' : '#64748b'; backBtn.style.borderColor = canBack ? 'rgba(6,182,212,0.35)' : 'rgba(148,163,184,0.12)'; backBtn.onclick = () => { if (viewLevel === 'planet' || viewLevel === 'star') goBack(); }; }
     const addCrumb = (label, level, data) => {
       const span = document.createElement('span');
       span.className = 'crumb' + (level === 'current' ? ' current' : '');
@@ -6499,7 +6499,7 @@
       void runAIAsk(dirId);
       return;
     }
-    if (ev.key === 'Escape') {
+    if (ev.key === 'Escape' || (ev.key === '[' && (ev.metaKey || ev.ctrlKey))) { if (ev.key === '[') { if (viewLevel === 'planet' || viewLevel === 'star') { ev.stopPropagation(); if (ev.cancelable) ev.preventDefault(); goBack(); } return; }
       hideSymbolPopup();
       if (xrayOpen) {
         closeXray();
@@ -6527,7 +6527,7 @@
       resetGalaxyDrillState();
       fitWorldToNodes();
       updateBreadcrumb();
-    }
+    } }
   });
   window.addEventListener('resize', resizePixi);
 
