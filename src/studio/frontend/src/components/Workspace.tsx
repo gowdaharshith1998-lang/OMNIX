@@ -1,22 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { GraphCanvas, type GraphCanvasHandle } from "./Graph/GraphCanvas";
 import { createFile, listFiles, type FileEntry } from "@/lib/api";
 import { isT1Mode } from "@/lib/t1Mode";
 import { StudioWebSocket } from "@/lib/ws";
 import { useStudioKeybindings } from "@/lib/keybindings";
 import { BottomToolbar } from "./BottomToolbar";
-import { DrillDown, type DrillDownHandle } from "./DrillDown";
 import { FindBar } from "./FindBar";
-import { LeftIconStrip } from "./LeftIconStrip";
+import { LeftRail, type LeftRailDrawer } from "./LeftRail";
 import { NewFileModal } from "./NewFileModal";
-import { QuickFilePicker } from "./QuickFilePicker";
+import { RightPanel, type RightPanelTab, type RightPanelTabId } from "./RightPanel";
 import { StatsPanel } from "./StatsPanel";
 import { BootstrapIndicator } from "./BootstrapIndicator";
 import {
   ReconnectIndicator,
   type ReconnectIndicatorMode,
 } from "./ReconnectIndicator";
-import type { DrillDownTarget, GraphNode } from "@/types/drilldown";
+import type { GraphNode } from "@/types/drilldown";
 
 type Props = {
   workspaceId: string;
@@ -47,18 +46,21 @@ function projectLabel(p: string) {
   return parts.length > 0 ? (parts[parts.length - 1] as string) : s;
 }
 
-function headBadgeFor(
-  t: DrillDownTarget,
-  nodeType: string | undefined
-): string {
-  if (t.mode === "file") return "FILE";
-  const u = (nodeType || "symbol").toLowerCase();
-  if (u.includes("dir")) return "DIRECTORY";
-  if (u === "function" || u === "method") return "FUNCTION";
-  if (u === "class") return "CLASS";
-  return u.replace(/[\s_]+/g, " ").toUpperCase().slice(0, 22);
-}
+type CodeTarget = {
+  path: string;
+  lineStart?: number;
+  lineEnd?: number;
+  nodeId?: string;
+  name?: string;
+};
 
+function DrawerPlaceholder({ label }: { label: string }) {
+  return (
+    <div className="p-4 text-sm text-omnix-text-dim">
+      {label} drawer content lands in this slice.
+    </div>
+  );
+}
 
 export function Workspace({
   workspaceId,
@@ -76,19 +78,16 @@ export function Workspace({
     entangled: 0,
   });
   const [wsState, setWsState] = useState<WsState>("idle");
-  const [files, setFiles] = useState<FileEntry[]>([]);
-  const [picker, setPicker] = useState(false);
+  const [, setFiles] = useState<FileEntry[]>([]);
   const [newFile, setNewFile] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [activeDrawer, setActiveDrawer] = useState<LeftRailDrawer | null>(null);
+  const [rightTab, setRightTab] = useState<RightPanelTabId>("code");
   const [toast, setToast] = useState<string | null>(null);
   const [graphHint] = useState<string[]>([]);
-  const [drillDownTarget, setDrillDownTarget] = useState<DrillDownTarget | null>(
-    null
-  );
+  const [codeTarget, setCodeTarget] = useState<CodeTarget | null>(null);
   const [graphNodes, setGraphNodes] = useState<Map<string, GraphNode>>(
     () => new Map()
   );
-  const [externalFileEpoch] = useState(0);
 
   const graphNodesRef = useRef(graphNodes);
   const graphRef = useRef<GraphCanvasHandle | null>(null);
@@ -109,19 +108,6 @@ export function Workspace({
     graphNodesRef.current = graphNodes;
   }, [graphNodes]);
 
-  const drillDownRef = useRef<DrillDownHandle | null>(null);
-  const drillFileRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!drillDownTarget) {
-      drillFileRef.current = null;
-      return;
-    }
-    drillFileRef.current =
-      drillDownTarget.mode === "file"
-        ? drillDownTarget.path
-        : drillDownTarget.filePath;
-  }, [drillDownTarget]);
-
   const refreshFiles = useCallback(async () => {
     try {
       setFiles(await listFiles(workspaceId, ""));
@@ -135,7 +121,8 @@ export function Workspace({
   }, [refreshFiles]);
 
   const openDrillDownFile = useCallback((p: string) => {
-    setDrillDownTarget({ mode: "file", path: p });
+    setCodeTarget({ path: p });
+    setRightTab("code");
   }, []);
 
   const openDrillDownNode = useCallback((nodeId: string) => {
@@ -145,10 +132,9 @@ export function Workspace({
       console.error("node not found:", nodeId);
       return;
     }
-    setDrillDownTarget({
-      mode: "node",
+    setCodeTarget({
       nodeId: n.id,
-      filePath: n.file_path,
+      path: n.file_path,
       lineStart: n.line_start,
       lineEnd: n.line_end,
       name: n.name,
@@ -163,10 +149,6 @@ export function Workspace({
       }
       return next;
     });
-  }, []);
-
-  const closeDrillDown = useCallback(() => {
-    setDrillDownTarget(null);
   }, []);
 
   useEffect(() => {
@@ -265,16 +247,16 @@ export function Workspace({
           : "hidden";
 
   useEffect(() => {
-    if (drillDownTarget?.mode !== "node") return;
-    const id = drillDownTarget.nodeId;
+    if (!codeTarget?.nodeId) return;
+    const id = codeTarget.nodeId;
     const inMap = graphNodes.get(id);
     if (!inMap) return;
     if (
-      inMap.line_start !== drillDownTarget.lineStart ||
-      inMap.line_end !== drillDownTarget.lineEnd
+      inMap.line_start !== codeTarget.lineStart ||
+      inMap.line_end !== codeTarget.lineEnd
     ) {
-      setDrillDownTarget((prev) => {
-        if (!prev || prev.mode !== "node" || prev.nodeId !== id) return prev;
+      setCodeTarget((prev) => {
+        if (!prev || prev.nodeId !== id) return prev;
         return {
           ...prev,
           lineStart: inMap.line_start,
@@ -282,7 +264,7 @@ export function Workspace({
         };
       });
     }
-  }, [drillDownTarget, graphNodes]);
+  }, [codeTarget, graphNodes]);
 
   useEffect(() => {
     if (!isDebugOn()) return;
@@ -312,105 +294,72 @@ export function Workspace({
   );
 
   const onDrillSaveShell = useCallback(() => {
-    setToast("No editor file open (shell)");
+    setToast("Code tab save lands next");
     setTimeout(() => setToast(null), 2200);
   }, []);
 
-  const onGraphDeselect = useCallback(() => {
-    if (drillDownTarget) {
-      closeDrillDown();
-    }
-  }, [drillDownTarget, closeDrillDown]);
-
   const pName = projectLabel(projectPath);
-  const headBadge = drillDownTarget
-    ? headBadgeFor(
-        drillDownTarget,
-        drillDownTarget.mode === "node"
-          ? graphNodes.get(drillDownTarget.nodeId)?.type
-          : undefined
-      )
-    : "FILE";
 
-  const stripActive =
-    settingsOpen ? "settings" : picker ? "find" : (null as "find" | "settings" | "project" | null);
+  const drawerContent: Record<LeftRailDrawer, ReactNode> = {
+    files: <DrawerPlaceholder label="Files" />,
+    search: <DrawerPlaceholder label="Search" />,
+    bugs: <DrawerPlaceholder label="Bugs" />,
+    receipts: <DrawerPlaceholder label="Receipts" />,
+    settings: <DrawerPlaceholder label="Settings" />,
+  };
+
+  const rightTabs: RightPanelTab[] = [
+    {
+      id: "code",
+      label: "Code",
+      content: (
+        <div className="flex h-full items-center justify-center p-6 text-center text-sm text-omnix-text-dim">
+          {codeTarget
+            ? `Code tab will open ${codeTarget.path}`
+            : "Select a file or symbol to open Code."}
+        </div>
+      ),
+    },
+    {
+      id: "history",
+      label: "History",
+      content: (
+        <div className="p-4 text-sm text-omnix-text-dim">
+          Receipt-backed history lands in this slice.
+        </div>
+      ),
+    },
+  ];
 
   useStudioKeybindings({
-    drillOpen: drillDownTarget != null,
+    drillOpen: codeTarget != null,
     onEscape: () => {
-      if (settingsOpen) {
-        setSettingsOpen(false);
-        return true;
-      }
-      if (drillDownTarget) {
-        closeDrillDown();
+      if (activeDrawer) {
+        setActiveDrawer(null);
         return true;
       }
       if (newFile) {
         setNewFile(false);
         return true;
       }
-      if (picker) {
-        setPicker(false);
-        return true;
-      }
       return false;
     },
-    onTogglePicker: () => setPicker((p) => !p),
+    onTogglePicker: () =>
+      setActiveDrawer((drawer) => (drawer === "search" ? null : "search")),
     onNewFile: () => setNewFile(true),
     onCmdSWhenNoDrill: onDrillSaveShell,
-    onSaveDrill: () => drillDownRef.current?.save(),
+    onSaveDrill: onDrillSaveShell,
   });
 
   return (
-    <div className="omnix-hex-bg relative h-full min-h-0 w-full pl-12 font-sans text-omnix-text-primary">
-      <LeftIconStrip
-        projectPath={projectPath}
-        active={stripActive}
-        onOpenFind={() => setPicker(true)}
-        onOpenSettings={() => setSettingsOpen((s) => !s)}
-        onProject={async () => {
-          try {
-            await navigator.clipboard.writeText(projectPath);
-            showToastStable("Project path copied", 1500);
-          } catch {
-            showToastStable(projectPath, 3000);
-          }
-        }}
-      />
-
-      {settingsOpen && (
-        <>
-          <button
-            type="button"
-            className="fixed inset-0 z-[50] border-0 bg-black/50 backdrop-blur-[2px] cursor-default"
-            aria-label="Close settings"
-            onClick={() => setSettingsOpen(false)}
-          />
-          <aside
-            className="fixed left-12 top-0 z-[60] box-border flex h-full w-[min(360px,90vw-3rem)] flex-col border-r border-omnix-sb-border bg-omnix-bg shadow-[8px_0_32px_rgba(0,0,0,0.35)]"
-            aria-label="Settings"
-          >
-            <div className="flex items-center justify-between border-b border-omnix-sb-border px-3 py-2.5">
-              <h2 className="text-sm font-semibold text-omnix-sb-text">Settings</h2>
-              <button
-                type="button"
-                className="h-7 w-7 cursor-pointer rounded border border-omnix-sb-border bg-omnix-panel text-omnix-sb-muted text-base leading-none hover:text-omnix-sb-text"
-                onClick={() => setSettingsOpen(false)}
-                aria-label="Close settings"
-                title="Close"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="overflow-auto p-3 text-sm text-omnix-sb-text">
-              <p className="text-omnix-sb-muted">
-                Settings — coming Day 14+ (placeholders, providers, and agent wiring).
-              </p>
-            </div>
-          </aside>
-        </>
-      )}
+    <div className="omnix-hex-bg relative h-full min-h-0 w-full font-sans text-omnix-text-primary">
+      <LeftRail
+        active={activeDrawer}
+        onSelect={setActiveDrawer}
+        onClose={() => setActiveDrawer(null)}
+      >
+        {activeDrawer ? drawerContent[activeDrawer] : null}
+      </LeftRail>
 
       <nav
         className="pointer-events-none fixed left-1/2 top-5 z-[30] w-[min(100%-2rem,720px)] -translate-x-1/2 px-4 text-center"
@@ -451,24 +400,15 @@ export function Workspace({
               graph
             </div>
             <div
-              className={
-                "relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border border-omnix-accent-indigo/20 bg-[rgba(2,6,21,0.5)]" +
-                (drillDownTarget
-                  ? " pr-[min(40%,32rem)] transition-[padding] max-md:pr-0"
-                  : "")
-              }
+              className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border border-omnix-accent-indigo/20 bg-[rgba(2,6,21,0.5)]"
             >
               <GraphCanvas
                 ref={graphRef}
-                drillDownNodeId={
-                  drillDownTarget?.mode === "node" ? drillDownTarget.nodeId : null
-                }
+                drillDownNodeId={codeTarget?.nodeId ?? null}
                 onFunctionNodeClick={openDrillDownNode}
                 onT1GraphNodes={onT1GraphNodes}
-                onFileOrDirClick={() => {
-                  /* X-RAY in Day 12; engine also logs */
-                }}
-                onDeselect={onGraphDeselect}
+                onFileOrDirClick={openDrillDownFile}
+                onDeselect={() => undefined}
               />
               {graphHint.length > 0 && (
                 <div className="pointer-events-none absolute bottom-2 left-2 z-10 max-w-[min(100%,20rem)] rounded border border-omnix-accent-indigo/20 bg-omnix-bg/80 px-2 py-1 font-mono text-[9px] text-omnix-text-dim/90">
@@ -482,34 +422,15 @@ export function Workspace({
               )}
             </div>
           </main>
-
-          <div
-            className={
-              drillDownTarget
-                ? "pointer-events-auto flex h-full min-h-0 w-[min(40%,32rem)] min-w-0 max-w-[min(40%,90vw)] shrink-0 flex-col border-omnix-sb-border"
-                : "pointer-events-none w-0 max-w-0 shrink-0 overflow-hidden"
-            }
-            style={drillDownTarget ? { position: "absolute", right: 0, top: 0, bottom: 0, zIndex: 25 } : undefined}
-          >
-            {drillDownTarget && (
-              <DrillDown
-                key={
-                  drillDownTarget.mode === "file"
-                    ? "f:" + drillDownTarget.path
-                    : "n:" + drillDownTarget.nodeId
-                }
-                ref={drillDownRef}
-                headBadge={headBadge}
-                workspaceId={workspaceId}
-                target={drillDownTarget}
-                onClose={closeDrillDown}
-                onToast={showToastStable}
-                externalFileEpoch={externalFileEpoch}
-              />
-            )}
-          </div>
         </div>
       </div>
+
+      <RightPanel
+        tabs={rightTabs}
+        activeTab={rightTab}
+        onSelectTab={setRightTab}
+        onNewAgentTab={() => showToastStable("Agent tabs land in slice 15", 1800)}
+      />
 
       <div
         className="pointer-events-none fixed bottom-20 left-0 right-0 z-40 flex justify-center px-3 pl-12"
@@ -544,16 +465,6 @@ export function Workspace({
         </div>
       </div>
 
-      <QuickFilePicker
-        open={picker}
-        files={files}
-        filter={find}
-        onFilterChange={setFind}
-        onClose={() => setPicker(false)}
-        onFilePicked={(p) => {
-          openDrillDownFile(p);
-        }}
-      />
       <NewFileModal
         open={newFile}
         onClose={() => setNewFile(false)}

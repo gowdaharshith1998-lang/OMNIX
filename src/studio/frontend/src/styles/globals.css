@@ -27,6 +27,131 @@ body {
   box-shadow: var(--omnix-glass-shadow);
 }
 
+.omnix-left-rail {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 70;
+  box-sizing: border-box;
+  display: flex;
+  width: 48px;
+  height: 100%;
+  flex-direction: column;
+  border-right: 1px solid var(--omnix-shell-border);
+  background: var(--omnix-shell-rail);
+  padding: 6px 0 10px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  will-change: transform;
+}
+
+.omnix-rail-btn.is-active {
+  color: var(--omnix-rail-accent);
+  box-shadow: inset 2px 0 0 var(--omnix-rail-accent);
+  background: rgba(0, 229, 160, 0.08);
+}
+
+.omnix-left-drawer {
+  position: fixed;
+  left: 48px;
+  top: 0;
+  z-index: 65;
+  display: flex;
+  width: min(360px, calc(100vw - 48px));
+  height: 100%;
+  flex-direction: column;
+  border-right: 1px solid var(--omnix-shell-border);
+  background: var(--omnix-shell-panel);
+  color: var(--omnix-text-primary);
+  transform: translateX(calc(-100% - 1px));
+  transition: transform 180ms ease;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  will-change: transform;
+}
+
+.omnix-left-drawer.is-open {
+  transform: translateX(0);
+}
+
+.omnix-right-panel {
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 55;
+  display: flex;
+  width: min(520px, 38vw);
+  min-width: 420px;
+  height: 100%;
+  flex-direction: column;
+  border-left: 1px solid var(--omnix-shell-border);
+  background: var(--omnix-shell-panel);
+  color: var(--omnix-text-primary);
+  transform: translateX(0);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  will-change: transform;
+}
+
+.omnix-tab-strip {
+  display: flex;
+  min-height: 42px;
+  align-items: stretch;
+  gap: 1px;
+  border-bottom: 1px solid var(--omnix-shell-border);
+  background: rgba(5, 8, 16, 0.92);
+  overflow-x: auto;
+}
+
+.omnix-tab {
+  display: flex;
+  align-items: stretch;
+  border-right: 1px solid var(--omnix-shell-border);
+  color: var(--omnix-text-dim);
+}
+
+.omnix-tab.is-active {
+  color: var(--omnix-text-primary);
+  box-shadow: inset 0 -2px 0 var(--omnix-accent-indigo);
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.omnix-tab-main,
+.omnix-tab-close,
+.omnix-tab-new {
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--omnix-font-sans);
+}
+
+.omnix-tab-main {
+  padding: 0 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.omnix-tab-close {
+  padding: 0 8px 0 0;
+  font-size: 13px;
+}
+
+.omnix-tab-new {
+  margin-left: auto;
+  padding: 0 12px;
+  color: var(--omnix-text-muted);
+  font-size: 11px;
+}
+
+.omnix-right-panel-body {
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
 /* FPS pulse (viewer #fps-counter uses #4ade80) */
 @keyframes omnix-fps-pulse {
   0%,
@@ -52,5 +177,9 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .omnix-fps-dot {
     animation: none;
+  }
+
+  .omnix-left-drawer {
+    transition: none;
   }
 }
