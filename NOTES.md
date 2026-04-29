@@ -1,5 +1,11 @@
 # AXIOM ML-DSA-65 (OMNIX)
 
+## Slice 14 Debt
+
+- debt-16: viewerEngine.ts X-Ray helpers (buildXrayHTML, detectIssues, buildHealthBar,
+  buildXrayAiSection, buildXrayFunctionHTML) superseded by XRayTab.tsx + lib/xray_*.ts.
+  Delete in slice 17 cleanup pass once XRayTab.tsx has been live one week without regression.
+
 ## Integration #11 (MEGA) — Evolution + database (ITER 4, 2026-04-25)
 
 - **Per-codebase DB (Q2):** `omnix analyze` writes `<analyzed_root>/omnix.db` (graph nodes/edges + evolution tables). This is the canonical store for that tree. `omnix find-bugs` uses that same file or creates `<codebase>/omnix.db` on first run; it does **not** fall back to `~/.omnix/omnix.db` unless you set `OMNIX_GRAPH_DB` to that path explicitly.

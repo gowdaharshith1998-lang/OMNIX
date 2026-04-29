@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-export type RightPanelTabId = "code" | "history" | `agent:${string}`;
+export type RightPanelTabId = "xray" | "code" | "history" | `agent:${string}`;
 
 export type RightPanelTab = {
   id: RightPanelTabId;

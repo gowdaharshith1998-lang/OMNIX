@@ -17,13 +17,18 @@ import { LeftRail, type LeftRailDrawer } from "./LeftRail";
 import { NewFileModal } from "./NewFileModal";
 import { RightPanel, type RightPanelTab, type RightPanelTabId } from "./RightPanel";
 import { StatsPanel } from "./StatsPanel";
+import { XRayTab } from "./XRayTab";
 import { BootstrapIndicator } from "./BootstrapIndicator";
 import {
   ReconnectIndicator,
   type ReconnectIndicatorMode,
 } from "./ReconnectIndicator";
-import type { GraphNode } from "@/types/drilldown";
-import { applyNodeModified, recordFromGraphPayload } from "@/lib/graphNode";
+import type { GraphEdge, GraphNode } from "@/types/drilldown";
+import {
+  applyNodeModified,
+  recordEdgeFromGraphPayload,
+  recordFromGraphPayload,
+} from "@/lib/graphNode";
 
 type Props = {
   workspaceId: string;
@@ -73,13 +78,15 @@ export function Workspace({
   const [, setFiles] = useState<FileEntry[]>([]);
   const [newFile, setNewFile] = useState(false);
   const [activeDrawer, setActiveDrawer] = useState<LeftRailDrawer | null>(null);
-  const [rightTab, setRightTab] = useState<RightPanelTabId>("code");
+  const [rightTab, setRightTab] = useState<RightPanelTabId>("xray");
   const [toast, setToast] = useState<string | null>(null);
   const [graphHint] = useState<string[]>([]);
   const [codeTarget, setCodeTarget] = useState<CodeTarget | null>(null);
+  const [selectedXRayNode, setSelectedXRayNode] = useState<GraphNode | null>(null);
   const [graphNodes, setGraphNodes] = useState<Map<string, GraphNode>>(
     () => new Map()
   );
+  const [graphEdges, setGraphEdges] = useState<GraphEdge[]>([]);
 
   const graphNodesRef = useRef(graphNodes);
   const graphRef = useRef<GraphCanvasHandle | null>(null);
@@ -118,12 +125,38 @@ export function Workspace({
     void refreshFiles();
   }, [refreshFiles]);
 
-  const openDrillDownFile = useCallback((p: string) => {
+  const openCodeFile = useCallback((p: string) => {
     setCodeTarget({ path: p });
     setRightTab("code");
   }, []);
 
-  const openDrillDownNode = useCallback((nodeId: string) => {
+  const selectXRayNode = useCallback((node: GraphNode | null) => {
+    setSelectedXRayNode(node);
+    setRightTab("xray");
+  }, []);
+
+  const findNodeForPath = useCallback((p: string) => {
+    const normalized = p.replace(/\\/g, "/");
+    const nodes = Array.from(graphNodesRef.current.values());
+    return (
+      nodes.find((node) => node.id === normalized) ??
+      nodes.find((node) => node.file_path === normalized) ??
+      nodes.find((node) => node.file_path && normalized.startsWith(node.file_path)) ??
+      null
+    );
+  }, []);
+
+  const openXRayFileOrDir = useCallback(
+    (p: string) => {
+      const node = findNodeForPath(p);
+      if (node?.file_path) setCodeTarget({ path: node.file_path });
+      else setCodeTarget({ path: p });
+      selectXRayNode(node);
+    },
+    [findNodeForPath, selectXRayNode]
+  );
+
+  const openXRayNode = useCallback((nodeId: string) => {
     const n = graphNodesRef.current.get(nodeId);
     if (!n || !n.file_path) {
       // eslint-disable-next-line no-console
@@ -137,7 +170,8 @@ export function Workspace({
       lineEnd: n.line_end,
       name: n.name,
     });
-  }, []);
+    selectXRayNode(n);
+  }, [selectXRayNode]);
 
   const onT1GraphNodes = useCallback((list: GraphNode[]) => {
     setGraphNodes((prev) => {
@@ -147,6 +181,10 @@ export function Workspace({
       }
       return next;
     });
+  }, []);
+
+  const onT1GraphEdges = useCallback((list: GraphEdge[]) => {
+    setGraphEdges(list);
   }, []);
 
   const [codeExternalEpoch, setCodeExternalEpoch] = useState(0);
@@ -171,6 +209,21 @@ export function Workspace({
           });
           noteCodeFileTouched(rec.file_path);
         }
+        return;
+      }
+      if (kind === "edge_added" && msg.edge && typeof msg.edge === "object") {
+        const rec = recordEdgeFromGraphPayload(msg.edge as Record<string, unknown>);
+        if (rec) {
+          setGraphEdges((prev) => {
+            if (prev.some((edge) => String(edge.id) === String(rec.id))) return prev;
+            return [...prev, rec];
+          });
+        }
+        return;
+      }
+      if (kind === "edge_removed" && msg.edge_id != null) {
+        const id = String(msg.edge_id);
+        setGraphEdges((prev) => prev.filter((edge) => String(edge.id) !== id));
         return;
       }
       if (kind === "node_modified" && typeof msg.node_id === "string") {
@@ -331,7 +384,7 @@ export function Workspace({
     if (!isDebugOn()) return;
     (window as unknown as { __omnix_select_node?: (id: string) => void })
       .__omnix_select_node = (nodeId: string) => {
-      openDrillDownNode(nodeId);
+      openXRayNode(nodeId);
     };
     // eslint-disable-next-line no-console
     console.info("debug: window.__omnix_select_node(nodeId) ready");
@@ -339,7 +392,7 @@ export function Workspace({
       const w = window as unknown as { __omnix_select_node?: unknown };
       if (w.__omnix_select_node) delete w.__omnix_select_node;
     };
-  }, [openDrillDownNode]);
+  }, [openXRayNode]);
 
   const showToastStable = useCallback(
     (message: string, durationMs?: number) => {
@@ -362,7 +415,7 @@ export function Workspace({
   const pName = projectLabel(projectPath);
 
   const drawerContent: Record<LeftRailDrawer, ReactNode> = {
-    files: <FilesDrawer workspaceId={workspaceId} onOpenFile={openDrillDownFile} />,
+    files: <FilesDrawer workspaceId={workspaceId} onOpenFile={openCodeFile} />,
     search: (
       <SearchDrawer
         workspaceId={workspaceId}
@@ -385,6 +438,21 @@ export function Workspace({
   };
 
   const rightTabs: RightPanelTab[] = [
+    {
+      id: "xray",
+      label: "X-Ray",
+      content: (
+        <XRayTab
+          selectedNode={selectedXRayNode}
+          graphNodes={graphNodes}
+          graphEdges={graphEdges}
+          stats={stats}
+          onSuggestedAction={() =>
+            showToastStable("action wiring lands in slice 15", 1800)
+          }
+        />
+      ),
+    },
     {
       id: "code",
       label: "Code",
@@ -479,9 +547,10 @@ export function Workspace({
               <GraphCanvas
                 ref={graphRef}
                 drillDownNodeId={codeTarget?.nodeId ?? null}
-                onFunctionNodeClick={openDrillDownNode}
+                onFunctionNodeClick={openXRayNode}
                 onT1GraphNodes={onT1GraphNodes}
-                onFileOrDirClick={openDrillDownFile}
+                onT1GraphEdges={onT1GraphEdges}
+                onFileOrDirClick={openXRayFileOrDir}
                 onDeselect={() => undefined}
               />
               {graphHint.length > 0 && (

@@ -1,5 +1,5 @@
 // @ts-nocheck
-import type { GraphNode } from "@/types/drilldown";
+import type { GraphEdge, GraphNode } from "@/types/drilldown";
 import { isT1Mode } from "@/lib/t1Mode";
 import {
   recordFromGraphPayload,
@@ -14,6 +14,8 @@ export type StudioGraphOptions = {
   onDeselect?: () => void;
   /** Same role as T1 `onT1GraphNodes`: DrillDown catalog after full graph snapshot. */
   onDrilldownCatalog?: (nodes: GraphNode[]) => void;
+  /** X-Ray catalog after full graph snapshot. */
+  onDrilldownEdges?: (edges: GraphEdge[]) => void;
 };
 
 type StudioHandle = {
@@ -214,6 +216,24 @@ export class StudioGraph {
         if (rec) list.push(rec);
       }
       cb(list);
+    }
+    const edgeCb = this._studio._options.onDrilldownEdges;
+    if (edgeCb) {
+      const list: GraphEdge[] = [];
+      for (let i = 0; i < rawLinks.length; i++) {
+        const edge = rawLinks[i] as Record<string, unknown>;
+        const source = typeof edge.source === "string" ? edge.source : null;
+        const target = typeof edge.target === "string" ? edge.target : null;
+        if (source && target) {
+          list.push({
+            id: typeof edge.id === "string" || typeof edge.id === "number" ? edge.id : i,
+            source_id: source,
+            target_id: target,
+            relationship: typeof edge.type === "string" ? edge.type : "CALLS",
+          });
+        }
+      }
+      edgeCb(list);
     }
   }
 

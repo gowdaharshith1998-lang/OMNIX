@@ -17,3 +17,10 @@ export type GraphNode = {
   line_start: number;
   line_end: number;
 };
+
+export type GraphEdge = {
+  id: string | number;
+  source_id: string;
+  target_id: string;
+  relationship: string;
+};
