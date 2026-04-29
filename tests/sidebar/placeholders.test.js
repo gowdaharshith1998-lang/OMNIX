@@ -50,17 +50,12 @@ describe('placeholders and Receipts link', () => {
   it('Receipts — link to /receipts and placeholder', () => {
     const win = newSidebarTestWindow();
     open(win, 'receipts');
-    const a = win.document.getElementById('sb-p-receipts-browse') || win.document.querySelector(
-      'a[href^="/receipts"]',
-    );
-    if (a) {
-      const href = a.getAttribute('href') || a.href;
-      const ok = (href && href.includes('receipts')) || a.textContent?.includes('Browse');
-      expect(ok).toBe(true);
-    } else {
-      const n = win.document.getElementById('sb-p-receipts');
-      expect(n && n.textContent && (n.textContent.indexOf('Browse') >= 0 || n.textContent.indexOf('receipts') >= 0)).toBe(true);
-    }
+    const list = win.document.getElementById('sb-receipts-list');
+    const status = win.document.getElementById('sb-receipts-status');
+    expect(list).not.toBeNull();
+    expect(status).not.toBeNull();
+    const n = win.document.getElementById('sb-p-receipts');
+    expect(n && n.textContent).not.toMatch(/Coming in Integration/i);
   });
 
   it('Settings — Integration #2 and description', () => {

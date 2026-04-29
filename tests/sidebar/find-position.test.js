@@ -15,8 +15,9 @@ function setFindVwVhForHappyDom(win, w, h) {
 }
 
 afterEach(() => {
-  if (globalThis.localStorage) {
-    globalThis.localStorage.removeItem(OMNIX_FIND_POS_KEY);
+  const ls = globalThis.localStorage;
+  if (ls && typeof ls.removeItem === 'function') {
+    ls.removeItem(OMNIX_FIND_POS_KEY);
   }
 });
 

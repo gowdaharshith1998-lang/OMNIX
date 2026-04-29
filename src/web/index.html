@@ -868,10 +868,10 @@
         </section>
         <section class="sb-p-sheet sb-pad" id="sb-p-receipts" data-sb-panel="receipts" role="region" aria-hidden="true" aria-label="Receipts">
           <h2 class="sb-h-sec">Receipts</h2>
-          <p class="sb-p-body">Coming in Integration <strong>#1</strong> — every signed receipt, verifiable offline. This tab is shippable.</p>
-          <p class="sb-pad" style="padding-left:0;padding-top:8px">
-            <a id="sb-p-receipts-browse" class="linkish" href="/receipts" style="color:var(--sb-accent);font-size:14px">Browse signed receipts</a>
-          </p>
+          <p class="sb-p-body">Signed receipts recorded under <code>~/.omnix/receipts</code>. This panel loads the latest receipts for the current workspace.</p>
+          <div class="sb-pad" style="padding-left:0;padding-top:8px" id="sb-receipts-wrap">
+            <div id="sb-receipts-status" style="color:var(--sb-dim);font-size:14px">Open a project to load receipts.</div>
+            <div id="sb-receipts-list" aria-label="Receipt list"></div></div>
         </section>
         <section class="sb-p-sheet sb-pad" id="sb-p-settings" data-sb-panel="settings" role="region" aria-hidden="true" aria-label="Settings">
           <h2 class="sb-h-sec">Settings</h2>
@@ -7063,6 +7063,9 @@
       if (tab === 'providers') {
         void refreshProviders();
       }
+      if (tab === 'receipts') {
+        void refreshReceipts();
+      }
     }
     function closePanel() {
       setState(false, null);
@@ -7297,6 +7300,129 @@
         row.appendChild(meta);
         row.appendChild(trk);
         elBars.appendChild(row);
+      }
+    }
+
+    function getStudioWorkspaceId() {
+      try {
+        const a = root.getAttribute('data-workspace-id');
+        if (a) return a;
+      } catch (e) {
+        /* */
+      }
+      try {
+        const w = /** @type {any} */ (window);
+        const o = w.OMNIX_STUDIO || w.__OMNIX_STUDIO || w.omnixStudio;
+        if (o && (o.workspaceId || o.workspace_id)) return String(o.workspaceId || o.workspace_id);
+      } catch (e2) {
+        /* */
+      }
+      try {
+        const k = localStorage.getItem('omnix.studio.workspace_id');
+        if (k) return String(k);
+      } catch (e3) {
+        /* */
+      }
+      return '';
+    }
+
+    function setReceiptsStatus(text, kind) {
+      const st = document.getElementById('sb-receipts-status');
+      if (!st) return;
+      st.textContent = String(text || '');
+      const k = String(kind || '');
+      if (k === 'error') {
+        st.style.color = 'var(--sb-warn)';
+      } else if (k === 'ok') {
+        st.style.color = 'var(--sb-dim)';
+      } else {
+        st.style.color = 'var(--sb-dim)';
+      }
+    }
+
+    function renderReceipts(list) {
+      const host = document.getElementById('sb-receipts-list');
+      if (!host) return;
+      host.textContent = '';
+      if (!Array.isArray(list) || list.length === 0) {
+        const p = document.createElement('p');
+        p.className = 'sb-pad';
+        p.textContent = 'No receipts yet.';
+        p.style.cssText = 'padding-left:0;color:var(--sb-dim);font-size:14px;';
+        host.appendChild(p);
+        return;
+      }
+      list.forEach((r) => {
+        const row = document.createElement('div');
+        row.className = 'sb-calls-row';
+        row.style.cssText = 'grid-template-columns: 72px 1fr 90px;';
+        const t = document.createElement('div');
+        t.className = 'sb-c-t';
+        t.textContent = fmtTime(String((r && r.mtime_iso) || ''));
+        const mid = document.createElement('div');
+        mid.className = 'sb-c-mid';
+        const kind = document.createElement('div');
+        kind.style.cssText = 'color:var(--sb-text);font-size:12px;line-height:1.2;';
+        kind.textContent = String((r && (r.kind || r.event)) || 'receipt');
+        const target = document.createElement('div');
+        target.style.cssText = 'color:var(--sb-dim);font-size:11px;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;';
+        target.textContent = String((r && r.target) || '');
+        mid.appendChild(kind);
+        mid.appendChild(target);
+        const bad = document.createElement('div');
+        bad.className = 'sb-c-bad';
+        const signed = String((r && r.sig_alg) || '') !== 'unsigned';
+        const btxt = signed ? '✓ Signed' : '⚠ Unsigned';
+        bad.innerHTML = '<span style="color:' + (signed ? 'var(--sb-ok)' : 'var(--sb-warn)') + '">' + btxt + '</span>';
+        const det = document.createElement('details');
+        det.style.cssText = 'grid-column: 1 / -1; padding-top:6px;';
+        const sum = document.createElement('summary');
+        sum.className = 'linkish';
+        sum.style.cssText = 'color:var(--sb-accent);font-size:12px;cursor:pointer;user-select:none;';
+        sum.textContent = 'Details';
+        const pre = document.createElement('pre');
+        pre.style.cssText = 'margin:6px 0 0 0;white-space:pre-wrap;word-break:break-word;color:var(--sb-text);background:rgba(15,23,42,0.5);border:1px solid rgba(148,163,184,0.15);border-radius:10px;padding:10px;font-size:11px;line-height:1.35;';
+        try {
+          pre.textContent = JSON.stringify(r, null, 2);
+        } catch (e) {
+          pre.textContent = String(r);
+        }
+        det.appendChild(sum);
+        det.appendChild(pre);
+        row.appendChild(t);
+        row.appendChild(mid);
+        row.appendChild(bad);
+        row.appendChild(det);
+        host.appendChild(row);
+      });
+    }
+
+    async function refreshReceipts() {
+      const wid = getStudioWorkspaceId();
+      if (!wid) {
+        setReceiptsStatus('Open a project to load receipts.', 'error');
+        renderReceipts([]);
+        return;
+      }
+      const url = fabricPath('/api/workspace/' + encodeURIComponent(wid) + '/receipts?limit=100');
+      if (!url) {
+        setReceiptsStatus('Receipts API unavailable in this environment.', 'error');
+        renderReceipts([]);
+        return;
+      }
+      setReceiptsStatus('Loading receipts…', 'ok');
+      try {
+        const res = await fetch(url, { method: 'GET' });
+        if (!res.ok) {
+          throw new Error('receipts');
+        }
+        const j = await res.json();
+        const rows = (j && j.receipts) || [];
+        setReceiptsStatus(rows && rows.length ? (rows.length + ' receipts') : 'No receipts yet.', 'ok');
+        renderReceipts(rows);
+      } catch (err) {
+        setReceiptsStatus('Could not load receipts.', 'error');
+        renderReceipts([]);
       }
     }
     function abortFetches() {

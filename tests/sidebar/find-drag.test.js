@@ -2,8 +2,9 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { newFindTestWindow, OMNIX_FIND_POS_KEY } from './helpers.js';
 
 afterEach(() => {
-  if (globalThis.localStorage) {
-    globalThis.localStorage.removeItem(OMNIX_FIND_POS_KEY);
+  const ls = globalThis.localStorage;
+  if (ls && typeof ls.removeItem === 'function') {
+    ls.removeItem(OMNIX_FIND_POS_KEY);
   }
   vi.useRealTimers();
   vi.restoreAllMocks();
