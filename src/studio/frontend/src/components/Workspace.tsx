@@ -6,6 +6,7 @@ import { StudioWebSocket } from "@/lib/ws";
 import { useStudioKeybindings } from "@/lib/keybindings";
 import { BottomToolbar } from "./BottomToolbar";
 import { CodeTab, type CodeTabHandle, type CodeTarget } from "./CodeTab";
+import { BugsDrawer } from "./drawers/BugsDrawer";
 import { FilesDrawer } from "./drawers/FilesDrawer";
 import { ReceiptsDrawer } from "./drawers/ReceiptsDrawer";
 import { SearchDrawer } from "./drawers/SearchDrawer";
@@ -51,14 +52,6 @@ function projectLabel(p: string) {
   const s = p.replace(/\\/g, "/");
   const parts = s.split("/").filter(Boolean);
   return parts.length > 0 ? (parts[parts.length - 1] as string) : s;
-}
-
-function DrawerPlaceholder({ label }: { label: string }) {
-  return (
-    <div className="p-4 text-sm text-omnix-text-dim">
-      {label} drawer content lands in this slice.
-    </div>
-  );
 }
 
 export function Workspace({
@@ -386,7 +379,7 @@ export function Workspace({
         }}
       />
     ),
-    bugs: <DrawerPlaceholder label="Bugs" />,
+    bugs: <BugsDrawer />,
     receipts: <ReceiptsDrawer workspaceId={workspaceId} />,
     settings: <SettingsDrawer projectPath={projectPath} />,
   };
