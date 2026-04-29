@@ -27,6 +27,8 @@ import asyncio
 import contextlib
 import json
 import time
+import hashlib
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -176,6 +178,117 @@ def api_studio_initial() -> dict[str, str | None]:
     return {"path": p}  # type: ignore[return-value, no-any-return]
 
 
+def _parse_receipt_bound(raw: str | None) -> float | None:
+    if raw is None or not raw.strip():
+        return None
+    s = raw.strip()
+    with contextlib.suppress(ValueError):
+        return float(s)
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(s).timestamp()
+    except ValueError:
+        raise HTTPException(400, "invalid receipt time bound") from None
+
+
+def _receipt_source(path: Path, body: dict[str, Any]) -> str:
+    stem = path.stem.lower()
+    event = str(body.get("event") or body.get("kind") or "").lower()
+    if stem.startswith("call_") or "fabric" in event or body.get("call_id") is not None:
+        return "fabric"
+    if stem.startswith("scan") or event.startswith("vault.scan"):
+        return "scan"
+    if stem.startswith("evolution_") or "evolution" in event:
+        return "evolution"
+    return "future"
+
+
+def _receipt_kind(source: str, body: dict[str, Any]) -> str:
+    raw = body.get("event") or body.get("kind") or body.get("type")
+    if isinstance(raw, str) and raw:
+        return raw
+    if source == "fabric":
+        return "fabric.call"
+    if source == "scan":
+        return "vault.scan"
+    if source == "evolution":
+        return "grammar.evolution"
+    return "receipt"
+
+
+def _receipt_target(body: dict[str, Any]) -> str:
+    for key in ("target", "file", "path", "grammar", "grammar_name", "provider", "model"):
+        value = body.get(key)
+        if isinstance(value, str) and value:
+            return value
+    provider = body.get("provider")
+    model = body.get("model")
+    if provider or model:
+        return " / ".join(str(x) for x in (provider, model) if x)
+    return ""
+
+
+def _iter_receipts(
+    *, since: float | None, until: float | None, limit: int
+) -> list[dict[str, Any]]:
+    root = (Path.home() / ".omnix" / "receipts").expanduser()
+    if not root.is_dir():
+        return []
+    rows: list[dict[str, Any]] = []
+    for path in root.glob("*.json"):
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        mtime = float(st.st_mtime)
+        if since is not None and mtime < since:
+            continue
+        if until is not None and mtime > until:
+            continue
+        try:
+            raw = path.read_bytes()
+            body0 = json.loads(raw.decode("utf-8", errors="replace"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            body0 = {}
+            raw = b""
+        body = body0 if isinstance(body0, dict) else {}
+        source = _receipt_source(path, body)
+        rows.append(
+            {
+                "kind": _receipt_kind(source, body),
+                "target": _receipt_target(body),
+                "hash_prefix": hashlib.sha256(raw).hexdigest()[:12] if raw else "",
+                "sig_alg": "ML-DSA-65" if path.with_suffix(".sig").is_file() else "unsigned",
+                "mtime_iso": datetime.fromtimestamp(mtime, timezone.utc).isoformat().replace("+00:00", "Z"),
+                "source": source,
+                "path": str(path),
+            }
+        )
+    rows.sort(key=lambda r: str(r.get("mtime_iso") or ""), reverse=True)
+    return rows[:limit]
+
+
+@app.get("/api/workspace/{workspace_id}/receipts")
+def api_workspace_receipts(
+    workspace_id: str,
+    since: str | None = None,
+    until: str | None = None,
+    limit: int = 100,
+) -> dict[str, list[dict[str, Any]]]:
+    w = MANAGER.get(workspace_id)
+    if w is None:
+        raise HTTPException(404, "unknown workspace_id")
+    lim = max(1, min(int(limit), 500))
+    return {
+        "receipts": _iter_receipts(
+            since=_parse_receipt_bound(since),
+            until=_parse_receipt_bound(until),
+            limit=lim,
+        )
+    }
+
+
 def _edge_dict(
     eid: int, sid: str, tid: str, rel: str, meta: dict[str, Any] | None
 ) -> dict[str, Any]:
@@ -319,6 +432,74 @@ def _iter_listable_files(
     return out
 
 
+_TREE_SKIP_NAMES = {"__pycache__", "node_modules", ".git", ".omnix-cache"}
+
+
+def _is_tree_skipped(root: Path, rel: str) -> bool:
+    parts = [p for p in rel.split("/") if p]
+    if any(p.startswith(".") for p in parts):
+        return True
+    if any(p in _TREE_SKIP_NAMES for p in parts):
+        return True
+    return is_studio_ignored(root, rel)
+
+
+def _empty_tree_dir(name: str) -> dict[str, Any]:
+    return {"name": name, "type": "dir", "children": []}
+
+
+def _insert_tree_file(root_node: dict[str, Any], parts: list[str], size: int) -> None:
+    cur = root_node
+    for part in parts[:-1]:
+        children = cur.setdefault("children", [])
+        hit = next(
+            (
+                c
+                for c in children
+                if isinstance(c, dict) and c.get("name") == part and c.get("type") == "dir"
+            ),
+            None,
+        )
+        if hit is None:
+            hit = _empty_tree_dir(part)
+            children.append(hit)
+        cur = hit
+    children = cur.setdefault("children", [])
+    children.append({"name": parts[-1], "type": "file", "size": int(size)})
+
+
+def _sort_tree(node: dict[str, Any]) -> None:
+    children = node.get("children")
+    if not isinstance(children, list):
+        return
+    children.sort(key=lambda c: (0 if c.get("type") == "dir" else 1, str(c.get("name", ""))))
+    for child in children:
+        if isinstance(child, dict) and child.get("type") == "dir":
+            _sort_tree(child)
+
+
+def _build_file_tree(root: Path, *, max_depth: int = 6) -> dict[str, Any]:
+    root = root.resolve()
+    tree = _empty_tree_dir(root.name or root.as_posix())
+    for f in root.rglob("*"):
+        if not f.is_file():
+            continue
+        try:
+            rel = f.relative_to(root).as_posix()
+        except (OSError, ValueError):
+            continue
+        parts = [p for p in rel.split("/") if p]
+        if not parts or len(parts) > max_depth or _is_tree_skipped(root, rel):
+            continue
+        try:
+            size = f.stat().st_size
+        except OSError:
+            size = 0
+        _insert_tree_file(tree, parts, int(size))
+    _sort_tree(tree)
+    return tree
+
+
 @app.get("/api/workspace/{workspace_id}/files")
 def api_list_files(  # noqa: D103
     workspace_id: str,
@@ -336,6 +517,14 @@ def api_list_files(  # noqa: D103
             lim,  # noqa: E501
         )
     }
+
+
+@app.get("/api/workspace/{workspace_id}/files/tree")
+def api_files_tree(workspace_id: str) -> dict[str, dict[str, Any]]:
+    w = MANAGER.get(workspace_id)
+    if w is None:
+        raise HTTPException(404, "unknown workspace_id")
+    return {"tree": _build_file_tree(w.root)}
 
 
 @app.post("/api/workspace/{workspace_id}/file")
@@ -472,6 +661,53 @@ def api_get_node(  # noqa: D103
         "line_start": n0.start_line,
         "line_end": n0.end_line,
     }
+
+
+@app.get("/api/workspace/{workspace_id}/search")
+def api_search(
+    workspace_id: str,
+    q: str = "",
+    kind: str = "all",
+    limit: int = 50,
+) -> dict[str, list[dict[str, Any]]]:
+    w = MANAGER.get(workspace_id)
+    if w is None:
+        raise HTTPException(404, "unknown workspace_id")
+    query = q.strip()
+    if not query:
+        return {"results": []}
+    if kind not in {"symbol", "file", "all"}:
+        raise HTTPException(400, "kind must be symbol, file, or all")
+    lim = max(1, min(int(limit), 100))
+    like = f"%{query.lower()}%"
+    types: tuple[str, ...]
+    if kind == "file":
+        types = ("file",)
+    elif kind == "symbol":
+        types = ("function", "method", "class")
+    else:
+        types = ("file", "function", "method", "class")
+    ph = ",".join("?" * len(types))
+    sql = (
+        "SELECT name, type, file_path, start_line FROM nodes "
+        f"WHERE type IN ({ph}) AND "
+        "(lower(name) LIKE ? OR lower(file_path) LIKE ?) "
+        "ORDER BY file_path, start_line, name LIMIT ?"
+    )
+    c = w.store.sqlite_connection()
+    rows: list[dict[str, Any]] = []
+    for row in c.execute(sql, (*types, like, like, lim)):
+        typ = str(row["type"])
+        rows.append(
+            {
+                "kind": "file" if typ == "file" else "symbol",
+                "name": str(row["name"] or ""),
+                "path": str(row["file_path"] or ""),
+                "line": int(row["start_line"] or 0),
+                "snippet": "",
+            }
+        )
+    return {"results": rows}
 
 async def _stats_ticker(w: Workspace, stop: asyncio.Event) -> None:
     while w._websockets:  # type: ignore[union-attr, misc, no-untyped-def]

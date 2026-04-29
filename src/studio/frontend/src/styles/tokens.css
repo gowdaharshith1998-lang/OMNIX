@@ -4,7 +4,7 @@
  */
 :root {
   /* Core canvas (viewer body + COLORS.bg) */
-  --omnix-bg-primary: #020615;
+  --omnix-bg-primary: #050810;
   --omnix-bg-gradient-end: #0a0f1a;
 
   /* Glass — .glass on viewer HUD */
@@ -35,9 +35,9 @@
   --omnix-rail-accent: #00e5a0;
 
   /* Left sidebar tokens (—sb-*) */
-  --omnix-sb-bg: #0a0f1a;
-  --omnix-sb-surface: #111a2e;
-  --omnix-sb-border: #1a2540;
+  --omnix-sb-bg: #050810;
+  --omnix-sb-surface: rgba(8, 12, 22, 0.78);
+  --omnix-sb-border: #1a1f2e;
   --omnix-sb-text: #e8edf5;
   --omnix-sb-muted: #8899b4;
   --omnix-sb-dim: #556a8a;
@@ -45,8 +45,12 @@
   --omnix-sb-glow: rgba(0, 229, 160, 0.12);
 
   /* X-ray panel (inline #xray-panel) */
-  --omnix-xray-bg: rgba(2, 6, 21, 0.95);
-  --omnix-xray-border: rgba(99, 102, 241, 0.3);
+  --omnix-xray-bg: rgba(8, 12, 22, 0.78);
+  --omnix-xray-border: #1a1f2e;
+  --omnix-shell-bg: #050810;
+  --omnix-shell-rail: rgba(8, 12, 22, 0.6);
+  --omnix-shell-panel: rgba(8, 12, 22, 0.78);
+  --omnix-shell-border: #1a1f2e;
 
   /* Search / find controls */
   --omnix-search-input-bg: rgba(2, 6, 23, 0.65);

@@ -886,6 +886,11 @@ export function installOmnixViewerEngine(studio) {
       let did = sn.dirId;
       if (did === undefined || did === null) did = sn.raw && sn.raw.id;
       if (did === undefined || did === null) return;
+      try {
+        if (typeof studio._options.onFileOrDirClick === 'function') {
+          studio._options.onFileOrDirClick(String(did));
+        }
+      } catch (_e) { /* callback only */ }
       if (xrayOpen) closeXray();
       hideSymbolPopup();
       transitionToStar(did, sn);

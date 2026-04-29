@@ -50,6 +50,13 @@ export type FileEntry = {
   modified: number;
 };
 
+export type FileTreeNode = {
+  name: string;
+  type: "dir" | "file";
+  size?: number;
+  children?: FileTreeNode[];
+};
+
 export async function listFiles(
   workspaceId: string,
   prefix = ""
@@ -62,6 +69,15 @@ export async function listFiles(
   if (!r.ok) throw new Error("list files");
   const j = (await r.json()) as { files: FileEntry[] };
   return j.files;
+}
+
+export async function getFileTree(workspaceId: string): Promise<FileTreeNode> {
+  const r = await fetch(
+    `/api/workspace/${encodeURIComponent(workspaceId)}/files/tree`
+  );
+  if (!r.ok) throw new Error("file tree");
+  const j = (await r.json()) as { tree: FileTreeNode };
+  return j.tree;
 }
 
 export async function createFile(
@@ -130,4 +146,57 @@ export async function putFile(
     written: boolean;
     new_last_modified: number;
   }>;
+}
+
+export type ReceiptSource = "fabric" | "scan" | "evolution" | "studio" | "future";
+
+export type ReceiptEntry = {
+  kind: string;
+  target: string;
+  hash_prefix: string;
+  sig_alg: string;
+  mtime_iso: string;
+  source: ReceiptSource;
+  path: string;
+};
+
+export async function listReceipts(
+  workspaceId: string,
+  opts: { since?: string; until?: string; limit?: number } = {}
+): Promise<ReceiptEntry[]> {
+  const q = new URLSearchParams();
+  if (opts.since) q.set("since", opts.since);
+  if (opts.until) q.set("until", opts.until);
+  if (opts.limit) q.set("limit", String(opts.limit));
+  const r = await fetch(
+    `/api/workspace/${encodeURIComponent(workspaceId)}/receipts?${q}`
+  );
+  if (!r.ok) throw new Error("list receipts");
+  const j = (await r.json()) as { receipts: ReceiptEntry[] };
+  return j.receipts;
+}
+
+export type SearchKind = "symbol" | "file" | "all";
+
+export type SearchResult = {
+  kind: "symbol" | "file";
+  name: string;
+  path: string;
+  line: number;
+  snippet: string;
+};
+
+export async function searchWorkspace(
+  workspaceId: string,
+  query: string,
+  kind: SearchKind = "all",
+  limit = 50
+): Promise<SearchResult[]> {
+  const q = new URLSearchParams({ q: query, kind, limit: String(limit) });
+  const r = await fetch(
+    `/api/workspace/${encodeURIComponent(workspaceId)}/search?${q}`
+  );
+  if (!r.ok) throw new Error("search");
+  const j = (await r.json()) as { results: SearchResult[] };
+  return j.results;
 }

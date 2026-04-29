@@ -7,7 +7,7 @@ import {
 import { OmnixDomStubs } from "./OmnixDomStubs";
 import { recordFromGraphPayload } from "@/lib/graphNode";
 import { isT1Mode } from "@/lib/t1Mode";
-import type { GraphNode } from "@/types/drilldown";
+import type { GraphEdge, GraphNode } from "@/types/drilldown";
 import { StudioGraph, type StudioGraphOptions } from "./StudioGraph";
 
 export type GraphCanvasHandle = {
@@ -21,6 +21,7 @@ type Props = {
   onDeselect: () => void;
   /** T1: merge static `graph_data*.json` nodes so DrillDown can resolve function/class id → file + lines. */
   onT1GraphNodes?: (nodes: GraphNode[]) => void;
+  onT1GraphEdges?: (edges: GraphEdge[]) => void;
 };
 
 /**
@@ -36,6 +37,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
       onFileOrDirClick,
       onDeselect,
       onT1GraphNodes,
+      onT1GraphEdges,
     }: Props,
     ref
   ) {
@@ -48,6 +50,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
       onDeselect,
     });
     const t1OnNodesRef = useRef<Props["onT1GraphNodes"]>(onT1GraphNodes);
+    const t1OnEdgesRef = useRef<Props["onT1GraphEdges"]>(onT1GraphEdges);
 
     useEffect(() => {
       optionsRef.current = {
@@ -60,6 +63,10 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
     useEffect(() => {
       t1OnNodesRef.current = onT1GraphNodes;
     }, [onT1GraphNodes]);
+
+    useEffect(() => {
+      t1OnEdgesRef.current = onT1GraphEdges;
+    }, [onT1GraphEdges]);
 
     useImperativeHandle(ref, () => ({
       ingestMessage: (msg: unknown) => {
@@ -85,6 +92,9 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
         get onDrilldownCatalog() {
           return t1OnNodesRef.current;
         },
+        get onDrilldownEdges() {
+          return t1OnEdgesRef.current;
+        },
       } as StudioGraphOptions);
       graphRef.current = g;
 
@@ -108,6 +118,25 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
                   if (rec) list.push(rec);
                 }
                 cb(list);
+              }
+              const edgeCb = t1OnEdgesRef.current;
+              if (edgeCb) {
+                const links = mod.default.links as Record<string, unknown>[];
+                const list: GraphEdge[] = [];
+                for (let i = 0; i < links.length; i++) {
+                  const link = links[i]!;
+                  const source = typeof link.source === "string" ? link.source : null;
+                  const target = typeof link.target === "string" ? link.target : null;
+                  if (source && target) {
+                    list.push({
+                      id: typeof link.id === "string" || typeof link.id === "number" ? link.id : i,
+                      source_id: source,
+                      target_id: target,
+                      relationship: typeof link.type === "string" ? link.type : "CALLS",
+                    });
+                  }
+                }
+                edgeCb(list);
               }
             }
           )

@@ -1,4 +1,4 @@
-import type { GraphNode } from "@/types/drilldown";
+import type { GraphEdge, GraphNode } from "@/types/drilldown";
 
 type ChangeEntry = { old?: unknown; new?: unknown } | undefined;
 
@@ -157,6 +157,38 @@ export function wsEdgeToLinkShape(
     target: edge.target_id,
     type:
       typeof edge.relationship === "string" ? edge.relationship : "CALLS",
+  };
+}
+
+export function recordEdgeFromGraphPayload(
+  edge: Record<string, unknown>
+): GraphEdge | null {
+  const source =
+    typeof edge.source_id === "string"
+      ? edge.source_id
+      : typeof edge.source === "string"
+        ? edge.source
+        : null;
+  const target =
+    typeof edge.target_id === "string"
+      ? edge.target_id
+      : typeof edge.target === "string"
+        ? edge.target
+        : null;
+  if (!source || !target) return null;
+  return {
+    id:
+      typeof edge.id === "string" || typeof edge.id === "number"
+        ? edge.id
+        : `${source}->${target}:${String(edge.relationship ?? edge.type ?? "CALLS")}`,
+    source_id: source,
+    target_id: target,
+    relationship:
+      typeof edge.relationship === "string"
+        ? edge.relationship
+        : typeof edge.type === "string"
+          ? edge.type
+          : "CALLS",
   };
 }
 
