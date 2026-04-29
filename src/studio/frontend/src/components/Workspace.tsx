@@ -9,6 +9,7 @@ import { CodeTab, type CodeTabHandle, type CodeTarget } from "./CodeTab";
 import { FilesDrawer } from "./drawers/FilesDrawer";
 import { ReceiptsDrawer } from "./drawers/ReceiptsDrawer";
 import { SearchDrawer } from "./drawers/SearchDrawer";
+import { SettingsDrawer } from "./drawers/SettingsDrawer";
 import { FindBar } from "./FindBar";
 import { HistoryTab } from "./HistoryTab";
 import { LeftRail, type LeftRailDrawer } from "./LeftRail";
@@ -387,7 +388,7 @@ export function Workspace({
     ),
     bugs: <DrawerPlaceholder label="Bugs" />,
     receipts: <ReceiptsDrawer workspaceId={workspaceId} />,
-    settings: <DrawerPlaceholder label="Settings" />,
+    settings: <SettingsDrawer projectPath={projectPath} />,
   };
 
   const rightTabs: RightPanelTab[] = [
