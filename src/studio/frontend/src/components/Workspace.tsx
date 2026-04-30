@@ -59,6 +59,7 @@ import {
   syncScopeFromViewer,
   useScope,
 } from "@/store/studioScopeStore";
+import { installGlobalErrorTrap } from "@/lib/globalErrorTrap";
 
 type Props = {
   workspaceId: string;
@@ -310,6 +311,13 @@ export function Workspace({
         showToastStable(`Unknown scope: ${id}`, 2600);
       },
     });
+  }, [showToastStable]);
+
+  useEffect(() => {
+    const uninstall = installGlobalErrorTrap({
+      onToast: (message, durationMs) => showToastStable(message, durationMs),
+    });
+    return uninstall;
   }, [showToastStable]);
 
   useEffect(() => {

@@ -35,6 +35,9 @@ type StudioHandle = {
   _applyScopeNavigation?: (spec: ScopeNavigationSpec) => void;
   _ingestDelta?: (message: unknown) => void;
   _destroy?: () => void;
+  /** Slice 15.2 — PIXI ticker pause/resume (viewerEngine). */
+  _pauseRenderLoop?: () => void;
+  _resumeRenderLoop?: () => void;
   _flashNodeRim?: (
     nodeId: string,
     opts?: { color?: number; durationMs?: number }
@@ -72,6 +75,8 @@ type BootstrapBuffer = {
  */
 export class StudioGraph {
   private _studio: StudioHandle;
+
+  private _disposed = false;
 
   private _wsIdToSynthId = new Map<string, string>();
 
@@ -233,33 +238,37 @@ export class StudioGraph {
       stats: this._bootstrapBuffer.lastStats,
     };
     this._studio._loadGraphFromData?.(payload);
+    // Defer huge React catalog/edge updates so the entrance/GSAP + PIXI bootstrap
+    // does not interleave with React commit (avoids removeChild DOM races on large graphs).
     const cb = this._studio._options.onDrilldownCatalog;
-    if (cb) {
-      const list: GraphNode[] = [];
-      for (let i = 0; i < rawNodes.length; i++) {
-        const rec = recordFromGraphPayload(rawNodes[i] as Record<string, unknown>);
-        if (rec) list.push(rec);
-      }
-      cb(list);
-    }
     const edgeCb = this._studio._options.onDrilldownEdges;
-    if (edgeCb) {
-      const list: GraphEdge[] = [];
-      for (let i = 0; i < rawLinks.length; i++) {
-        const edge = rawLinks[i] as Record<string, unknown>;
-        const source = typeof edge.source === "string" ? edge.source : null;
-        const target = typeof edge.target === "string" ? edge.target : null;
-        if (source && target) {
-          list.push({
-            id: typeof edge.id === "string" || typeof edge.id === "number" ? edge.id : i,
-            source_id: source,
-            target_id: target,
-            relationship: typeof edge.type === "string" ? edge.type : "CALLS",
-          });
+    queueMicrotask(() => {
+      if (cb) {
+        const list: GraphNode[] = [];
+        for (let i = 0; i < rawNodes.length; i++) {
+          const rec = recordFromGraphPayload(rawNodes[i] as Record<string, unknown>);
+          if (rec) list.push(rec);
         }
+        cb(list);
       }
-      edgeCb(list);
-    }
+      if (edgeCb) {
+        const list: GraphEdge[] = [];
+        for (let i = 0; i < rawLinks.length; i++) {
+          const edge = rawLinks[i] as Record<string, unknown>;
+          const source = typeof edge.source === "string" ? edge.source : null;
+          const target = typeof edge.target === "string" ? edge.target : null;
+          if (source && target) {
+            list.push({
+              id: typeof edge.id === "string" || typeof edge.id === "number" ? edge.id : i,
+              source_id: source,
+              target_id: target,
+              relationship: typeof edge.type === "string" ? edge.type : "CALLS",
+            });
+          }
+        }
+        edgeCb(list);
+      }
+    });
   }
 
   /** Day 11a T2+ — live WebSocket deltas; bootstrap buffers then one static rebuild. */
@@ -524,7 +533,30 @@ export class StudioGraph {
     }
   }
 
-  destroy() {
+  /** Slice 15.2 — stop the PIXI ticker before scene teardown (idempotent). */
+  pauseRenderLoop(): void {
+    if (this._disposed) return;
+    this._studio._pauseRenderLoop?.();
+  }
+
+  /** Slice 15.2 — resume ticker after rebuild (no-op if disposed). */
+  resumeRenderLoop(): void {
+    if (this._disposed) return;
+    this._studio._resumeRenderLoop?.();
+  }
+
+  /**
+   * Slice 15.2 — pause ticker then dispose viewer resources (idempotent).
+   * Safe to call multiple times; second call is a no-op.
+   */
+  disposeAll(): void {
+    if (this._disposed) return;
+    this._disposed = true;
+    this._studio._pauseRenderLoop?.();
     this._studio._destroy?.();
+  }
+
+  destroy() {
+    this.disposeAll();
   }
 }

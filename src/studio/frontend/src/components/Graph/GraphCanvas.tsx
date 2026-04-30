@@ -194,8 +194,17 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
       }
 
       return () => {
-        g.destroy();
         graphRef.current = null;
+        try {
+          g.pauseRenderLoop();
+        } catch {
+          /* ignore */
+        }
+        try {
+          g.disposeAll();
+        } catch {
+          /* ignore */
+        }
       };
     }, []);
 

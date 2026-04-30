@@ -5326,6 +5326,12 @@ export function installOmnixViewerEngine(studio) {
     currentLinks = model.galaxy.links;
     world.alpha = 1;
     killTweens();
+    if (world) {
+      gsap.killTweensOf(world);
+      gsap.killTweensOf(world.scale);
+    }
+    if (starGraphics) gsap.killTweensOf(starGraphics);
+    if (galaxyEdgeGfx) gsap.killTweensOf(galaxyEdgeGfx);
     startSimulation(currentNodes, currentLinks);
     restoreGalaxyView();
     gsap.fromTo(world, { alpha: 0.3 }, { alpha: 1, duration: 0.45, ease: 'power2.out' });
@@ -5377,34 +5383,13 @@ export function installOmnixViewerEngine(studio) {
     }
   }
 
-  function notifyStudioScopeFromViewer() {
-    const fn = studio._options && studio._options.onViewerScope;
-    if (typeof fn !== 'function') return;
-    if (viewLevel === 'galaxy') {
-      fn({ kind: 'repo' });
-      return;
-    }
-    if (viewLevel === 'star' && selectedDir) {
-      fn({ kind: 'directory', path: selectedDir });
-      return;
-    }
-    if (viewLevel === 'planet' && selectedFile && selectedDir) {
-      const fp =
-        selectedFile.filePath || resolveDirFilePath(selectedDir, selectedFile.name);
-      fn({ kind: 'file', path: fp });
-    }
-  }
-
   function updateBreadcrumb() {
     const canGoBack = viewLevel === 'star' || viewLevel === 'planet';
     if (studio._options && typeof studio._options.onNavigationStateChange === 'function') {
       try { studio._options.onNavigationStateChange(canGoBack); } catch (_e) { /* */ }
     }
-    const bc = document.getElementById('omnix-engine-breadcrumb-host');
-    if (!bc) {
-      notifyStudioScopeFromViewer();
-      return;
-    }
+    const bc = document.getElementById('breadcrumb');
+    if (!bc) return;
     bc.innerHTML = '';
     const addCrumb = (label, level, data) => {
       const span = document.createElement('span');
@@ -5451,43 +5436,6 @@ export function installOmnixViewerEngine(studio) {
     }
 
     gsap.fromTo(bc, { opacity: 0.5 }, { opacity: 1, duration: 0.35 });
-    notifyStudioScopeFromViewer();
-  }
-
-  function forceScopeNavigateToRepo() {
-    loadLevelGalaxy();
-  }
-
-  function forceScopeNavigateToDirectory(dirPath) {
-    if (!model || !dirPath) return;
-    cleanupPlanetView();
-    cleanupStarView();
-    viewLevel = 'galaxy';
-    selectedDir = null;
-    selectedFile = null;
-    const files = model.dirFilesMap[dirPath] || [];
-    createStarView(dirPath, files);
-  }
-
-  function forceScopeNavigateToFile(fp) {
-    if (!model || !fp) return;
-    const dirPath = dirname(fp);
-    cleanupPlanetView();
-    cleanupStarView();
-    viewLevel = 'galaxy';
-    selectedDir = null;
-    selectedFile = null;
-    const files = model.dirFilesMap[dirPath] || [];
-    createStarView(dirPath, files);
-    let hit = null;
-    for (let i = 0; i < starNodes.length; i++) {
-      const sn = starNodes[i];
-      if (sn && sn.fileData && sn.fileData.filePath === fp) {
-        hit = sn.fileData;
-        break;
-      }
-    }
-    if (hit) transitionToPlanet(hit);
   }
 
   function drawBackground() {
@@ -5940,19 +5888,28 @@ export function installOmnixViewerEngine(studio) {
     }, 1);
     tl.add(() => {
       if (model && simNodes.length) {
+        // Thousands of staggered scale tweens exhaust WebGL / leave orphaned GSAP targets
+        // after context loss; cap the fan-out for large galaxy graphs.
+        const ENTRANCE_STAGGER_NODE_CAP = 200;
+        const heavy = simNodes.length > ENTRANCE_STAGGER_NODE_CAP;
         nodePool.forEach((p, i) => {
           if (i >= simNodes.length) return;
           p.container.visible = true;
           p.simNode = simNodes[i];
           p.container.x = simNodes[i].x;
           p.container.y = simNodes[i].y;
-          gsap.fromTo(p.container.scale, { x: 0, y: 0 }, {
-            x: 1,
-            y: 1,
-            duration: 0.45,
-            ease: 'back.out(1.4)',
-            delay: i * 0.03,
-          });
+          gsap.killTweensOf(p.container.scale);
+          if (heavy) {
+            p.container.scale.set(1, 1);
+          } else {
+            gsap.fromTo(p.container.scale, { x: 0, y: 0 }, {
+              x: 1,
+              y: 1,
+              duration: 0.45,
+              ease: 'back.out(1.4)',
+              delay: i * 0.03,
+            });
+          }
         });
       }
     }, 1.5);
@@ -6126,35 +6083,6 @@ export function installOmnixViewerEngine(studio) {
   window.addEventListener('keydown', __omnixKeydownHandler);
   window.addEventListener('resize', __omnixResizeHandler);
 
-  /** Slice 15 — React-driven scope sync: hard-reset drill stack then open target level. */
-  studio._applyScopeNavigation = function (spec) {
-    if (!model || !app) return;
-    if (!spec || spec.kind === 'repo') {
-      if (viewLevel === 'galaxy' && !selectedDir && !selectedFile) return;
-      forceScopeNavigateToRepo();
-      return;
-    }
-    if (spec.kind === 'directory') {
-      const dirPath = spec.path;
-      if (!dirPath) return;
-      if (viewLevel === 'star' && selectedDir === dirPath && !selectedFile) return;
-      forceScopeNavigateToDirectory(dirPath);
-      return;
-    }
-    if (spec.kind === 'file') {
-      const fp = spec.path;
-      if (!fp) return;
-      if (
-        viewLevel === 'planet' &&
-        selectedFile &&
-        selectedFile.filePath === fp
-      ) {
-        return;
-      }
-      forceScopeNavigateToFile(fp);
-    }
-  };
-
   studio._loadGraphFromData = function (data) {
     if (!data || !Array.isArray(data.nodes) || !Array.isArray(data.links)) {
       showLoadError('Invalid graph payload (expected nodes + links arrays).');
@@ -6221,6 +6149,20 @@ export function installOmnixViewerEngine(studio) {
     starfieldTwinkle = null;
     try {
       killTweens();
+    } catch (_e) { /* */ }
+    try {
+      nodePool.forEach(p => {
+        if (!p || !p.container) return;
+        gsap.killTweensOf(p.container);
+        gsap.killTweensOf(p.container.scale);
+      });
+      if (world) {
+        gsap.killTweensOf(world);
+        gsap.killTweensOf(world.scale);
+      }
+      if (starGraphics) gsap.killTweensOf(starGraphics);
+      if (galaxyEdgeGfx) gsap.killTweensOf(galaxyEdgeGfx);
+      if (layerEdges) gsap.killTweensOf(layerEdges);
     } catch (_e) { /* */ }
     if (world && world.children) {
       for (let wi = 0; wi < world.children.length; wi++) {
