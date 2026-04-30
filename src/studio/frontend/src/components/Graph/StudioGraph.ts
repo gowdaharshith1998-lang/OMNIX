@@ -8,11 +8,20 @@ import {
 } from "@/lib/graphNode";
 import { installOmnixViewerEngine } from "./viewerEngine";
 
+export type ViewerScopePayload =
+  | { kind: "repo" }
+  | { kind: "directory"; path: string }
+  | { kind: "file"; path: string };
+
+export type ScopeNavigationSpec = ViewerScopePayload;
+
 export type StudioGraphOptions = {
   onFunctionNodeClick?: (nodeId: string) => void;
   onFileOrDirClick?: (filePath: string) => void;
   onDeselect?: () => void;
   onNavigationStateChange?: (canGoBack: boolean) => void;
+  /** Slice 15 — constellation reports semantic scope for React shell (breadcrumb / X-Ray / stats). */
+  onViewerScope?: (payload: ViewerScopePayload) => void;
   /** Same role as T1 `onT1GraphNodes`: DrillDown catalog after full graph snapshot. */
   onDrilldownCatalog?: (nodes: GraphNode[]) => void;
   /** X-Ray catalog after full graph snapshot. */
@@ -23,6 +32,7 @@ type StudioHandle = {
   _container: HTMLElement;
   _options: StudioGraphOptions;
   _loadGraphFromData?: (data: unknown) => void;
+  _applyScopeNavigation?: (spec: ScopeNavigationSpec) => void;
   _ingestDelta?: (message: unknown) => void;
   _destroy?: () => void;
   _flashNodeRim?: (
@@ -118,6 +128,10 @@ export class StudioGraph {
 
   goBack(): void {
     this._studio._goBack?.();
+  }
+
+  applyScopeNavigation(spec: ScopeNavigationSpec): void {
+    this._studio._applyScopeNavigation?.(spec);
   }
 
   private _logDispatch(m: Record<string, unknown>, t: string) {

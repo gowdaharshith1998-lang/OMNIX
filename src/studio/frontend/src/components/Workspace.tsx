@@ -40,6 +40,24 @@ import {
   saveShellLayout,
   type ShellLayoutState,
 } from "@/lib/persisted_widths";
+import type { ScopeNavigationSpec, ViewerScopePayload } from "./Graph/StudioGraph";
+import {
+  ancestryChain,
+  CANONICAL_SCOPES,
+  computeScopedStats,
+  extendRegistryWithGraphNodes,
+  scopeRecordsToMaps,
+  type ScopeRecord,
+} from "@/store/scopeRegistry";
+import {
+  configureStudioScopeHandlers,
+  getStudioScopeSnapshot,
+  setScope,
+  setSelectedNode,
+  setValidScopeIds,
+  syncScopeFromViewer,
+  useScope,
+} from "@/store/studioScopeStore";
 
 type Props = {
   workspaceId: string;
@@ -79,6 +97,38 @@ function isBugsScanEvent(msg: Record<string, unknown>): msg is BugsScanEvent {
   );
 }
 
+function navigationSpecForScopeRecord(
+  id: string,
+  byId: Map<string, ScopeRecord>
+): ScopeNavigationSpec {
+  const r = byId.get(id);
+  if (!r || id === "repo") return { kind: "repo" };
+  if (r.badge === "FILE" && r.pathPrefix)
+    return { kind: "file", path: r.pathPrefix };
+  if (r.pathPrefix) return { kind: "directory", path: r.pathPrefix };
+  return { kind: "repo" };
+}
+
+function scopeIdFromViewerPayload(
+  payload: ViewerScopePayload,
+  pathToId: Map<string, string>
+): string {
+  if (payload.kind === "repo") return "repo";
+  const path = payload.path.replace(/\\/g, "/");
+  const direct = pathToId.get(path);
+  if (direct) return direct;
+  let best: { len: number; id: string } | null = null;
+  for (const [prefix, scopeId] of pathToId) {
+    if (!prefix) continue;
+    if (path === prefix || path.startsWith(`${prefix}/`)) {
+      if (!best || prefix.length > best.len) {
+        best = { len: prefix.length, id: scopeId };
+      }
+    }
+  }
+  return best?.id ?? "repo";
+}
+
 export function Workspace({
   workspaceId,
   projectPath,
@@ -89,14 +139,22 @@ export function Workspace({
   const [shellLayout, setShellLayout] = useState<ShellLayoutState>(() =>
     loadShellLayout(projectPath)
   );
-  const [stats] = useState({
-    files: initialStats.files,
-    functions: initialStats.functions,
-    classes: initialStats.classes,
-    edges: initialStats.edges,
-    dark_matter: 0,
-    entangled: 0,
-  });
+  const bootstrapTotals = useMemo(
+    () => ({
+      files: initialStats.files,
+      functions: initialStats.functions,
+      classes: initialStats.classes,
+      edges: initialStats.edges,
+      dark_matter: 0,
+      entangled: 0,
+    }),
+    [
+      initialStats.classes,
+      initialStats.edges,
+      initialStats.files,
+      initialStats.functions,
+    ]
+  );
   const [wsState, setWsState] = useState<WsState>("idle");
   const [, setFiles] = useState<FileEntry[]>([]);
   const [newFile, setNewFile] = useState(false);
@@ -111,12 +169,58 @@ export function Workspace({
   const [bugsScanEvent, setBugsScanEvent] = useState<BugsScanEvent | null>(null);
   const [graphHint] = useState<string[]>([]);
   const [codeTarget, setCodeTarget] = useState<CodeTarget | null>(null);
-  const [selectedXRayNode, setSelectedXRayNode] = useState<GraphNode | null>(null);
   const [graphCanGoBack, setGraphCanGoBack] = useState(false);
   const [graphNodes, setGraphNodes] = useState<Map<string, GraphNode>>(
     () => new Map()
   );
   const [graphEdges, setGraphEdges] = useState<GraphEdge[]>([]);
+  const [scopeRecords, setScopeRecords] =
+    useState<ScopeRecord[]>(CANONICAL_SCOPES);
+
+  const { currentScope, selectedNodeId } = useScope();
+  const skipScopeApplyRef = useRef(false);
+  const scopeMaps = useMemo(
+    () => scopeRecordsToMaps(scopeRecords),
+    [scopeRecords]
+  );
+  const scopeById = scopeMaps.byId;
+  const pathToScopeId = scopeMaps.pathToId;
+
+  const selectedXRayNode = useMemo(() => {
+    if (!selectedNodeId) return null;
+    return graphNodes.get(selectedNodeId) ?? null;
+  }, [graphNodes, selectedNodeId]);
+
+  const nodesList = useMemo(
+    () => Array.from(graphNodes.values()),
+    [graphNodes]
+  );
+
+  const displayStats = useMemo(() => {
+    const rec = scopeById.get(currentScope);
+    const prefix = rec?.pathPrefix ?? null;
+    if (currentScope === "repo" && graphNodes.size === 0) {
+      return bootstrapTotals;
+    }
+    const m = computeScopedStats(nodesList, graphEdges, prefix);
+    return {
+      files: m.files,
+      functions: m.functions,
+      classes: m.classes,
+      edges: m.edges,
+      dark_matter: m.dark_matter,
+      entangled: m.entangled,
+    };
+  }, [
+    bootstrapTotals,
+    currentScope,
+    graphEdges,
+    graphNodes.size,
+    nodesList,
+    scopeById,
+  ]);
+
+  const activeScopeRecord = scopeById.get(currentScope) ?? null;
 
   const graphNodesRef = useRef(graphNodes);
   const graphRef = useRef<GraphCanvasHandle | null>(null);
@@ -188,6 +292,66 @@ export function Workspace({
     if (shellLayout.rightPanel.collapsed) setRightPanelCollapsed(false);
   }, [setRightPanelCollapsed, shellLayout.rightPanel.collapsed]);
 
+  const showToastStable = useCallback(
+    (message: string, durationMs?: number) => {
+      setToast(message);
+      setTimeout(
+        () => {
+          setToast((t) => (t === message ? null : t));
+        },
+        durationMs ?? (message === "saved" ? 1000 : 2200)
+      );
+    },
+    []
+  );
+
+  useEffect(() => {
+    configureStudioScopeHandlers({
+      onInvalidScope: (id) => {
+        showToastStable(`Unknown scope: ${id}`, 2600);
+      },
+    });
+  }, [showToastStable]);
+
+  useEffect(() => {
+    if (graphNodes.size === 0) {
+      setScopeRecords(CANONICAL_SCOPES);
+      setValidScopeIds(CANONICAL_SCOPES.map((r) => r.id));
+      return;
+    }
+    const extended = extendRegistryWithGraphNodes(
+      CANONICAL_SCOPES,
+      graphNodes.values()
+    );
+    setScopeRecords(extended);
+    setValidScopeIds(extended.map((r) => r.id));
+  }, [graphNodes]);
+
+  const onViewerScope = useCallback(
+    (payload: ViewerScopePayload) => {
+      const id = scopeIdFromViewerPayload(payload, pathToScopeId);
+      skipScopeApplyRef.current = true;
+      syncScopeFromViewer(id, {
+        pathPrefixForScope: (sid) => scopeById.get(sid)?.pathPrefix ?? null,
+        selectedFilePath: () => {
+          const sid = getStudioScopeSnapshot().selectedNodeId;
+          return sid ? graphNodesRef.current.get(sid)?.file_path ?? null : null;
+        },
+      });
+    },
+    [pathToScopeId, scopeById]
+  );
+
+  useEffect(() => {
+    if (skipScopeApplyRef.current) {
+      skipScopeApplyRef.current = false;
+      return;
+    }
+    graphRef.current?.applyScopeNavigation?.(
+      navigationSpecForScopeRecord(currentScope, scopeById)
+    );
+  }, [currentScope, scopeRecords]);
+
   const refreshFiles = useCallback(async () => {
     try {
       setFiles(await listFiles(workspaceId, ""));
@@ -206,7 +370,7 @@ export function Workspace({
   }, []);
 
   const selectXRayNode = useCallback((node: GraphNode | null) => {
-    setSelectedXRayNode(node);
+    setSelectedNode(node?.id ?? null);
     setRightTab("xray");
     expandRightPanel();
   }, [expandRightPanel]);
@@ -232,22 +396,24 @@ export function Workspace({
     [findNodeForPath, selectXRayNode]
   );
 
-  const openXRayNode = useCallback((nodeId: string) => {
-    const n = graphNodesRef.current.get(nodeId);
-    if (!n || !n.file_path) {
-      // eslint-disable-next-line no-console
-      console.error("node not found:", nodeId);
-      return;
-    }
-    setCodeTarget({
-      nodeId: n.id,
-      path: n.file_path,
-      lineStart: n.line_start,
-      lineEnd: n.line_end,
-      name: n.name,
-    });
-    selectXRayNode(n);
-  }, [selectXRayNode]);
+  const openXRayNode = useCallback(
+    (nodeId: string) => {
+      const n = graphNodesRef.current.get(nodeId);
+      if (!n || !n.file_path) {
+        showToastStable("node not found in graph index", 2600);
+        return;
+      }
+      setCodeTarget({
+        nodeId: n.id,
+        path: n.file_path,
+        lineStart: n.line_start,
+        lineEnd: n.line_end,
+        name: n.name,
+      });
+      selectXRayNode(n);
+    },
+    [selectXRayNode, showToastStable]
+  );
 
   const handleGraphBack = useCallback(() => {
     if (!graphRef.current?.canGoBack()) return false;
@@ -498,19 +664,6 @@ export function Workspace({
     };
   }, [openXRayNode]);
 
-  const showToastStable = useCallback(
-    (message: string, durationMs?: number) => {
-      setToast(message);
-      setTimeout(
-        () => {
-          setToast((t) => (t === message ? null : t));
-        },
-        durationMs ?? (message === "saved" ? 1000 : 2200)
-      );
-    },
-    []
-  );
-
   const onDrillSaveShell = useCallback(() => {
     setToast("Code tab save lands next");
     setTimeout(() => setToast(null), 2200);
@@ -561,7 +714,8 @@ export function Workspace({
           selectedNode={selectedXRayNode}
           graphNodes={graphNodes}
           graphEdges={graphEdges}
-          stats={stats}
+          stats={displayStats}
+          scopeRecord={activeScopeRecord}
           onSuggestedAction={() =>
             showToastStable("action wiring lands in slice 15", 15000)
           }
@@ -587,6 +741,12 @@ export function Workspace({
       content: <HistoryTab workspaceId={workspaceId} />,
     },
   ];
+
+  const activateScopeFromBreadcrumb = useCallback((id: string) => {
+    void setScope(id);
+  }, []);
+
+  const crumbChain = ancestryChain(currentScope, scopeById);
 
   useStudioKeybindings({
     drillOpen: codeTarget != null,
@@ -635,8 +795,8 @@ export function Workspace({
         aria-label="Breadcrumb"
       >
         <div
-          className="omnix-glass pointer-events-auto mx-auto flex w-max max-w-full items-center justify-center gap-1.5 rounded-full border border-omnix-accent-indigo/25 px-4 py-2 font-mono text-xs"
-          id="breadcrumb"
+          className="omnix-glass pointer-events-auto mx-auto flex w-max max-w-full flex-wrap items-center justify-center gap-1.5 rounded-full border border-omnix-accent-indigo/25 px-4 py-2 font-mono text-xs"
+          data-studio-breadcrumb="1"
         >
           {graphCanGoBack ? (
             <button
@@ -647,30 +807,59 @@ export function Workspace({
             >
               &lt; Back
             </button>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={onBack}
-                className="text-omnix-text-muted transition hover:rounded-md hover:bg-[rgba(99,102,241,0.15)] hover:text-omnix-text-primary"
-              >
-                OMNIX
-              </button>
-              <span className="text-omnix-text-sep select-none">›</span>
-              <span
-                className="max-w-[min(50vw,24rem)] truncate text-omnix-text-primary"
-                title={projectPath}
-              >
-                {pName}
+          ) : null}
+          <button
+            type="button"
+            disabled={currentScope === "repo"}
+            onClick={() => activateScopeFromBreadcrumb("repo")}
+            className={
+              currentScope === "repo"
+                ? "cursor-default text-omnix-text-primary"
+                : "text-omnix-text-muted transition hover:rounded-md hover:bg-[rgba(99,102,241,0.15)] hover:text-omnix-text-primary"
+            }
+          >
+            OMNIX
+          </button>
+          {crumbChain
+            .filter((r) => r.id !== "repo")
+            .map((r, i, arr) => (
+              <span key={r.id} className="flex items-center gap-1.5">
+                <span className="text-omnix-text-sep select-none">›</span>
+                {i < arr.length - 1 ? (
+                  <button
+                    type="button"
+                    className="max-w-[min(40vw,18rem)] truncate text-omnix-text-muted transition hover:rounded-md hover:bg-[rgba(99,102,241,0.15)] hover:text-omnix-text-primary"
+                    title={r.label}
+                    onClick={() => activateScopeFromBreadcrumb(r.id)}
+                  >
+                    {r.label}
+                  </button>
+                ) : (
+                  <span
+                    className="max-w-[min(40vw,18rem)] truncate text-omnix-text-primary"
+                    title={r.label}
+                  >
+                    {r.label}
+                  </span>
+                )}
               </span>
-            </>
-          )}
+            ))}
+          <span className="text-omnix-text-sep select-none">›</span>
+          <span
+            className="max-w-[min(50vw,24rem)] truncate text-omnix-text-muted"
+            title={projectPath}
+          >
+            {pName}
+          </span>
+          <button
+            type="button"
+            className="ml-1 text-[10px] uppercase tracking-wide text-omnix-text-dim hover:text-omnix-text-primary"
+            onClick={onBack}
+          >
+            Exit
+          </button>
         </div>
       </nav>
-
-      <div className="pointer-events-none fixed right-5 top-5 z-30" aria-label="Graph stats">
-        <StatsPanel stats={stats} />
-      </div>
 
       <ReconnectIndicator mode={reconnectIndicatorMode} />
       <BootstrapIndicator phase={bootstrapIndicatorPhase} />
@@ -683,6 +872,7 @@ export function Workspace({
             </div>
             <div
               className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border border-omnix-accent-indigo/20 bg-[rgba(2,6,21,0.5)]"
+              data-omnix-constellation="1"
             >
               <GraphCanvas
                 ref={graphRef}
@@ -693,7 +883,29 @@ export function Workspace({
                 onFileOrDirClick={openXRayFileOrDir}
                 onDeselect={() => undefined}
                 onNavigationStateChange={setGraphCanGoBack}
+                onViewerScope={onViewerScope}
               />
+              <div
+                data-omnix-stats-card="1"
+                className="pointer-events-auto absolute right-4 top-4 z-20 font-mono"
+                aria-label="Graph stats"
+              >
+                <StatsPanel stats={displayStats} variant="constellation" />
+              </div>
+              <div
+                data-omnix-find-slot="1"
+                className="pointer-events-none absolute bottom-[50px] left-1/2 z-30 w-[min(100%-2rem,42rem)] max-w-2xl -translate-x-1/2 px-3"
+                role="search"
+                aria-label="Find in project"
+              >
+                <div className="pointer-events-auto w-full">
+                  <FindBar
+                    value={find}
+                    onChange={setFind}
+                    onClear={find ? () => setFind("") : undefined}
+                  />
+                </div>
+              </div>
               {graphHint.length > 0 && (
                 <div className="pointer-events-none absolute bottom-2 left-2 z-10 max-w-[min(100%,20rem)] rounded border border-omnix-accent-indigo/20 bg-omnix-bg/80 px-2 py-1 font-mono text-[9px] text-omnix-text-dim/90">
                   recent: {graphHint.join(" · ")}
@@ -726,20 +938,6 @@ export function Workspace({
           setRightPanelCollapsed(!shellLayout.rightPanel.collapsed)
         }
       />
-
-      <div
-        className="pointer-events-none fixed bottom-20 left-0 right-0 z-40 flex justify-center px-3 pl-12"
-        role="search"
-        aria-label="Find in project"
-      >
-        <div className="pointer-events-auto w-full max-w-2xl">
-          <FindBar
-            value={find}
-            onChange={setFind}
-            onClear={find ? () => setFind("") : undefined}
-          />
-        </div>
-      </div>
 
       <div
         className="pointer-events-none fixed bottom-5 left-0 right-0 z-40 flex justify-center px-3 pl-12"

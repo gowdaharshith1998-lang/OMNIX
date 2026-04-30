@@ -63,6 +63,7 @@ vi.mock("@/components/Graph/GraphCanvas", () => ({
         graphNavHarness.goBack();
         props.onNavigationStateChange(false);
       },
+      applyScopeNavigation: vi.fn(),
     }));
     return React.createElement(
       React.Fragment,

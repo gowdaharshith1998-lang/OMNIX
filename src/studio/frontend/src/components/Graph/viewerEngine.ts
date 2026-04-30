@@ -5377,12 +5377,34 @@ export function installOmnixViewerEngine(studio) {
     }
   }
 
+  function notifyStudioScopeFromViewer() {
+    const fn = studio._options && studio._options.onViewerScope;
+    if (typeof fn !== 'function') return;
+    if (viewLevel === 'galaxy') {
+      fn({ kind: 'repo' });
+      return;
+    }
+    if (viewLevel === 'star' && selectedDir) {
+      fn({ kind: 'directory', path: selectedDir });
+      return;
+    }
+    if (viewLevel === 'planet' && selectedFile && selectedDir) {
+      const fp =
+        selectedFile.filePath || resolveDirFilePath(selectedDir, selectedFile.name);
+      fn({ kind: 'file', path: fp });
+    }
+  }
+
   function updateBreadcrumb() {
     const canGoBack = viewLevel === 'star' || viewLevel === 'planet';
     if (studio._options && typeof studio._options.onNavigationStateChange === 'function') {
       try { studio._options.onNavigationStateChange(canGoBack); } catch (_e) { /* */ }
     }
-    const bc = document.getElementById('breadcrumb');
+    const bc = document.getElementById('omnix-engine-breadcrumb-host');
+    if (!bc) {
+      notifyStudioScopeFromViewer();
+      return;
+    }
     bc.innerHTML = '';
     const addCrumb = (label, level, data) => {
       const span = document.createElement('span');
@@ -5429,6 +5451,43 @@ export function installOmnixViewerEngine(studio) {
     }
 
     gsap.fromTo(bc, { opacity: 0.5 }, { opacity: 1, duration: 0.35 });
+    notifyStudioScopeFromViewer();
+  }
+
+  function forceScopeNavigateToRepo() {
+    loadLevelGalaxy();
+  }
+
+  function forceScopeNavigateToDirectory(dirPath) {
+    if (!model || !dirPath) return;
+    cleanupPlanetView();
+    cleanupStarView();
+    viewLevel = 'galaxy';
+    selectedDir = null;
+    selectedFile = null;
+    const files = model.dirFilesMap[dirPath] || [];
+    createStarView(dirPath, files);
+  }
+
+  function forceScopeNavigateToFile(fp) {
+    if (!model || !fp) return;
+    const dirPath = dirname(fp);
+    cleanupPlanetView();
+    cleanupStarView();
+    viewLevel = 'galaxy';
+    selectedDir = null;
+    selectedFile = null;
+    const files = model.dirFilesMap[dirPath] || [];
+    createStarView(dirPath, files);
+    let hit = null;
+    for (let i = 0; i < starNodes.length; i++) {
+      const sn = starNodes[i];
+      if (sn && sn.fileData && sn.fileData.filePath === fp) {
+        hit = sn.fileData;
+        break;
+      }
+    }
+    if (hit) transitionToPlanet(hit);
   }
 
   function drawBackground() {
@@ -6066,6 +6125,35 @@ export function installOmnixViewerEngine(studio) {
   __omnixWireOptionalDom();
   window.addEventListener('keydown', __omnixKeydownHandler);
   window.addEventListener('resize', __omnixResizeHandler);
+
+  /** Slice 15 — React-driven scope sync: hard-reset drill stack then open target level. */
+  studio._applyScopeNavigation = function (spec) {
+    if (!model || !app) return;
+    if (!spec || spec.kind === 'repo') {
+      if (viewLevel === 'galaxy' && !selectedDir && !selectedFile) return;
+      forceScopeNavigateToRepo();
+      return;
+    }
+    if (spec.kind === 'directory') {
+      const dirPath = spec.path;
+      if (!dirPath) return;
+      if (viewLevel === 'star' && selectedDir === dirPath && !selectedFile) return;
+      forceScopeNavigateToDirectory(dirPath);
+      return;
+    }
+    if (spec.kind === 'file') {
+      const fp = spec.path;
+      if (!fp) return;
+      if (
+        viewLevel === 'planet' &&
+        selectedFile &&
+        selectedFile.filePath === fp
+      ) {
+        return;
+      }
+      forceScopeNavigateToFile(fp);
+    }
+  };
 
   studio._loadGraphFromData = function (data) {
     if (!data || !Array.isArray(data.nodes) || !Array.isArray(data.links)) {

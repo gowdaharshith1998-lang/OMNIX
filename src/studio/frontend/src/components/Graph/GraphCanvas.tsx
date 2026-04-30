@@ -8,12 +8,17 @@ import { OmnixDomStubs } from "./OmnixDomStubs";
 import { recordFromGraphPayload } from "@/lib/graphNode";
 import { isT1Mode } from "@/lib/t1Mode";
 import type { GraphEdge, GraphNode } from "@/types/drilldown";
-import { StudioGraph, type StudioGraphOptions } from "./StudioGraph";
+import {
+  StudioGraph,
+  type ScopeNavigationSpec,
+  type StudioGraphOptions,
+} from "./StudioGraph";
 
 export type GraphCanvasHandle = {
   ingestMessage: (msg: unknown) => void;
   canGoBack: () => boolean;
   goBack: () => void;
+  applyScopeNavigation: (spec: ScopeNavigationSpec) => void;
 };
 
 type Props = {
@@ -22,6 +27,7 @@ type Props = {
   onFileOrDirClick: (filePath: string) => void;
   onDeselect: () => void;
   onNavigationStateChange: (canGoBack: boolean) => void;
+  onViewerScope?: StudioGraphOptions["onViewerScope"];
   /** T1: merge static `graph_data*.json` nodes so DrillDown can resolve function/class id → file + lines. */
   onT1GraphNodes?: (nodes: GraphNode[]) => void;
   onT1GraphEdges?: (edges: GraphEdge[]) => void;
@@ -40,6 +46,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
       onFileOrDirClick,
       onDeselect,
       onNavigationStateChange,
+      onViewerScope,
       onT1GraphNodes,
       onT1GraphEdges,
     }: Props,
@@ -53,6 +60,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
       onFileOrDirClick,
       onDeselect,
       onNavigationStateChange,
+      onViewerScope,
     });
     const t1OnNodesRef = useRef<Props["onT1GraphNodes"]>(onT1GraphNodes);
     const t1OnEdgesRef = useRef<Props["onT1GraphEdges"]>(onT1GraphEdges);
@@ -63,8 +71,15 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
         onFileOrDirClick,
         onDeselect,
         onNavigationStateChange,
+        onViewerScope,
       };
-    }, [onFunctionNodeClick, onFileOrDirClick, onDeselect, onNavigationStateChange]);
+    }, [
+      onFunctionNodeClick,
+      onFileOrDirClick,
+      onDeselect,
+      onNavigationStateChange,
+      onViewerScope,
+    ]);
 
     useEffect(() => {
       t1OnNodesRef.current = onT1GraphNodes;
@@ -81,6 +96,9 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
       canGoBack: () => Boolean(graphRef.current?.canGoBack()),
       goBack: () => {
         graphRef.current?.goBack();
+      },
+      applyScopeNavigation: (spec: ScopeNavigationSpec) => {
+        graphRef.current?.applyScopeNavigation(spec);
       },
     }));
 
@@ -101,6 +119,9 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
         },
         get onNavigationStateChange() {
           return optionsRef.current.onNavigationStateChange;
+        },
+        get onViewerScope() {
+          return optionsRef.current.onViewerScope;
         },
         get onDrilldownCatalog() {
           return t1OnNodesRef.current;

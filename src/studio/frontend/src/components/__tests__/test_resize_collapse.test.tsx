@@ -49,7 +49,7 @@ describe("slice 14 resize and persistence", () => {
     });
     expect(loadShellLayout("ws")).toEqual({
       leftDrawer: { width: 333, openTab: "files" },
-      rightPanel: { width: 555, collapsed: false },
+      rightPanel: { width: RIGHT_PANEL_MAX, collapsed: false },
     });
   });
 

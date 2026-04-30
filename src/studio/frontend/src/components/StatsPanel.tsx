@@ -9,7 +9,11 @@ type Stats = {
   entangled?: number;
 };
 
-type Props = { stats: Stats };
+type Props = {
+  stats: Stats;
+  /** Slice 15 — smaller blurred overlay inside the constellation canvas. */
+  variant?: "default" | "constellation";
+};
 
 const row = "stat-row flex justify-between gap-4 font-mono text-xs leading-tight last:mb-0";
 
@@ -17,10 +21,14 @@ function Label({ children }: { children: ReactNode }) {
   return <span className="text-omnix-text-muted">{children}</span>;
 }
 
-export function StatsPanel({ stats }: Props) {
+export function StatsPanel({ stats, variant = "default" }: Props) {
+  const shell =
+    variant === "constellation"
+      ? "omnix-glass pointer-events-auto min-w-[180px] rounded-lg px-3 py-2.5 backdrop-blur-md"
+      : "omnix-glass pointer-events-auto min-w-[200px] rounded-xl px-4 py-3.5";
   return (
-    <div className="omnix-glass pointer-events-auto min-w-[200px] rounded-xl px-4 py-3.5">
-      <div className="mb-2.5 font-display text-[11px] font-bold uppercase tracking-[0.25em] text-[#a78bfa]">
+    <div className={shell}>
+      <div className="mb-2 font-display text-[10px] font-bold uppercase tracking-[0.25em] text-[#a78bfa]">
         graph
       </div>
       <div className="space-y-1">

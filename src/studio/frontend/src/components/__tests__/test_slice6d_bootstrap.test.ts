@@ -70,6 +70,9 @@ vi.mock("@/components/Graph/GraphCanvas", () => ({
   ) {
     React.useImperativeHandle(ref, () => ({
       ingestMessage: vi.fn(),
+      canGoBack: () => false,
+      goBack: vi.fn(),
+      applyScopeNavigation: vi.fn(),
     }));
     return React.createElement("div", { "data-testid": "graph-canvas" });
   }),

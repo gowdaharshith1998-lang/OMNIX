@@ -23,7 +23,7 @@ export function OmnixDomStubs() {
 
       <div id="ui-fade">
         <div id="fps-counter" />
-        <div id="breadcrumb" />
+        <div id="omnix-engine-breadcrumb-host" />
         <div id="tooltip">
           <div className="tooltip-name" />
           <div className="tooltip-type" />

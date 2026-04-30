@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { GraphEdge, GraphNode } from "@/types/drilldown";
 import { detectXRayIssues, type XRayIssue } from "@/lib/xray_diagnostics";
 import { computeXRayHealth, type XRayHealth } from "@/lib/xray_health";
+import type { ScopeRecord } from "@/store/scopeRegistry";
 
 type Stats = {
   files: number;
@@ -17,6 +18,8 @@ type Props = {
   graphNodes: Map<string, GraphNode>;
   graphEdges: GraphEdge[];
   stats: Stats;
+  /** Active constellation scope (slice 15); drives summary header when no leaf is selected. */
+  scopeRecord?: ScopeRecord | null;
   onSuggestedAction: () => void;
 };
 
@@ -239,15 +242,36 @@ export function XRayTab({
   graphNodes,
   graphEdges,
   stats,
+  scopeRecord,
   onSuggestedAction,
 }: Props) {
   const nodes = useMemo(() => Array.from(graphNodes.values()), [graphNodes]);
-  const model = useMemo(
-    () => buildModel(selectedNode, nodes, graphEdges, stats),
-    [graphEdges, nodes, selectedNode, stats]
-  );
+  const modelNodes = useMemo(() => {
+    if (selectedNode) return nodes;
+    const pre = scopeRecord?.pathPrefix?.replace(/\\/g, "/") ?? "";
+    if (!pre) return nodes;
+    return nodes.filter((n) => {
+      const fp = (n.file_path ?? "").replace(/\\/g, "/");
+      return fp === pre || fp.startsWith(`${pre}/`);
+    });
+  }, [nodes, scopeRecord?.pathPrefix, selectedNode]);
+
+  const model = useMemo(() => {
+    const m = buildModel(selectedNode, modelNodes, graphEdges, stats);
+    if (!selectedNode && scopeRecord && scopeRecord.id !== "repo") {
+      return {
+        ...m,
+        title: scopeRecord.label,
+        subtitle: scopeRecord.pathPrefix ?? "Scope intelligence",
+      };
+    }
+    return m;
+  }, [graphEdges, modelNodes, scopeRecord, selectedNode, stats]);
+
   const branch = !selectedNode
-    ? "repo"
+    ? scopeRecord && scopeRecord.id !== "repo"
+      ? "scoped_repo"
+      : "repo"
     : isSymbol(selectedNode)
       ? "symbol"
       : "module";
@@ -275,6 +299,15 @@ export function XRayTab({
           <Tiles model={model} />
           <Files model={model} />
           <Connections model={model} />
+          <Issues issues={model.issues} onSuggestedAction={onSuggestedAction} />
+          <Health model={model} />
+          <AiAgentZone />
+        </XRayShell>
+      );
+    case "scoped_repo":
+      return (
+        <XRayShell model={model} eyebrow={scopeRecord?.badge ?? "MODULE"}>
+          <Tiles model={model} repoStats={stats} />
           <Issues issues={model.issues} onSuggestedAction={onSuggestedAction} />
           <Health model={model} />
           <AiAgentZone />

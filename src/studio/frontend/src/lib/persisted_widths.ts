@@ -3,9 +3,9 @@ import type { LeftRailDrawer } from "@/components/LeftRail";
 export const LEFT_DRAWER_MIN = 240;
 export const LEFT_DRAWER_MAX = 480;
 export const LEFT_DRAWER_DEFAULT = 300;
-export const RIGHT_PANEL_MIN = 360;
-export const RIGHT_PANEL_MAX = 640;
-export const RIGHT_PANEL_DEFAULT = 440;
+export const RIGHT_PANEL_MIN = 280;
+export const RIGHT_PANEL_MAX = 360;
+export const RIGHT_PANEL_DEFAULT = 320;
 
 export type ShellLayoutState = {
   leftDrawer: {
