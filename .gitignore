@@ -46,3 +46,13 @@ htmlcov/
 graph.gexf
 __pycache__/
 *.pyc
+# slice 17 cleanup target — orphan SQLite databases at repo root
+/omnix.db
+/omnix.db-shm
+/omnix.db-wal
+/0
+/0-shm
+/0-wal
+/1
+/1-shm
+/1-wal
