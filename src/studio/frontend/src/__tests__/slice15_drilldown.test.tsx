@@ -67,6 +67,7 @@ vi.mock("@/lib/t1Mode", () => ({
 vi.mock("../components/Graph/GraphCanvas", () => ({
   GraphCanvas: React.forwardRef(function MockGraphCanvas(
     props: {
+      navigationSpec?: { kind: string; path?: string };
       onViewerScope?: (p: {
         kind: "repo" | "directory" | "file";
         path?: string;
@@ -80,6 +81,7 @@ vi.mock("../components/Graph/GraphCanvas", () => ({
       ingestMessage: (m: unknown) => void;
       canGoBack: () => boolean;
       goBack: () => void;
+      simulateRenderError?: () => void;
     }>
   ) {
     React.useImperativeHandle(ref, () => ({
@@ -87,6 +89,7 @@ vi.mock("../components/Graph/GraphCanvas", () => ({
       canGoBack: () => false,
       goBack: vi.fn(),
       applyScopeNavigation: vi.fn(),
+      simulateRenderError: vi.fn(),
     }));
     React.useEffect(() => {
       props.onT1GraphNodes?.(FIXTURE_NODES);
@@ -170,9 +173,9 @@ describe("slice15 drill-down integration", () => {
       (galaxy as HTMLButtonElement).click();
     });
     expect(getStudioScopeSnapshot().currentScope).toBe("av2");
-    const eyebrow = container.querySelector(".xray-eyebrow");
-    const title = container.querySelector(".xray-header h2");
-    expect(eyebrow?.textContent).toContain("MODULE");
+    const badge = container.querySelector('[data-testid="xray-badge"]');
+    const title = container.querySelector('[data-testid="xray-name"]');
+    expect(badge?.textContent).toContain("MODULE");
     expect(title?.textContent).toContain("AXIOM-V2");
     await act(async () => {
       root.unmount();
@@ -206,10 +209,10 @@ describe("slice15 drill-down integration", () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>("[data-testid=\"pick-fn\"]")!.click();
     });
-    const eyebrow = container.querySelector(".xray-eyebrow");
-    expect(eyebrow?.textContent?.toUpperCase()).toContain("FUNCTION");
+    const badge = container.querySelector('[data-testid="xray-badge"]');
+    expect(badge?.textContent?.toUpperCase()).toContain("FUNCTION");
     await act(async () => {
-      const tabs = [...container.querySelectorAll('[role="tab"]')];
+      const tabs = [...container.querySelectorAll(".xray-itabs [role='tab']")];
       const codeBtn = tabs.find((t) => t.textContent?.trim().toUpperCase() === "CODE");
       expect(codeBtn).toBeTruthy();
       (codeBtn as HTMLButtonElement).click();
@@ -218,10 +221,8 @@ describe("slice15 drill-down integration", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    const ta = container.querySelector(
-      'textarea[aria-label="mock monaco"]'
-    ) as HTMLTextAreaElement | null;
-    expect(ta?.value ?? "").toMatch(/verify_hybrid|def /);
+    const body = container.querySelector('[data-testid="xray-code-body"]');
+    expect(body?.textContent ?? "").toMatch(/verify_hybrid|def /);
     await act(async () => {
       root.unmount();
     });

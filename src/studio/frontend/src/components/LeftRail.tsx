@@ -147,7 +147,7 @@ export function LeftRail({
 
   return (
     <>
-      <nav className="omnix-left-rail" aria-label="OMNIX activity">
+      <nav className="omnix-left-rail" aria-label="OMNIX activity" data-testid="left-rail">
         {items.map((item) => {
           const Icon = item.icon;
           const selected = active === item.id;

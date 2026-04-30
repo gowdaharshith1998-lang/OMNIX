@@ -32,6 +32,7 @@ export function BottomToolbar({ onExportJson, onDarkMatter, onTimeline }: Props)
     <div
       className="omnix-glass flex flex-wrap items-center justify-center gap-3 border border-omnix-accent-indigo/20 px-4 py-2.5 text-xs"
       id="bottom-bar"
+      data-testid="omnix-status-bar"
     >
       <span
         id="omnix-version"

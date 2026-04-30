@@ -73,6 +73,7 @@ vi.mock("@/components/Graph/GraphCanvas", () => ({
       canGoBack: () => false,
       goBack: vi.fn(),
       applyScopeNavigation: vi.fn(),
+      simulateRenderError: vi.fn(),
     }));
     return React.createElement("div", { "data-testid": "graph-canvas" });
   }),

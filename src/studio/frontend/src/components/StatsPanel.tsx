@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useScope } from "@/store/studioScopeStore";
 
 type Stats = {
   files: number;
@@ -22,6 +23,7 @@ function Label({ children }: { children: ReactNode }) {
 }
 
 export function StatsPanel({ stats, variant = "default" }: Props) {
+  useScope();
   const shell =
     variant === "constellation"
       ? "omnix-glass pointer-events-auto min-w-[180px] rounded-lg px-3 py-2.5 backdrop-blur-md"
@@ -34,7 +36,11 @@ export function StatsPanel({ stats, variant = "default" }: Props) {
       <div className="space-y-1">
         <div className={row}>
           <Label>Files</Label>
-          <span className="text-right" style={{ color: "var(--omnix-stat-mono)" }}>
+          <span
+            data-testid="stats-files"
+            className="text-right"
+            style={{ color: "var(--omnix-stat-mono)" }}
+          >
             {stats.files}
           </span>
         </div>

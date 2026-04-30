@@ -46,6 +46,7 @@ vi.mock("@/lib/ws", () => ({
 vi.mock("@/components/Graph/GraphCanvas", () => ({
   GraphCanvas: React.forwardRef(function MockGraphCanvas(
     props: {
+      navigationSpec?: { kind: string };
       onFunctionNodeClick: (nodeId: string) => void;
       onNavigationStateChange: (canGoBack: boolean) => void;
     },
@@ -53,6 +54,7 @@ vi.mock("@/components/Graph/GraphCanvas", () => ({
       ingestMessage: (msg: unknown) => void;
       canGoBack: () => boolean;
       goBack: () => void;
+      simulateRenderError?: () => void;
     }>
   ) {
     React.useImperativeHandle(ref, () => ({
@@ -64,6 +66,7 @@ vi.mock("@/components/Graph/GraphCanvas", () => ({
         props.onNavigationStateChange(false);
       },
       applyScopeNavigation: vi.fn(),
+      simulateRenderError: vi.fn(),
     }));
     return React.createElement(
       React.Fragment,
@@ -92,6 +95,14 @@ vi.mock("@/lib/api", () => ({
   listFiles: vi.fn(() => Promise.resolve([])),
   createFile: vi.fn(),
   listReceipts: vi.fn(() => Promise.resolve([])),
+  getFile: vi.fn(() =>
+    Promise.resolve({
+      path: "services/governance.py",
+      content: "def govern():\n  pass\n",
+      last_modified: 1,
+      language: "python",
+    })
+  ),
   getFileTree: vi.fn(() => Promise.resolve({ name: "proj", type: "dir", children: [] })),
   searchWorkspace: vi.fn(() => Promise.resolve([])),
 }));
@@ -100,8 +111,12 @@ vi.mock("@/lib/t1Mode", () => ({
   isT1Mode: vi.fn(() => false),
 }));
 
+import { CANONICAL_SCOPES, scopeRecordsToMaps } from "@/store/scopeRegistry";
+import { resetStudioScopeForTests, setSelectedNode } from "@/store/studioScopeStore";
 import { Workspace } from "../Workspace";
 import { XRayTab } from "../XRayTab";
+
+const scopeById = scopeRecordsToMaps(CANONICAL_SCOPES).byId;
 
 const roots: Root[] = [];
 
@@ -149,92 +164,146 @@ afterEach(() => {
   wsHarness.reset();
   graphNavHarness.reset();
   vi.clearAllMocks();
+  resetStudioScopeForTests();
 });
 
 describe("XRayTab", () => {
   it("renders repo-root intelligence with no selection", () => {
+    resetStudioScopeForTests();
     const { container } = render(
-      <XRayTab selectedNode={null} graphNodes={nodes} graphEdges={edges} stats={stats} onSuggestedAction={vi.fn()} />
+      <XRayTab
+        workspaceId="ws"
+        graphNodes={nodes}
+        graphEdges={edges}
+        stats={stats}
+        scopeById={scopeById}
+        projectPath="/tmp/proj"
+        onSuggestedAction={vi.fn()}
+      />
     );
     expect(container.textContent).toContain("Repository");
-    expect(container.textContent).toContain("Files");
-    expect(container.textContent).toContain("HEALTH");
+    expect(container.textContent).toContain("Scope metrics");
+    expect(container.textContent?.includes("HEALTH")).toBe(false);
   });
 
   it("renders directory/module intelligence", () => {
+    resetStudioScopeForTests();
+    setSelectedNode("dir");
     const { container } = render(
-      <XRayTab selectedNode={nodes.get("dir")!} graphNodes={nodes} graphEdges={edges} stats={stats} onSuggestedAction={vi.fn()} />
+      <XRayTab
+        workspaceId="ws"
+        graphNodes={nodes}
+        graphEdges={edges}
+        stats={stats}
+        scopeById={scopeById}
+        projectPath="/tmp/proj"
+        onSuggestedAction={vi.fn()}
+      />
     );
     expect(container.textContent).toContain("services");
-    expect(container.textContent).toContain("FILES (by connections)");
-    expect(container.textContent).toContain("CONNECTIONS");
+    expect(container.textContent).toContain("Connections");
   });
 
   it("renders symbol intelligence", () => {
+    resetStudioScopeForTests();
+    setSelectedNode("n1");
     const { container } = render(
-      <XRayTab selectedNode={nodes.get("n1")!} graphNodes={nodes} graphEdges={edges} stats={stats} onSuggestedAction={vi.fn()} />
+      <XRayTab
+        workspaceId="ws"
+        graphNodes={nodes}
+        graphEdges={edges}
+        stats={stats}
+        scopeById={scopeById}
+        projectPath="/tmp/proj"
+        onSuggestedAction={vi.fn()}
+      />
     );
-    expect(container.textContent).toContain("SIGNATURE");
+    expect(container.textContent).toContain("Signature");
     expect(container.textContent).toContain("govern");
     expect(container.textContent).toContain("CALLS");
   });
 
-  it("fires no-op suggested action affordance", () => {
+  it("fires no-op suggested action affordance from diagnostics tab", () => {
     const onAction = vi.fn();
-    const noisyEdges = Array.from({ length: 25 }, (_, i): GraphEdge => ({
-      id: `e${i}`,
-      source_id: "n2",
-      target_id: "n1",
-      relationship: "CALLS",
-    }));
-    const { container } = render(
-      <XRayTab selectedNode={nodes.get("n1")!} graphNodes={nodes} graphEdges={noisyEdges} stats={stats} onSuggestedAction={onAction} />
-    );
-    act(() => container.querySelector(".xray-issue button")?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
-    expect(onAction).toHaveBeenCalled();
-  });
-
-  it("renders healthy empty diagnostics state", () => {
-    const { container } = render(
-      <XRayTab selectedNode={null} graphNodes={new Map()} graphEdges={[]} stats={{ ...stats, files: 0, functions: 0, edges: 0 }} onSuggestedAction={vi.fn()} />
-    );
-    expect(container.textContent).toContain("No issues detected");
-  });
-
-  it("ranks files by connection count", () => {
-    const { container } = render(
-      <XRayTab selectedNode={nodes.get("dir")!} graphNodes={nodes} graphEdges={edges} stats={stats} onSuggestedAction={vi.fn()} />
-    );
-    expect(container.textContent).toContain("governance.py");
-    expect(container.textContent).toContain("+2");
-  });
-
-  it("renders health labels", () => {
-    const { container } = render(
-      <XRayTab selectedNode={nodes.get("dir")!} graphNodes={nodes} graphEdges={edges} stats={stats} onSuggestedAction={vi.fn()} />
-    );
-    expect(container.textContent).toContain("Complexity");
-    expect(container.textContent).toContain("Connectivity");
-    expect(container.textContent).toContain("Entanglement risk");
-  });
-
-  it("renders AI unavailable state", () => {
-    const { container } = render(
-      <XRayTab selectedNode={nodes.get("n1")!} graphNodes={nodes} graphEdges={edges} stats={stats} onSuggestedAction={vi.fn()} />
-    );
-    expect(container.textContent).toContain("AI Agent unavailable");
-  });
-
-  it("surfaces entanglement diagnostics", () => {
     const manyEntangled = Array.from({ length: 9 }, (_, i): GraphEdge => ({
       id: `ent-${i}`,
       source_id: "n1",
       target_id: "n2",
       relationship: "ENTANGLED",
     }));
+    resetStudioScopeForTests();
+    setSelectedNode("dir");
     const { container } = render(
-      <XRayTab selectedNode={nodes.get("dir")!} graphNodes={nodes} graphEdges={manyEntangled} stats={stats} onSuggestedAction={vi.fn()} />
+      <XRayTab
+        workspaceId="ws"
+        graphNodes={nodes}
+        graphEdges={manyEntangled}
+        stats={stats}
+        scopeById={scopeById}
+        projectPath="/tmp/proj"
+        onSuggestedAction={onAction}
+      />
     );
+    act(() => {
+      const diag = [...container.querySelectorAll(".xray-itabs [role='tab']")].find(
+        (b) => b.textContent?.trim() === "Diagnostics"
+      );
+      diag?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    act(() =>
+      container.querySelector(".xray-issue button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    );
+    expect(onAction).toHaveBeenCalled();
+  });
+
+  it("renders healthy empty diagnostics state", () => {
+    resetStudioScopeForTests();
+    const { container } = render(
+      <XRayTab
+        workspaceId="ws"
+        graphNodes={new Map()}
+        graphEdges={[]}
+        stats={{ ...stats, files: 0, functions: 0, edges: 0 }}
+        scopeById={scopeById}
+        projectPath="/tmp/proj"
+        onSuggestedAction={vi.fn()}
+      />
+    );
+    act(() => {
+      const diag = [...container.querySelectorAll(".xray-itabs [role='tab']")].find(
+        (b) => b.textContent?.trim() === "Diagnostics"
+      );
+      diag?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(container.textContent).toContain("No issues detected");
+  });
+
+  it("surfaces entanglement diagnostics on the Diagnostics tab", () => {
+    const manyEntangled = Array.from({ length: 9 }, (_, i): GraphEdge => ({
+      id: `ent-${i}`,
+      source_id: "n1",
+      target_id: "n2",
+      relationship: "ENTANGLED",
+    }));
+    resetStudioScopeForTests();
+    setSelectedNode("dir");
+    const { container } = render(
+      <XRayTab
+        workspaceId="ws"
+        graphNodes={nodes}
+        graphEdges={manyEntangled}
+        stats={stats}
+        scopeById={scopeById}
+        projectPath="/tmp/proj"
+        onSuggestedAction={vi.fn()}
+      />
+    );
+    act(() => {
+      const diag = [...container.querySelectorAll(".xray-itabs [role='tab']")].find(
+        (b) => b.textContent?.trim() === "Diagnostics"
+      );
+      diag?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
     expect(container.textContent).toContain("extreme coupling");
   });
 

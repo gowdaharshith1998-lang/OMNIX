@@ -10,6 +10,7 @@ export function FindBar({ value, onChange, onClear, placeholder }: Props) {
     <div
       className="omnix-glass flex w-full max-w-2xl items-center gap-2.5 rounded-full border border-omnix-accent-indigo/20 px-3 py-1.5 shadow-omnix-glow"
       id="search-panel"
+      data-testid="find-bar"
     >
       <span
         className="shrink-0 font-display text-[10px] font-bold tracking-[0.2em] text-omnix-accent-indigo"

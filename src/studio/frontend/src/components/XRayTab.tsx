@@ -1,8 +1,13 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { GraphEdge, GraphNode } from "@/types/drilldown";
-import { detectXRayIssues, type XRayIssue } from "@/lib/xray_diagnostics";
-import { computeXRayHealth, type XRayHealth } from "@/lib/xray_health";
+import { detectXRayIssues } from "@/lib/xray_diagnostics";
 import type { ScopeRecord } from "@/store/scopeRegistry";
+import { useScope } from "@/store/studioScopeStore";
+import { XRayContent } from "./XRayContent";
+import { XRayHead } from "./XRayHead";
+import type { XRayInnerTab } from "./XRayItabs";
+import { XRayItabs } from "./XRayItabs";
+import { XRayMetrics } from "./XRayMetrics";
 
 type Stats = {
   files: number;
@@ -14,12 +19,12 @@ type Stats = {
 };
 
 type Props = {
-  selectedNode: GraphNode | null;
+  workspaceId: string;
   graphNodes: Map<string, GraphNode>;
   graphEdges: GraphEdge[];
   stats: Stats;
-  /** Active constellation scope (slice 15); drives summary header when no leaf is selected. */
-  scopeRecord?: ScopeRecord | null;
+  scopeById: Map<string, ScopeRecord>;
+  projectPath: string;
   onSuggestedAction: () => void;
 };
 
@@ -31,8 +36,6 @@ type ConnectionRow = {
 };
 
 type XRayModel = {
-  title: string;
-  subtitle: string;
   files: Array<{ name: string; path: string; connections: number }>;
   scopedNodes: GraphNode[];
   scopedEdges: GraphEdge[];
@@ -41,8 +44,7 @@ type XRayModel = {
   outgoing: number;
   dark: number;
   entangled: number;
-  health: XRayHealth;
-  issues: XRayIssue[];
+  issues: ReturnType<typeof detectXRayIssues>;
 };
 
 function basename(path: string) {
@@ -76,7 +78,7 @@ function buildModel(
   selectedNode: GraphNode | null,
   nodes: GraphNode[],
   edges: GraphEdge[],
-  stats: Stats
+  _stats: Stats
 ): XRayModel {
   const scopePath = selectedNode?.file_path
     ? isDirectoryLike(selectedNode)
@@ -155,8 +157,6 @@ function buildModel(
   });
 
   return {
-    title: selectedNode ? selectedNode.name : "Repository",
-    subtitle: selectedNode?.file_path ?? "Whole graph intelligence",
     files,
     scopedNodes,
     scopedEdges,
@@ -164,88 +164,72 @@ function buildModel(
     incoming,
     outgoing,
     dark,
-    entangled: selectedNode ? entangled : stats.entangled,
-    health: computeXRayHealth({ scopedNodes, scopedEdges, entangledCount: entangled }),
+    entangled: selectedNode ? entangled : _stats.entangled,
     issues,
   };
 }
 
-function StatTile({ label, value, tone }: { label: string; value: number; tone: string }) {
-  return (
-    <div className={`xray-stat ${tone}`}>
-      <div>{value}</div>
-      <span>{label}</span>
-    </div>
-  );
-}
-
-function HealthBar({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="xray-health-row">
-      <div>
-        <span>{label}</span>
-        <b>{value}%</b>
-      </div>
-      <div className="xray-health-track">
-        <i style={{ width: `${value}%` }} />
-      </div>
-    </div>
-  );
-}
-
-function Issues({
-  issues,
-  onSuggestedAction,
-}: {
-  issues: XRayIssue[];
-  onSuggestedAction: () => void;
-}) {
-  if (issues.length === 0) {
-    return (
-      <section className="xray-section">
-        <h3>DIAGNOSTICS</h3>
-        <div className="xray-ok">No issues detected - this scope looks healthy.</div>
-      </section>
-    );
+function resolveHeader(
+  selectedNode: GraphNode | null,
+  scopeRecord: ScopeRecord | null,
+  projectPath: string
+): { badge: string; name: string; pathLine: string } {
+  if (selectedNode && isSymbol(selectedNode)) {
+    const badge =
+      selectedNode.type === "method" ? "FUNCTION" : selectedNode.type.toUpperCase();
+    return {
+      badge,
+      name: selectedNode.name,
+      pathLine: `${selectedNode.file_path}:${selectedNode.line_start}`,
+    };
   }
-  return (
-    <section className="xray-section">
-      <h3>DIAGNOSTICS ({issues.length} issues)</h3>
-      <div className="xray-issues">
-        {issues.map((issue) => (
-          <article key={`${issue.title}:${issue.action}`} className={`xray-issue ${issue.severity}`}>
-            <strong>{issue.icon} {issue.title}</strong>
-            <p>{issue.detail}</p>
-            <button type="button" onClick={onSuggestedAction}>
-              {issue.action}
-            </button>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function AiAgentZone() {
-  return (
-    <section className="xray-section xray-ai-zone">
-      <h3>AI AGENT</h3>
-      <div className="xray-ai-unavailable">
-        AI Agent unavailable - set OMNIX_AI_KEY or install Ollama.
-      </div>
-    </section>
-  );
+  if (selectedNode?.type === "file") {
+    return {
+      badge: "FILE",
+      name: selectedNode.name || basename(selectedNode.file_path ?? ""),
+      pathLine: selectedNode.file_path ?? "",
+    };
+  }
+  if (selectedNode && isDirectoryLike(selectedNode)) {
+    return {
+      badge: "MODULE",
+      name: selectedNode.name,
+      pathLine: selectedNode.file_path ?? "",
+    };
+  }
+  if (scopeRecord && scopeRecord.id !== "repo") {
+    return {
+      badge: scopeRecord.badge,
+      name: scopeRecord.label,
+      pathLine: scopeRecord.pathPrefix ?? "",
+    };
+  }
+  return {
+    badge: "REPO",
+    name: "Repository",
+    pathLine: projectPath,
+  };
 }
 
 export function XRayTab({
-  selectedNode,
+  workspaceId,
   graphNodes,
   graphEdges,
   stats,
-  scopeRecord,
+  scopeById,
+  projectPath,
   onSuggestedAction,
 }: Props) {
+  const { currentScope, selectedNodeId } = useScope();
+  const [innerTab, setInnerTab] = useState<XRayInnerTab>("code");
+
+  const scopeRecord = scopeById.get(currentScope) ?? null;
+  const selectedNode = selectedNodeId
+    ? graphNodes.get(selectedNodeId) ?? null
+    : null;
+
   const nodes = useMemo(() => Array.from(graphNodes.values()), [graphNodes]);
+
   const modelNodes = useMemo(() => {
     if (selectedNode) return nodes;
     const pre = scopeRecord?.pathPrefix?.replace(/\\/g, "/") ?? "";
@@ -256,156 +240,38 @@ export function XRayTab({
     });
   }, [nodes, scopeRecord?.pathPrefix, selectedNode]);
 
-  const model = useMemo(() => {
-    const m = buildModel(selectedNode, modelNodes, graphEdges, stats);
-    if (!selectedNode && scopeRecord && scopeRecord.id !== "repo") {
-      return {
-        ...m,
-        title: scopeRecord.label,
-        subtitle: scopeRecord.pathPrefix ?? "Scope intelligence",
-      };
-    }
-    return m;
-  }, [graphEdges, modelNodes, scopeRecord, selectedNode, stats]);
+  const model = useMemo(
+    () => buildModel(selectedNode, modelNodes, graphEdges, stats),
+    [graphEdges, modelNodes, selectedNode, stats]
+  );
 
-  const branch = !selectedNode
-    ? scopeRecord && scopeRecord.id !== "repo"
-      ? "scoped_repo"
-      : "repo"
-    : isSymbol(selectedNode)
-      ? "symbol"
-      : "module";
+  const header = resolveHeader(selectedNode, scopeRecord, projectPath);
 
-  switch (branch) {
-    case "symbol":
-      return (
-        <XRayShell model={model} eyebrow={selectedNode?.type.toUpperCase() ?? "SYMBOL"}>
-          <section className="xray-section">
-            <h3>SIGNATURE</h3>
-            <div className="xray-signature">
-              {selectedNode?.name}
-              <span>{selectedNode?.file_path}:{selectedNode?.line_start}</span>
-            </div>
-          </section>
-          <Connections model={model} />
-          <Issues issues={model.issues} onSuggestedAction={onSuggestedAction} />
-          <Health model={model} />
-          <AiAgentZone />
-        </XRayShell>
-      );
-    case "module":
-      return (
-        <XRayShell model={model} eyebrow="MODULE">
-          <Tiles model={model} />
-          <Files model={model} />
-          <Connections model={model} />
-          <Issues issues={model.issues} onSuggestedAction={onSuggestedAction} />
-          <Health model={model} />
-          <AiAgentZone />
-        </XRayShell>
-      );
-    case "scoped_repo":
-      return (
-        <XRayShell model={model} eyebrow={scopeRecord?.badge ?? "MODULE"}>
-          <Tiles model={model} repoStats={stats} />
-          <Issues issues={model.issues} onSuggestedAction={onSuggestedAction} />
-          <Health model={model} />
-          <AiAgentZone />
-        </XRayShell>
-      );
-    case "repo":
-    default:
-      return (
-        <XRayShell model={model} eyebrow="REPO">
-          <Tiles model={model} repoStats={stats} />
-          <Issues issues={model.issues} onSuggestedAction={onSuggestedAction} />
-          <Health model={model} />
-          <AiAgentZone />
-        </XRayShell>
-      );
-  }
-}
+  const scopeModel = useMemo(
+    () => ({
+      connections: model.connections,
+      incoming: model.incoming,
+      outgoing: model.outgoing,
+      dark: model.dark,
+    }),
+    [model.connections, model.dark, model.incoming, model.outgoing]
+  );
 
-function XRayShell({
-  model,
-  eyebrow,
-  children,
-}: {
-  model: XRayModel;
-  eyebrow: string;
-  children: React.ReactNode;
-}) {
   return (
-    <div className="xray-tab">
-      <header className="xray-header">
-        <div className="xray-label">X-RAY</div>
-        <div className="xray-eyebrow">{eyebrow}</div>
-        <h2>{model.title}</h2>
-        <p>{model.subtitle}</p>
-      </header>
-      {children}
+    <div className="xray-tab flex min-h-0 flex-1 flex-col gap-1 overflow-hidden">
+      <XRayHead badge={header.badge} name={header.name} pathLine={header.pathLine} />
+      <XRayItabs active={innerTab} onSelect={setInnerTab} />
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        <XRayContent
+          active={innerTab}
+          workspaceId={workspaceId}
+          selectedNode={selectedNode}
+          scopeModel={scopeModel}
+          issues={model.issues}
+          onSuggestedAction={onSuggestedAction}
+        />
+      </div>
+      <XRayMetrics scopedNodes={model.scopedNodes} scopedEdges={model.scopedEdges} />
     </div>
-  );
-}
-
-function Tiles({ model, repoStats }: { model: XRayModel; repoStats?: Stats }) {
-  const fileCount = repoStats?.files ?? model.files.length;
-  const functionCount =
-    repoStats?.functions ?? model.scopedNodes.filter((node) => isSymbol(node)).length;
-  const connectionCount = repoStats?.edges ?? model.scopedEdges.length;
-  return (
-    <section className="xray-tiles">
-      <StatTile label="Files" value={fileCount} tone="purple" />
-      <StatTile label="Functions" value={functionCount} tone="teal" />
-      <StatTile label="Connections" value={connectionCount} tone="amber" />
-    </section>
-  );
-}
-
-function Files({ model }: { model: XRayModel }) {
-  return (
-    <section className="xray-section">
-      <h3>FILES (by connections)</h3>
-      <div className="xray-list">
-        {model.files.slice(0, 12).map((file) => (
-          <div key={file.path} className="xray-file-row">
-            <span>{file.name}</span>
-            <b>+{file.connections}</b>
-          </div>
-        ))}
-        {model.files.length === 0 && <div className="xray-empty">No files in scope.</div>}
-      </div>
-    </section>
-  );
-}
-
-function Connections({ model }: { model: XRayModel }) {
-  return (
-    <section className="xray-section">
-      <h3>CONNECTIONS</h3>
-      <div className="xray-connection-summary">
-        {model.outgoing} outgoing · {model.incoming} incoming · {model.dark} dark
-      </div>
-      <div className="xray-list">
-        {model.connections.map((conn, idx) => (
-          <div key={`${conn.name}:${conn.type}:${idx}`} className="xray-connection-row">
-            <span>{conn.direction === "out" ? "->" : "<-"} {conn.name}</span>
-            <b className={`rel-${conn.type.toLowerCase()}`}>{conn.type}</b>
-          </div>
-        ))}
-        {model.connections.length === 0 && <div className="xray-empty">No external connections.</div>}
-      </div>
-    </section>
-  );
-}
-
-function Health({ model }: { model: XRayModel }) {
-  return (
-    <section className="xray-section">
-      <h3>HEALTH</h3>
-      <HealthBar label="Complexity" value={model.health.complexity} />
-      <HealthBar label="Connectivity" value={model.health.connectivity} />
-      <HealthBar label="Entanglement risk" value={model.health.entanglementRisk} />
-    </section>
   );
 }

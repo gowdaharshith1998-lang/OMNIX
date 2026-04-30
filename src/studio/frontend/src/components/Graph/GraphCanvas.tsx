@@ -3,6 +3,7 @@ import {
   useEffect,
   useImperativeHandle,
   useRef,
+  useState,
 } from "react";
 import { OmnixDomStubs } from "./OmnixDomStubs";
 import { recordFromGraphPayload } from "@/lib/graphNode";
@@ -13,16 +14,20 @@ import {
   type ScopeNavigationSpec,
   type StudioGraphOptions,
 } from "./StudioGraph";
+import { useScope } from "@/store/studioScopeStore";
 
 export type GraphCanvasHandle = {
   ingestMessage: (msg: unknown) => void;
   canGoBack: () => boolean;
   goBack: () => void;
   applyScopeNavigation: (spec: ScopeNavigationSpec) => void;
+  /** Dev / smoke: triggers constellation error boundary on next render. */
+  simulateRenderError?: () => void;
 };
 
 type Props = {
   drillDownNodeId: string | null;
+  navigationSpec: ScopeNavigationSpec;
   onFunctionNodeClick: (nodeId: string) => void;
   onFileOrDirClick: (filePath: string) => void;
   onDeselect: () => void;
@@ -42,6 +47,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
   function GraphCanvas(
     {
       drillDownNodeId: _drillDownNodeId,
+      navigationSpec,
       onFunctionNodeClick,
       onFileOrDirClick,
       onDeselect,
@@ -53,6 +59,10 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
     ref
   ) {
     void _drillDownNodeId; // T2+ highlight
+    const { currentScope } = useScope();
+    const [navApplyError, setNavApplyError] = useState<Error | null>(null);
+    if (navApplyError) throw navApplyError;
+
     const mountRef = useRef<HTMLDivElement>(null);
     const graphRef = useRef<StudioGraph | null>(null);
     const optionsRef = useRef<StudioGraphOptions>({
@@ -99,6 +109,9 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
       },
       applyScopeNavigation: (spec: ScopeNavigationSpec) => {
         graphRef.current?.applyScopeNavigation(spec);
+      },
+      simulateRenderError: () => {
+        setNavApplyError(new Error("simulated constellation failure"));
       },
     }));
 
@@ -185,6 +198,17 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
         graphRef.current = null;
       };
     }, []);
+
+    useEffect(() => {
+      const inst = graphRef.current;
+      if (!inst) return;
+      try {
+        inst.applyScopeNavigation(navigationSpec);
+      } catch (e: unknown) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        setNavApplyError(err);
+      }
+    }, [navigationSpec, currentScope]);
 
     return (
       <>

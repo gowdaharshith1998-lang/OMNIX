@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { GraphCanvas, type GraphCanvasHandle } from "./Graph/GraphCanvas";
+import { ConstellationBoundary } from "./ConstellationBoundary";
 import {
   createFile,
   listFiles,
@@ -178,18 +179,13 @@ export function Workspace({
     useState<ScopeRecord[]>(CANONICAL_SCOPES);
 
   const { currentScope, selectedNodeId } = useScope();
-  const skipScopeApplyRef = useRef(false);
+  const [constellationMountEpoch, setConstellationMountEpoch] = useState(0);
   const scopeMaps = useMemo(
     () => scopeRecordsToMaps(scopeRecords),
     [scopeRecords]
   );
   const scopeById = scopeMaps.byId;
   const pathToScopeId = scopeMaps.pathToId;
-
-  const selectedXRayNode = useMemo(() => {
-    if (!selectedNodeId) return null;
-    return graphNodes.get(selectedNodeId) ?? null;
-  }, [graphNodes, selectedNodeId]);
 
   const nodesList = useMemo(
     () => Array.from(graphNodes.values()),
@@ -220,7 +216,10 @@ export function Workspace({
     scopeById,
   ]);
 
-  const activeScopeRecord = scopeById.get(currentScope) ?? null;
+  const navigationSpec = useMemo(
+    () => navigationSpecForScopeRecord(currentScope, scopeById),
+    [currentScope, scopeById]
+  );
 
   const graphNodesRef = useRef(graphNodes);
   const graphRef = useRef<GraphCanvasHandle | null>(null);
@@ -314,6 +313,21 @@ export function Workspace({
   }, [showToastStable]);
 
   useEffect(() => {
+    const allow =
+      import.meta.env.DEV || import.meta.env.VITE_OMNIX_STUDIO_DEBUG === "1";
+    if (!allow) return;
+    const w = window as unknown as {
+      studioGraph?: { simulateRenderError?: () => void };
+    };
+    w.studioGraph = {
+      simulateRenderError: () => graphRef.current?.simulateRenderError?.(),
+    };
+    return () => {
+      delete w.studioGraph;
+    };
+  }, []);
+
+  useEffect(() => {
     if (graphNodes.size === 0) {
       setScopeRecords(CANONICAL_SCOPES);
       setValidScopeIds(CANONICAL_SCOPES.map((r) => r.id));
@@ -330,7 +344,6 @@ export function Workspace({
   const onViewerScope = useCallback(
     (payload: ViewerScopePayload) => {
       const id = scopeIdFromViewerPayload(payload, pathToScopeId);
-      skipScopeApplyRef.current = true;
       syncScopeFromViewer(id, {
         pathPrefixForScope: (sid) => scopeById.get(sid)?.pathPrefix ?? null,
         selectedFilePath: () => {
@@ -341,16 +354,6 @@ export function Workspace({
     },
     [pathToScopeId, scopeById]
   );
-
-  useEffect(() => {
-    if (skipScopeApplyRef.current) {
-      skipScopeApplyRef.current = false;
-      return;
-    }
-    graphRef.current?.applyScopeNavigation?.(
-      navigationSpecForScopeRecord(currentScope, scopeById)
-    );
-  }, [currentScope, scopeRecords]);
 
   const refreshFiles = useCallback(async () => {
     try {
@@ -391,9 +394,20 @@ export function Workspace({
       const node = findNodeForPath(p);
       if (node?.file_path) setCodeTarget({ path: node.file_path });
       else setCodeTarget({ path: p });
+      const dirLike =
+        node != null &&
+        (node.type === "directory" ||
+          node.type === "module" ||
+          node.type === "folder");
+      if (dirLike) {
+        setSelectedNode(null);
+        setRightTab("xray");
+        expandRightPanel();
+        return;
+      }
       selectXRayNode(node);
     },
-    [findNodeForPath, selectXRayNode]
+    [expandRightPanel, findNodeForPath, selectXRayNode]
   );
 
   const openXRayNode = useCallback(
@@ -711,11 +725,12 @@ export function Workspace({
       label: "X-Ray",
       content: (
         <XRayTab
-          selectedNode={selectedXRayNode}
+          workspaceId={workspaceId}
           graphNodes={graphNodes}
           graphEdges={graphEdges}
           stats={displayStats}
-          scopeRecord={activeScopeRecord}
+          scopeById={scopeById}
+          projectPath={projectPath}
           onSuggestedAction={() =>
             showToastStable("action wiring lands in slice 15", 15000)
           }
@@ -743,6 +758,7 @@ export function Workspace({
   ];
 
   const activateScopeFromBreadcrumb = useCallback((id: string) => {
+    if (id === "repo") setSelectedNode(null);
     void setScope(id);
   }, []);
 
@@ -797,6 +813,7 @@ export function Workspace({
         <div
           className="omnix-glass pointer-events-auto mx-auto flex w-max max-w-full flex-wrap items-center justify-center gap-1.5 rounded-full border border-omnix-accent-indigo/25 px-4 py-2 font-mono text-xs"
           data-studio-breadcrumb="1"
+          data-testid="breadcrumb"
         >
           {graphCanGoBack ? (
             <button
@@ -810,10 +827,10 @@ export function Workspace({
           ) : null}
           <button
             type="button"
-            disabled={currentScope === "repo"}
+            disabled={currentScope === "repo" && selectedNodeId == null}
             onClick={() => activateScopeFromBreadcrumb("repo")}
             className={
-              currentScope === "repo"
+              currentScope === "repo" && selectedNodeId == null
                 ? "cursor-default text-omnix-text-primary"
                 : "text-omnix-text-muted transition hover:rounded-md hover:bg-[rgba(99,102,241,0.15)] hover:text-omnix-text-primary"
             }
@@ -874,17 +891,23 @@ export function Workspace({
               className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border border-omnix-accent-indigo/20 bg-[rgba(2,6,21,0.5)]"
               data-omnix-constellation="1"
             >
-              <GraphCanvas
-                ref={graphRef}
-                drillDownNodeId={codeTarget?.nodeId ?? null}
-                onFunctionNodeClick={openXRayNode}
-                onT1GraphNodes={onT1GraphNodes}
-                onT1GraphEdges={onT1GraphEdges}
-                onFileOrDirClick={openXRayFileOrDir}
-                onDeselect={() => undefined}
-                onNavigationStateChange={setGraphCanGoBack}
-                onViewerScope={onViewerScope}
-              />
+              <ConstellationBoundary
+                onRetry={() => setConstellationMountEpoch((n) => n + 1)}
+              >
+                <GraphCanvas
+                  key={constellationMountEpoch}
+                  ref={graphRef}
+                  drillDownNodeId={codeTarget?.nodeId ?? null}
+                  navigationSpec={navigationSpec}
+                  onFunctionNodeClick={openXRayNode}
+                  onT1GraphNodes={onT1GraphNodes}
+                  onT1GraphEdges={onT1GraphEdges}
+                  onFileOrDirClick={openXRayFileOrDir}
+                  onDeselect={() => undefined}
+                  onNavigationStateChange={setGraphCanGoBack}
+                  onViewerScope={onViewerScope}
+                />
+              </ConstellationBoundary>
               <div
                 data-omnix-stats-card="1"
                 className="pointer-events-auto absolute right-4 top-4 z-20 font-mono"
