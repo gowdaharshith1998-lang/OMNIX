@@ -57,6 +57,30 @@ describe("BugsDrawer", () => {
     expect(container.textContent).toContain("scan scan-1");
   });
 
+  it("renders FS-HYGIENE badge and paths for filesystem_hygiene findings", () => {
+    const event: BugsScanEvent = {
+      type: "bugs_scan_complete",
+      scan_id: "scan-fs",
+      findings: [
+        {
+          file: "leaky.py",
+          function: "leak",
+          lineno: 1,
+          dimension: "filesystem_hygiene",
+          severity: "HIGH",
+          severity_score: 18,
+          offending_paths: [{ path: "/repo/garbage/.omnix", size: 0 }],
+          reason: "Filesystem hygiene: artifact created outside declared sandbox.",
+        },
+      ],
+      summary: { findings_count: 1, files_scanned: 1, total_examples_run: 10 },
+      wall_time_seconds: 0.5,
+    };
+    const { container } = render(<BugsDrawer workspaceId="ws1" scanEvent={event} />);
+    expect(container.textContent).toContain("FS-HYGIENE");
+    expect(container.textContent).toContain("/repo/garbage/.omnix");
+  });
+
   it("renders completed findings with severity badges", () => {
     const event: BugsScanEvent = {
       type: "bugs_scan_complete",
@@ -99,6 +123,23 @@ describe("BugsDrawer", () => {
 
     expect(container.textContent).toContain("Scanning...");
     expect(container.textContent).toContain("1m 5s");
+  });
+
+  it("R11: wall-clock timer advances between heartbeats (local interval)", () => {
+    vi.useFakeTimers();
+    const started: BugsScanEvent = {
+      type: "bugs_scan_started",
+      scan_id: "scan-r11",
+      started_at: Date.now() / 1000,
+      target_path: "/tmp/ws",
+    };
+    const { container } = render(<BugsDrawer workspaceId="ws1" scanEvent={started} />);
+    expect(container.textContent).toContain("0s");
+    act(() => {
+      vi.advanceTimersByTime(1300);
+    });
+    expect(container.textContent).toContain("1s");
+    vi.useRealTimers();
   });
 
   it("sorts findings by file path", () => {

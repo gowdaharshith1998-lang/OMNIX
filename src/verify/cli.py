@@ -33,6 +33,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Root for relative file paths in graph (default: OMNIX repo or target parent)",
     )
+    p.add_argument(
+        "--verify-workspace",
+        dest="verify_workspace",
+        default=None,
+        help="Working directory for verify (PBT relative paths land here; find_bugs sets this).",
+    )
     return p
 
 
@@ -57,6 +63,7 @@ def run(args: argparse.Namespace | None = None) -> int:
             codebase_root=croot,
             no_receipt=a.no_receipt,
             omnix_root=omnix_root,
+            workspace_dir=a.verify_workspace,
         )
     except (OSError, RuntimeError) as e:
         print(f"omnix verify: {e}", file=sys.stderr)

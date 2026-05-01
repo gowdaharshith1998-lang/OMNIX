@@ -230,6 +230,13 @@ export type BugFinding = {
   lineno?: number;
   severity_score?: number;
   kind?: string;
+  dimension?: string;
+  severity?: string;
+  target_function?: string;
+  offending_paths?: { path: string; size: number }[];
+  sandbox_dirs?: string[];
+  fuzz_inputs?: string;
+  reproduction?: string;
   caller_count?: number;
   reachable_from_entries?: boolean;
   cluster_id?: string | number | null;
@@ -251,6 +258,18 @@ export type BugScanSummary = {
   wall_time_seconds?: number;
   skipped_main_count?: number;
   skipped_by_reason?: Record<string, number>;
+  filesystem_hygiene_findings_count?: number;
+  filesystem_hygiene_clean?: boolean;
+  budget_total?: number;
+  budget_used?: number;
+  scan_phase?: string;
+  wall_clock_ms?: number;
+  turboscan_plan?: Array<{
+    relpath?: string;
+    function?: string;
+    examples?: number;
+    tier?: string;
+  }>;
 };
 
 export type BugsScanEvent =
@@ -264,6 +283,8 @@ export type BugsScanEvent =
       type: "bugs_scan_heartbeat";
       scan_id: string;
       elapsed_seconds: number;
+      scan_phase?: string;
+      budget_used?: number;
     }
   | {
       type: "bugs_scan_complete";

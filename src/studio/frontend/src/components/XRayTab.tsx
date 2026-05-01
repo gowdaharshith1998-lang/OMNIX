@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import type { BugFinding, BugScanSummary } from "@/lib/api";
 import type { GraphEdge, GraphNode } from "@/types/drilldown";
 import { detectXRayIssues } from "@/lib/xray_diagnostics";
 import type { ScopeRecord } from "@/store/scopeRegistry";
@@ -25,6 +26,8 @@ type Props = {
   stats: Stats;
   scopeById: Map<string, ScopeRecord>;
   projectPath: string;
+  bugsScanFindings: BugFinding[];
+  bugsScanSummary: BugScanSummary | null;
   onSuggestedAction: () => void;
 };
 
@@ -218,6 +221,8 @@ export function XRayTab({
   stats,
   scopeById,
   projectPath,
+  bugsScanFindings,
+  bugsScanSummary,
   onSuggestedAction,
 }: Props) {
   const { currentScope, selectedNodeId } = useScope();
@@ -257,6 +262,25 @@ export function XRayTab({
     [model.connections, model.dark, model.incoming, model.outgoing]
   );
 
+  const filesystemHygieneCleanLine = useMemo(() => {
+    if (!bugsScanSummary) return null;
+    const node = selectedNode;
+    if (!node?.file_path) return null;
+    if (
+      !["function", "method", "class", "file"].includes(node.type)
+    ) {
+      return null;
+    }
+    const fp = node.file_path.replace(/\\/g, "/");
+    const filthy = bugsScanFindings.some(
+      (f) =>
+        f.dimension === "filesystem_hygiene" &&
+        (f.file ?? "").replace(/\\/g, "/") === fp
+    );
+    if (filthy) return null;
+    return "✓ filesystem clean";
+  }, [bugsScanFindings, bugsScanSummary, selectedNode]);
+
   return (
     <div className="xray-tab flex min-h-0 flex-1 flex-col gap-1 overflow-hidden">
       <XRayHead badge={header.badge} name={header.name} pathLine={header.pathLine} />
@@ -268,6 +292,7 @@ export function XRayTab({
           selectedNode={selectedNode}
           scopeModel={scopeModel}
           issues={model.issues}
+          filesystemHygieneCleanLine={filesystemHygieneCleanLine}
           onSuggestedAction={onSuggestedAction}
         />
       </div>

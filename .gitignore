@@ -57,3 +57,13 @@ __pycache__/
 /1-shm
 /1-wal
 .omnix/
+
+# Graphify
+.venv-graphify/
+graphify-out/
+GRAPH_REPORT.md
+.gitnexus
+
+# AI agent tooling (local, per-developer)
+.claude/
+.cursor/mcp.json

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BugsScanConflictError,
   startBugsScan,
@@ -64,32 +64,61 @@ function summaryText(summary: BugScanSummary | null, findings: BugFinding[]) {
   if (!summary) return `${findings.length} finding${findings.length === 1 ? "" : "s"}`;
   const files = summary.files_scanned ?? 0;
   const examples = summary.total_examples_run ?? 0;
-  return `${findings.length} finding${findings.length === 1 ? "" : "s"} / ${files} files / ${examples} examples`;
+  const bud =
+    summary.budget_used != null && summary.budget_total != null
+      ? ` · budget ${summary.budget_used}/${summary.budget_total}`
+      : "";
+  return `${findings.length} finding${findings.length === 1 ? "" : "s"} / ${files} files / ${examples} examples${bud}`;
 }
 
 export function BugsDrawer({ workspaceId, scanEvent, onToast }: Props) {
   const [status, setStatus] = useState<ScanStatus>("idle");
   const [scanId, setScanId] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [scanPhase, setScanPhase] = useState<string | null>(null);
+  const [budgetUsedLive, setBudgetUsedLive] = useState<number | null>(null);
   const [findings, setFindings] = useState<BugFinding[]>([]);
   const [summary, setSummary] = useState<BugScanSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("rank");
+  const wallClockStartRef = useRef<number | null>(null);
+
+  const scanning = status === "starting" || status === "running";
+
+  useEffect(() => {
+    if (!scanning) return;
+    const start =
+      wallClockStartRef.current !== null ? wallClockStartRef.current : Date.now();
+    if (wallClockStartRef.current === null) {
+      wallClockStartRef.current = start;
+    }
+    const id = window.setInterval(() => {
+      setElapsed((Date.now() - start) / 1000);
+    }, 250);
+    return () => clearInterval(id);
+  }, [scanning, scanId]);
 
   useEffect(() => {
     if (!scanEvent) return;
     if (scanEvent.type === "bugs_scan_started") {
       setScanId(scanEvent.scan_id);
       setStatus("running");
+      if (wallClockStartRef.current === null) {
+        wallClockStartRef.current = Date.now();
+      }
       setElapsed(0);
+      setScanPhase("dispatching");
+      setBudgetUsedLive(null);
       setError(null);
       return;
     }
     if (scanEvent.type === "bugs_scan_heartbeat") {
-      if (scanId && scanEvent.scan_id !== scanId) return;
+      if (scanId != null && scanEvent.scan_id !== scanId) return;
       setScanId(scanEvent.scan_id);
       setStatus((current) => (current === "complete" ? current : "running"));
       setElapsed(scanEvent.elapsed_seconds);
+      if (scanEvent.scan_phase) setScanPhase(scanEvent.scan_phase);
+      if (scanEvent.budget_used != null) setBudgetUsedLive(scanEvent.budget_used);
       return;
     }
     if (scanEvent.type === "bugs_scan_complete") {
@@ -98,6 +127,9 @@ export function BugsDrawer({ workspaceId, scanEvent, onToast }: Props) {
       setFindings(scanEvent.findings);
       setSummary(scanEvent.summary);
       setElapsed(scanEvent.wall_time_seconds);
+      wallClockStartRef.current = null;
+      setScanPhase(scanEvent.summary?.scan_phase ?? null);
+      setBudgetUsedLive(scanEvent.summary?.budget_used ?? null);
       setError(null);
       return;
     }
@@ -105,6 +137,7 @@ export function BugsDrawer({ workspaceId, scanEvent, onToast }: Props) {
       setScanId(scanEvent.scan_id);
       setStatus("error");
       setError(scanEvent.error_message);
+      wallClockStartRef.current = null;
       onToast?.(scanEvent.error_message, 3500);
     }
   }, [onToast, scanEvent, scanId]);
@@ -129,16 +162,17 @@ export function BugsDrawer({ workspaceId, scanEvent, onToast }: Props) {
     return rows;
   }, [findings, sortMode]);
 
-  const scanning = status === "starting" || status === "running";
   const buttonLabel = scanning ? "Scanning..." : status === "complete" ? "RESCAN" : "SCAN";
 
   const beginScan = () => {
     setStatus("starting");
     setError(null);
+    wallClockStartRef.current = null;
     void startBugsScan(workspaceId)
       .then(({ scan_id }) => {
         setScanId(scan_id);
         setStatus("running");
+        wallClockStartRef.current = Date.now();
         setElapsed(0);
       })
       .catch((e) => {
@@ -195,7 +229,9 @@ export function BugsDrawer({ workspaceId, scanEvent, onToast }: Props) {
 
       {scanning && (
         <div className="mb-3 text-sm text-omnix-text-dim">
-          Scanning... elapsed {formatElapsed(elapsed)}
+          Scanning… {scanPhase ? `${scanPhase} · ` : ""}
+          elapsed {formatElapsed(elapsed)}
+          {budgetUsedLive != null ? ` · examples ${budgetUsedLive}` : ""}
         </div>
       )}
       {error && <div className="mb-3 text-sm text-rose-300/90">Scan failed: {error}</div>}
@@ -248,16 +284,38 @@ export function BugsDrawer({ workspaceId, scanEvent, onToast }: Props) {
                         {location}
                       </div>
                     </div>
-                    <span
-                      className={`shrink-0 rounded-full border px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] ${severityClass(tier)}`}
-                      title={`severity score: ${score}`}
-                    >
-                      {tier}
-                    </span>
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      {finding.dimension === "filesystem_hygiene" ? (
+                        <span
+                          className="rounded-full border border-cyan-400/40 px-2 py-0.5 font-mono text-[8px] uppercase tracking-[0.14em] text-cyan-200"
+                          title="Filesystem hygiene dimension"
+                        >
+                          FS-HYGIENE
+                        </span>
+                      ) : null}
+                      <span
+                        className={`rounded-full border px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.12em] ${severityClass(tier)}`}
+                        title={`severity score: ${score}`}
+                      >
+                        {tier}
+                      </span>
+                    </div>
                   </div>
                   <p className="mt-2 text-xs leading-5 text-omnix-text-muted">
                     {firstFailureText(finding)}
                   </p>
+                  {finding.dimension === "filesystem_hygiene" &&
+                  finding.offending_paths &&
+                  finding.offending_paths.length > 0 ? (
+                    <ul className="mt-2 max-h-24 list-inside list-disc overflow-y-auto rounded border border-slate-700/60 bg-slate-950/50 px-2 py-1 font-mono text-[10px] text-omnix-text-muted">
+                      {finding.offending_paths.slice(0, 12).map((o) => (
+                        <li key={o.path} className="truncate">
+                          {o.path}
+                          {typeof o.size === "number" ? ` (${o.size}b)` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                   {inputText(finding) && (
                     <div className="mt-2 truncate rounded border border-slate-700/60 bg-slate-950/50 px-2 py-1 font-mono text-[10px] text-omnix-text-muted">
                       input {inputText(finding)}
@@ -267,7 +325,20 @@ export function BugsDrawer({ workspaceId, scanEvent, onToast }: Props) {
                     <button
                       type="button"
                       className="rounded border border-[var(--omnix-shell-border)] px-2 py-1 font-mono text-[9px] uppercase tracking-[0.12em] text-omnix-text-muted hover:text-omnix-text-primary"
-                      onClick={() => onToast?.("agent sessions arrive in slice 15", 2200)}
+                      onClick={() => {
+                        if (finding.dimension === "filesystem_hygiene") {
+                          const parts = [
+                            finding.reproduction,
+                            finding.fuzz_inputs,
+                            finding.offending_paths
+                              ?.map((o) => o.path)
+                              .join("\n"),
+                          ].filter(Boolean);
+                          onToast?.(parts.join("\n---\n") || "filesystem hygiene", 12000);
+                          return;
+                        }
+                        onToast?.("agent sessions arrive in slice 15", 2200);
+                      }}
                     >
                       DEEPEN
                     </button>

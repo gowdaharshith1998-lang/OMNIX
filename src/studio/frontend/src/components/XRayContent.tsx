@@ -24,6 +24,7 @@ type Props = {
   selectedNode: GraphNode | null;
   scopeModel: ScopeModel;
   issues: XRayIssue[];
+  filesystemHygieneCleanLine: string | null;
   onSuggestedAction: () => void;
 };
 
@@ -36,19 +37,39 @@ function isSymbol(node: GraphNode | null) {
 function DiagnosticsBody({
   issues,
   onSuggestedAction,
+  filesystemHygieneCleanLine,
 }: {
   issues: XRayIssue[];
   onSuggestedAction: () => void;
+  filesystemHygieneCleanLine: string | null;
 }) {
   if (issues.length === 0) {
     return (
-      <div className="xray-ok rounded border border-omnix-accent-indigo/15 bg-[rgba(99,102,241,0.06)] px-3 py-2 font-mono text-[11px] text-omnix-text-muted">
-        No issues detected — this scope looks healthy.
+      <div className="space-y-2">
+        {filesystemHygieneCleanLine ? (
+          <div
+            data-testid="xray-fs-hygiene-clean"
+            className="rounded border border-emerald-500/25 bg-[rgba(16,185,129,0.06)] px-3 py-2 font-mono text-[11px] text-emerald-200/90"
+          >
+            {filesystemHygieneCleanLine}
+          </div>
+        ) : null}
+        <div className="xray-ok rounded border border-omnix-accent-indigo/15 bg-[rgba(99,102,241,0.06)] px-3 py-2 font-mono text-[11px] text-omnix-text-muted">
+          No issues detected — this scope looks healthy.
+        </div>
       </div>
     );
   }
   return (
     <div className="xray-issues space-y-2">
+      {filesystemHygieneCleanLine ? (
+        <div
+          data-testid="xray-fs-hygiene-clean"
+          className="rounded border border-emerald-500/25 bg-[rgba(16,185,129,0.06)] px-3 py-2 font-mono text-[11px] text-emerald-200/90"
+        >
+          {filesystemHygieneCleanLine}
+        </div>
+      ) : null}
       {issues.map((issue) => (
         <article
           key={`${issue.title}:${issue.action}`}
@@ -77,6 +98,7 @@ export function XRayContent({
   selectedNode,
   scopeModel,
   issues,
+  filesystemHygieneCleanLine,
   onSuggestedAction,
 }: Props) {
   const [codeBody, setCodeBody] = useState<string | null>(null);
@@ -134,7 +156,11 @@ export function XRayContent({
 
   if (active === "diagnostics") {
     return (
-      <DiagnosticsBody issues={issues} onSuggestedAction={onSuggestedAction} />
+      <DiagnosticsBody
+        issues={issues}
+        onSuggestedAction={onSuggestedAction}
+        filesystemHygieneCleanLine={filesystemHygieneCleanLine}
+      />
     );
   }
 

@@ -85,6 +85,8 @@ describe("slice15.1 no legacy X-Ray dashboard", () => {
           }}
           scopeById={byId}
           projectPath="/proj"
+          bugsScanFindings={[]}
+          bugsScanSummary={null}
           onSuggestedAction={() => undefined}
         />
       );
@@ -116,6 +118,8 @@ describe("slice15.1 no legacy X-Ray dashboard", () => {
           }}
           scopeById={byId}
           projectPath="/proj"
+          bugsScanFindings={[]}
+          bugsScanSummary={null}
           onSuggestedAction={() => undefined}
         />
       );
@@ -157,6 +161,8 @@ describe("slice15.1 no legacy X-Ray dashboard", () => {
           }}
           scopeById={byId}
           projectPath="/proj"
+          bugsScanFindings={[]}
+          bugsScanSummary={null}
           onSuggestedAction={() => undefined}
         />
       );

@@ -178,6 +178,8 @@ describe("XRayTab", () => {
         stats={stats}
         scopeById={scopeById}
         projectPath="/tmp/proj"
+        bugsScanFindings={[]}
+        bugsScanSummary={null}
         onSuggestedAction={vi.fn()}
       />
     );
@@ -197,6 +199,8 @@ describe("XRayTab", () => {
         stats={stats}
         scopeById={scopeById}
         projectPath="/tmp/proj"
+        bugsScanFindings={[]}
+        bugsScanSummary={null}
         onSuggestedAction={vi.fn()}
       />
     );
@@ -215,6 +219,8 @@ describe("XRayTab", () => {
         stats={stats}
         scopeById={scopeById}
         projectPath="/tmp/proj"
+        bugsScanFindings={[]}
+        bugsScanSummary={null}
         onSuggestedAction={vi.fn()}
       />
     );
@@ -241,6 +247,8 @@ describe("XRayTab", () => {
         stats={stats}
         scopeById={scopeById}
         projectPath="/tmp/proj"
+        bugsScanFindings={[]}
+        bugsScanSummary={null}
         onSuggestedAction={onAction}
       />
     );
@@ -266,6 +274,8 @@ describe("XRayTab", () => {
         stats={{ ...stats, files: 0, functions: 0, edges: 0 }}
         scopeById={scopeById}
         projectPath="/tmp/proj"
+        bugsScanFindings={[]}
+        bugsScanSummary={null}
         onSuggestedAction={vi.fn()}
       />
     );
@@ -295,6 +305,8 @@ describe("XRayTab", () => {
         stats={stats}
         scopeById={scopeById}
         projectPath="/tmp/proj"
+        bugsScanFindings={[]}
+        bugsScanSummary={null}
         onSuggestedAction={vi.fn()}
       />
     );

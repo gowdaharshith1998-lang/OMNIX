@@ -4,6 +4,8 @@ import { ConstellationBoundary } from "./ConstellationBoundary";
 import {
   createFile,
   listFiles,
+  type BugFinding,
+  type BugScanSummary,
   type BugsScanEvent,
   type FileEntry,
   type SearchResult,
@@ -169,6 +171,10 @@ export function Workspace({
   const [rightTab, setRightTab] = useState<RightPanelTabId>("xray");
   const [toast, setToast] = useState<string | null>(null);
   const [bugsScanEvent, setBugsScanEvent] = useState<BugsScanEvent | null>(null);
+  const [bugsScanFindings, setBugsScanFindings] = useState<BugFinding[]>([]);
+  const [bugsScanSummary, setBugsScanSummary] = useState<BugScanSummary | null>(
+    null
+  );
   const [graphHint] = useState<string[]>([]);
   const [codeTarget, setCodeTarget] = useState<CodeTarget | null>(null);
   const [graphCanGoBack, setGraphCanGoBack] = useState(false);
@@ -562,6 +568,10 @@ export function Workspace({
         const m = msg as Record<string, unknown>;
         if (isBugsScanEvent(m)) {
           setBugsScanEvent(m);
+          if (m.type === "bugs_scan_complete") {
+            setBugsScanFindings(m.findings);
+            setBugsScanSummary(m.summary);
+          }
         }
         if (m.type === "bootstrap_complete" && !hasBootstrappedRef.current) {
           hasBootstrappedRef.current = true;
@@ -739,6 +749,8 @@ export function Workspace({
           stats={displayStats}
           scopeById={scopeById}
           projectPath={projectPath}
+          bugsScanFindings={bugsScanFindings}
+          bugsScanSummary={bugsScanSummary}
           onSuggestedAction={() =>
             showToastStable("action wiring lands in slice 15", 15000)
           }

@@ -117,13 +117,24 @@ def msg_bugs_scan_started(
     }
 
 
-def msg_bugs_scan_heartbeat(scan_id: str, elapsed_seconds: float) -> dict[str, Any]:
-    return {
+def msg_bugs_scan_heartbeat(
+    scan_id: str,
+    elapsed_seconds: float,
+    *,
+    scan_phase: str | None = None,
+    budget_used: int | None = None,
+) -> dict[str, Any]:
+    msg: dict[str, Any] = {
         "type": "bugs_scan_heartbeat",
         "ts": _ts(),
         "scan_id": str(scan_id),
         "elapsed_seconds": float(elapsed_seconds),
     }
+    if scan_phase is not None:
+        msg["scan_phase"] = str(scan_phase)
+    if budget_used is not None:
+        msg["budget_used"] = int(budget_used)
+    return msg
 
 
 def msg_bugs_scan_complete(

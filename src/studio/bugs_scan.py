@@ -48,7 +48,11 @@ def _start_heartbeat_thread(
             _schedule_broadcast(
                 loop,
                 workspace,
-                msg_bugs_scan_heartbeat(scan_id, time.time() - started_at),
+                msg_bugs_scan_heartbeat(
+                    scan_id,
+                    time.time() - started_at,
+                    scan_phase="scanning",
+                ),
             )
 
     threading.Thread(target=heartbeat, daemon=True, name=f"bugs-scan-{scan_id}").start()
@@ -81,6 +85,7 @@ async def run_scan_for_workspace(
                 codebase_path=str(workspace.root),
                 graph_db=str(workspace.store.db_path),
                 json_mode=True,
+                incremental=True,
             )
         finally:
             if prior_cap is None:

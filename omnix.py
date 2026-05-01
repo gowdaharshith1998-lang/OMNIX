@@ -65,6 +65,11 @@ def main() -> None:
     vsub.add_argument(
         "--codebase-root", default=None, help="Analyzed root for rel paths in graph (default: OMNIX repo root)"
     )
+    vsub.add_argument(
+        "--verify-workspace",
+        default=None,
+        help="Working directory for verify (relative paths from PBT land here; find-bugs sets this automatically).",
+    )
 
     fb = subparsers.add_parser("find-bugs", help="Scan a codebase for bugs (PBT + graph ranking)")
     fb.add_argument("path", help="Path to codebase root")

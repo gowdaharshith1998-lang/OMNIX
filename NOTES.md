@@ -12,6 +12,20 @@
   buildXrayAiSection, buildXrayFunctionHTML) superseded by XRayTab.tsx + lib/xray_*.ts.
   Delete in slice 17 cleanup pass once XRayTab.tsx has been live one week without regression.
 
+## Slice 17b — Filesystem hygiene detector (2026-05-01)
+
+### Round 2 — TURBOSCAN (2026-05-01)
+
+- **Round 1 rollback:** Per-example repo snapshot/diff in `verify/runner.py` was removed from the hot path when `OMNIX_FS_HYGIENE_DELEGATED=1` (set by the TURBOSCAN orchestrator). Hygiene for parallel scans uses **watchdog** (`Observer` or `PollingObserver` fallback with log line `FALLBACK_POLLING`) plus a **multiprocessing `Manager().dict()`** slot registry so Layer 1 correlates inotify events with the in-flight verify target (serial path uses the same registry).
+- **Package:** `src/scan/turboscan/` (orchestrator, budget planner, incremental state under `<repo>/.omnix/turboscan/`, worker-isolated Hypothesis dirs under `workers/<slot>/hypothesis`).
+- **CLI:** `--no-turboscan`, `--all`, `--incremental`, `--plan`. Studio scan passes `incremental=True`.
+- **E2E gates:** `tests/scan/turboscan/test_e2e_self_scan.py` R8/R9 run only when `OMNIX_TURBOSCAN_E2E=1` (full OMNIX self-graph timing + legacy comparison). **Wall-clock &lt;30s must be confirmed on target hardware** (stopwatch + Chromium) — not asserted in default CI.
+- **Benchmark:** `benchmarks/turboscan_self_scan.py <codebase>`.
+
+- Shipped: `src/scan/filesystem_hygiene.py` + per-example snapshot/diff inside `verify/runner.py` (when `OMNIX_FS_HYGIENE_ENABLED=1`). Findings merge into `find_bugs` with `dimension=filesystem_hygiene`. Studio drawer shows **FS-HYGIENE** + **DEEPEN** details; X-Ray Diagnostics shows **✓ filesystem clean** per file after a completed scan when that file has no hygiene findings on it.
+- Live self-scan for `_prepare_verify_workspace_dir`: that helper only writes under `<repo>/.omnix/verify_workspace`, which is inside the declared sandbox, so the detector may correctly report **no** HIGH finding for it while still catching debt-19-shaped leaks (garbage dirname + `.omnix` under repo root). Slice **17c** owns containment fixes guided by hygiene results.
+- Snapshot/diff is **non-atomic** vs concurrent writers (documented in `filesystem_hygiene.py`).
+
 ## Integration #11 (MEGA) — Evolution + database (ITER 4, 2026-04-25)
 
 - **Per-codebase DB (Q2):** Studio analysis writes `<analyzed_root>/.omnix/omnix.db` (graph nodes/edges + evolution tables). This is the canonical Studio store for that tree. `omnix find-bugs` uses its codebase-local graph DB or creates one on first run; it does **not** fall back to `~/.omnix/omnix.db` unless you set `OMNIX_GRAPH_DB` to that path explicitly.

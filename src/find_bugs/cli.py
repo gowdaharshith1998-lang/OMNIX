@@ -83,6 +83,36 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Layer 7: after findings, run sandbox-only Fabric code_fix (P28); no repo writes (P27)",
     )
+    p.add_argument(
+        "--strict-fs-hygiene",
+        action="store_true",
+        help="Filesystem hygiene: snapshot entire repo depth (slower) vs depth-3 default",
+    )
+    p.add_argument(
+        "--no-fs-hygiene",
+        action="store_true",
+        help="Disable filesystem hygiene detector for this scan",
+    )
+    p.add_argument(
+        "--no-turboscan",
+        action="store_true",
+        help="Use legacy serial scanner (for comparison / debugging)",
+    )
+    p.add_argument(
+        "--all",
+        action="store_true",
+        help="Force full scan (disable incremental file filter)",
+    )
+    p.add_argument(
+        "--incremental",
+        action="store_true",
+        help="Only scan Python files changed since last successful scan",
+    )
+    p.add_argument(
+        "--plan",
+        action="store_true",
+        help="Print budget plan and targets without running PBT (dry run)",
+    )
     return p
 
 
@@ -99,6 +129,9 @@ def run(
         g = str(Path(g).resolve())
     _emit_fix_fabric_warning_if_needed(bool(getattr(a, "fix", False)))
     try:
+        incremental = bool(getattr(a, "incremental", False))
+        if bool(getattr(a, "all", False)):
+            incremental = False
         ex, out, _detail = runner.run_find_bugs(
             path,
             examples=a.examples,
@@ -110,6 +143,11 @@ def run(
             graph_db=g,
             no_sign=False,
             enable_fix=bool(getattr(a, "fix", False)),
+            filesystem_hygiene=not bool(getattr(a, "no_fs_hygiene", False)),
+            strict_fs_hygiene=bool(getattr(a, "strict_fs_hygiene", False)),
+            turboscan=not bool(getattr(a, "no_turboscan", False)),
+            incremental=incremental,
+            plan_only=bool(getattr(a, "plan", False)),
         )
     except (OSError, RuntimeError, TypeError) as e:
         print(f"omnix find-bugs: {e}", file=sys.stderr)
