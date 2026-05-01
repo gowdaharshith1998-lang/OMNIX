@@ -67,6 +67,7 @@ export function setScope(id: string): boolean {
     return true;
   }
   snapshot = { currentScope: id, selectedNodeId: null };
+  console.debug("[slice17c1] atom set", { path: id, source: "setScope" });
   emit();
   return true;
 }
@@ -98,6 +99,7 @@ export function syncScopeFromViewer(
   }
   if (snapshot.currentScope === id && snapshot.selectedNodeId === sel) return;
   snapshot = { currentScope: id, selectedNodeId: sel };
+  console.debug("[slice17c1] atom set", { path: id, source: "syncScopeFromViewer" });
   emit();
 }
 

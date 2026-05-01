@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { BugFinding, BugScanSummary } from "@/lib/api";
 import type { GraphEdge, GraphNode } from "@/types/drilldown";
 import { detectXRayIssues } from "@/lib/xray_diagnostics";
@@ -21,6 +21,8 @@ type Stats = {
 
 type Props = {
   workspaceId: string;
+  /** Scope id from studioScopeStore — echoed on Diagnostics for slice 17c tests. */
+  scopeAtomId: string;
   graphNodes: Map<string, GraphNode>;
   graphEdges: GraphEdge[];
   stats: Stats;
@@ -216,6 +218,7 @@ function resolveHeader(
 
 export function XRayTab({
   workspaceId,
+  scopeAtomId,
   graphNodes,
   graphEdges,
   stats,
@@ -229,6 +232,13 @@ export function XRayTab({
   const [innerTab, setInnerTab] = useState<XRayInnerTab>("code");
 
   const scopeRecord = scopeById.get(currentScope) ?? null;
+
+  useEffect(() => {
+    const pathEcho =
+      scopeRecord?.pathPrefix?.replace(/\\/g, "/") ||
+      (currentScope === "repo" ? projectPath : currentScope);
+    console.debug("[slice17c1] xray-head got scope", { path: pathEcho });
+  }, [currentScope, projectPath, scopeRecord?.pathPrefix]);
   const selectedNode = selectedNodeId
     ? graphNodes.get(selectedNodeId) ?? null
     : null;
@@ -289,6 +299,7 @@ export function XRayTab({
         <XRayContent
           active={innerTab}
           workspaceId={workspaceId}
+          scopeAtomId={scopeAtomId}
           selectedNode={selectedNode}
           scopeModel={scopeModel}
           issues={model.issues}

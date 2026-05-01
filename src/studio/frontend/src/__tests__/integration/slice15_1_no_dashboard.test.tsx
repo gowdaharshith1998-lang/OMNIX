@@ -73,6 +73,7 @@ describe("slice15.1 no legacy X-Ray dashboard", () => {
       root.render(
         <XRayTab
           workspaceId="w"
+          scopeAtomId="repo"
           graphNodes={new Map()}
           graphEdges={[]}
           stats={{
@@ -106,6 +107,7 @@ describe("slice15.1 no legacy X-Ray dashboard", () => {
       root.render(
         <XRayTab
           workspaceId="w"
+          scopeAtomId="repo"
           graphNodes={new Map()}
           graphEdges={[]}
           stats={{
@@ -149,6 +151,7 @@ describe("slice15.1 no legacy X-Ray dashboard", () => {
       root.render(
         <XRayTab
           workspaceId="w"
+          scopeAtomId="repo"
           graphNodes={bigNodes}
           graphEdges={edges}
           stats={{

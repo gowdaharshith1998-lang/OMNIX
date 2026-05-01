@@ -12,6 +12,7 @@ import type { GraphEdge, GraphNode } from "@/types/drilldown";
 import {
   StudioGraph,
   type ScopeNavigationSpec,
+  type ScopeVisualEmptyDetail,
   type StudioGraphOptions,
 } from "./StudioGraph";
 import { useScope } from "@/store/studioScopeStore";
@@ -33,6 +34,7 @@ type Props = {
   onDeselect: () => void;
   onNavigationStateChange: (canGoBack: boolean) => void;
   onViewerScope?: StudioGraphOptions["onViewerScope"];
+  onScopeVisualEmpty?: (detail: ScopeVisualEmptyDetail | null) => void;
   /** T1: merge static `graph_data*.json` nodes so DrillDown can resolve function/class id → file + lines. */
   onT1GraphNodes?: (nodes: GraphNode[]) => void;
   onT1GraphEdges?: (edges: GraphEdge[]) => void;
@@ -53,6 +55,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
       onDeselect,
       onNavigationStateChange,
       onViewerScope,
+      onScopeVisualEmpty,
       onT1GraphNodes,
       onT1GraphEdges,
     }: Props,
@@ -71,6 +74,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
       onDeselect,
       onNavigationStateChange,
       onViewerScope,
+      onScopeVisualEmpty,
     });
     const t1OnNodesRef = useRef<Props["onT1GraphNodes"]>(onT1GraphNodes);
     const t1OnEdgesRef = useRef<Props["onT1GraphEdges"]>(onT1GraphEdges);
@@ -82,6 +86,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
         onDeselect,
         onNavigationStateChange,
         onViewerScope,
+        onScopeVisualEmpty,
       };
     }, [
       onFunctionNodeClick,
@@ -89,6 +94,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
       onDeselect,
       onNavigationStateChange,
       onViewerScope,
+      onScopeVisualEmpty,
     ]);
 
     useEffect(() => {
@@ -135,6 +141,9 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
         },
         get onViewerScope() {
           return optionsRef.current.onViewerScope;
+        },
+        get onScopeVisualEmpty() {
+          return optionsRef.current.onScopeVisualEmpty;
         },
         get onDrilldownCatalog() {
           return t1OnNodesRef.current;

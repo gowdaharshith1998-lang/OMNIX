@@ -860,6 +860,37 @@ export function installOmnixViewerEngine(studio) {
     return 0;
   }
 
+  function normalizeFsPath(p) {
+    return String(p || '').replace(/\\/g, '/');
+  }
+
+  /** Slice 17c — Pixi drill updates the same scope channel as React (studioScopeStore). */
+  function notifyViewerScope(payload) {
+    try {
+      const pathLogged =
+        payload && payload.kind === 'repo'
+          ? ''
+          : payload && payload.path != null
+            ? String(payload.path)
+            : '';
+      console.debug('[slice17c1] notifyViewerScope', {
+        kind: payload && payload.kind ? payload.kind : '?',
+        path: pathLogged,
+      });
+      if (studio._options && typeof studio._options.onViewerScope === 'function') {
+        studio._options.onViewerScope(payload);
+      }
+    } catch (_e) { /* callback guard */ }
+  }
+
+  function notifyScopeVisualEmpty(detail) {
+    try {
+      if (studio._options && typeof studio._options.onScopeVisualEmpty === 'function') {
+        studio._options.onScopeVisualEmpty(detail);
+      }
+    } catch (_e) { /* callback guard */ }
+  }
+
   function onNodeRightDown(e) {
     if (pointerEventButton(e) !== 2) return;
     e.stopPropagation();
@@ -886,6 +917,12 @@ export function installOmnixViewerEngine(studio) {
       let did = sn.dirId;
       if (did === undefined || did === null) did = sn.raw && sn.raw.id;
       if (did === undefined || did === null) return;
+      // slice17c1 probes A–C — galaxy drill is synchronous via transitionToStar (R0).
+      console.debug('[slice17c1] click', {
+        kind: 'galaxy',
+        path: String(did),
+        timestamp: typeof performance !== 'undefined' ? performance.now() : Date.now(),
+      });
       try {
         if (typeof studio._options.onFileOrDirClick === 'function') {
           studio._options.onFileOrDirClick(String(did));
@@ -893,7 +930,9 @@ export function installOmnixViewerEngine(studio) {
       } catch (_e) { /* callback only */ }
       if (xrayOpen) closeXray();
       hideSymbolPopup();
+      console.debug('[slice17c1] calling transitionToStar', { dirId: String(did) });
       transitionToStar(did, sn);
+      console.debug('[slice17c1] transitionToStar returned', { success: true });
     }
   }
 
@@ -1492,6 +1531,7 @@ export function installOmnixViewerEngine(studio) {
   function createStarView(dirId, files) {
     viewLevel = 'star';
     selectedDir = dirId;
+    notifyViewerScope({ kind: 'directory', path: normalizeFsPath(dirId) });
     updateBreadcrumb();
     cleanupStarView();
     if (!world || !app) return;
@@ -1513,6 +1553,14 @@ export function installOmnixViewerEngine(studio) {
     const centerY = app.screen.height / 2;
     const maxFilesAll = Math.min(files.length, STAR_VIEW_MAX_FILES);
     const fileSlice = files.slice(0, maxFilesAll);
+    if (!fileSlice.length) {
+      notifyScopeVisualEmpty({
+        scopePath: normalizeFsPath(dirId),
+        viewLevel: 'star',
+      });
+    } else {
+      notifyScopeVisualEmpty(null);
+    }
     const rand = starGrowthRng(starGrowthSeed(dirId));
 
     const starEdgeGfx = new PIXI.Graphics();
@@ -2238,6 +2286,9 @@ export function installOmnixViewerEngine(studio) {
 
   function transitionToPlanet(fileData) {
     if (!model || !world || !app || viewLevel !== 'star') return;
+    console.debug('[slice17c1] calling transitionToPlanet', {
+      galaxy: fileData && fileData.name != null ? String(fileData.name) : '',
+    });
     hideSymbolPopup();
     killTweens();
     if (planetCreateDelayed) {
@@ -2268,6 +2319,11 @@ export function installOmnixViewerEngine(studio) {
     const symbols = getSymbolsForFile(fileData.filePath || fileData.name, selectedDir);
     selectedFile = fileData;
     viewLevel = 'planet';
+    notifyViewerScope({
+      kind: 'file',
+      path: normalizeFsPath(fileData.filePath || fileData.name || ''),
+    });
+    notifyScopeVisualEmpty(null);
     updateBreadcrumb();
 
     const cx = app.screen.width / 2;
@@ -2314,6 +2370,7 @@ export function installOmnixViewerEngine(studio) {
       if (viewLevel !== 'planet' || !selectedFile || selectedFile !== fileData) return;
       createPlanetView(fileData, symbols);
     });
+    console.debug('[slice17c1] transitionToPlanet returned', { success: true });
   }
 
   function runPlanetReverseMitosis(onDone) {
@@ -2381,6 +2438,8 @@ export function installOmnixViewerEngine(studio) {
       selectedDir = null;
       selectedFile = null;
       restoreGalaxyView();
+      notifyScopeVisualEmpty(null);
+      notifyViewerScope({ kind: 'repo' });
       return;
     }
     const sc = world.children.find(c => c._omnixType === 'star');
@@ -2390,6 +2449,8 @@ export function installOmnixViewerEngine(studio) {
       selectedDir = null;
       selectedFile = null;
       restoreGalaxyView();
+      notifyScopeVisualEmpty(null);
+      notifyViewerScope({ kind: 'repo' });
       return;
     }
     starReverseActive = true;
@@ -2421,6 +2482,8 @@ export function installOmnixViewerEngine(studio) {
         selectedDir = null;
         selectedFile = null;
         restoreGalaxyView();
+        notifyScopeVisualEmpty(null);
+        notifyViewerScope({ kind: 'repo' });
       },
     });
 
@@ -2494,6 +2557,9 @@ export function installOmnixViewerEngine(studio) {
         const sc = world && world.children.find(c => c._omnixType === 'star');
         if (sc && sc._sim) sc._sim.alpha(0.45).restart();
         updateBreadcrumb();
+        if (selectedDir) {
+          notifyViewerScope({ kind: 'directory', path: normalizeFsPath(selectedDir) });
+        }
         return;
       }
       closeXray();
@@ -2501,6 +2567,9 @@ export function installOmnixViewerEngine(studio) {
         viewLevel = 'star';
         selectedFile = null;
         restoreStarView();
+        if (selectedDir) {
+          notifyViewerScope({ kind: 'directory', path: normalizeFsPath(selectedDir) });
+        }
       });
     } else if (viewLevel === 'star') {
       if (starReverseActive) return;
@@ -2545,11 +2614,17 @@ export function installOmnixViewerEngine(studio) {
 
     if (!simNodes.length) {
       for (let _zi = 0; _zi < MYCELIUM_POOL_SIZE; _zi++) myceliumParticlePool[_zi].active = false;
+      if (viewLevel === 'galaxy') {
+        notifyScopeVisualEmpty({ scopePath: '', viewLevel: 'galaxy' });
+      }
       syncPixiFromSim();
       return;
     }
 
     const isGalaxyView = simNodes.length > 0 && simNodes[0].kind === 'directory';
+    if (isGalaxyView) {
+      notifyScopeVisualEmpty(null);
+    }
     const chargeStrength = isGalaxyView ? -150 : -420;
     const collidePad = isGalaxyView ? 6 : 16;
     simulation = d3f.forceSimulation(simNodes)
@@ -5316,6 +5391,7 @@ export function installOmnixViewerEngine(studio) {
 
   function loadLevelGalaxy() {
     hideSymbolPopup();
+    notifyScopeVisualEmpty(null);
     cleanupStarView();
     cleanupPlanetView();
     resetGalaxyDrillState();
@@ -5334,6 +5410,7 @@ export function installOmnixViewerEngine(studio) {
     if (galaxyEdgeGfx) gsap.killTweensOf(galaxyEdgeGfx);
     startSimulation(currentNodes, currentLinks);
     restoreGalaxyView();
+    notifyViewerScope({ kind: 'repo' });
     gsap.fromTo(world, { alpha: 0.3 }, { alpha: 1, duration: 0.45, ease: 'power2.out' });
     if (timelineVisible && timelineData) {
       const s = document.getElementById('timeline-slider');
@@ -5344,6 +5421,73 @@ export function installOmnixViewerEngine(studio) {
   function zoomOutOne() {
     goBack();
   }
+
+  studio._applyScopeNavigation = function (spec) {
+    if (!model || !app) return;
+    const normPath = p => String(p || '').replace(/\\/g, '/');
+    if (!spec || spec.kind === 'repo') {
+      loadLevelGalaxy();
+      return;
+    }
+    if (spec.kind === 'directory') {
+      const p = normPath(spec.path);
+      if (!p) {
+        loadLevelGalaxy();
+        return;
+      }
+      /**
+       * slice17c1 — React GraphCanvas applies navigationSpec whenever currentScope changes.
+       * createStarView already set viewLevel === 'star' and notifyViewerScope(directory).
+       * Without this guard, loadLevelGalaxy() runs and wipes the drill (R7 regression).
+       */
+      if (
+        (viewLevel === 'star' || viewLevel === 'galaxy') &&
+        selectedDir != null &&
+        normPath(selectedDir) === p
+      ) {
+        return;
+      }
+      if (viewLevel !== 'galaxy') {
+        loadLevelGalaxy();
+      }
+      transitionToStar(p, null);
+      return;
+    }
+    if (spec.kind === 'file') {
+      const fp = normPath(spec.path);
+      const dir = dirname(fp);
+      if (!fp || !dir) {
+        loadLevelGalaxy();
+        return;
+      }
+      if (viewLevel === 'planet' && selectedFile) {
+        const curFp = normPath(
+          selectedFile.filePath || resolveDirFilePath(selectedDir, selectedFile.name)
+        );
+        if (curFp === fp) {
+          return;
+        }
+      }
+      loadLevelGalaxy();
+      transitionToStar(dir, null);
+      const delaySec = STAR_DRILL_CREATE_DELAY_SEC + 0.35;
+      gsap.delayedCall(delaySec, () => {
+        if (!model) return;
+        const files = model.dirFilesMap[dir] || [];
+        const base = basename(fp);
+        let hit = files.find(f => f.name === base);
+        if (!hit) {
+          hit = files.find(f => resolveDirFilePath(dir, f.name) === fp);
+        }
+        if (!hit || viewLevel !== 'star') return;
+        const fd = Object.assign({}, hit, {
+          dirId: dir,
+          filePath: resolveDirFilePath(dir, hit.name),
+        });
+        transitionToPlanet(fd);
+      });
+    }
+  };
 
   studio._canGoBack = function () {
     return viewLevel === 'star' || viewLevel === 'planet';

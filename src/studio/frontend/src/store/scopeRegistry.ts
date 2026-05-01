@@ -94,8 +94,12 @@ export function extendRegistryWithGraphNodes(
     if (!fp) continue;
     const parts = fp.split("/").filter(Boolean);
     if (parts.length < 2) continue;
-    const top = parts.slice(0, 2).join("/");
-    seenDirs.add(top);
+    /* Directory prefixes along the path (slice 17c); exclude filename segment when it looks like a file. */
+    const last = parts[parts.length - 1] ?? "";
+    const limit = last.includes(".") ? parts.length - 1 : parts.length;
+    for (let len = 2; len <= limit; len++) {
+      seenDirs.add(parts.slice(0, len).join("/"));
+    }
   }
 
   let idx = 0;

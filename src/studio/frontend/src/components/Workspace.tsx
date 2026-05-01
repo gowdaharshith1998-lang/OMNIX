@@ -28,6 +28,7 @@ import { RightPanel, type RightPanelTab, type RightPanelTabId } from "./RightPan
 import { StatsPanel } from "./StatsPanel";
 import { XRayTab } from "./XRayTab";
 import { BootstrapIndicator } from "./BootstrapIndicator";
+import { EmptyScopeState } from "./EmptyScopeState";
 import {
   ReconnectIndicator,
   type ReconnectIndicatorMode,
@@ -43,7 +44,11 @@ import {
   saveShellLayout,
   type ShellLayoutState,
 } from "@/lib/persisted_widths";
-import type { ScopeNavigationSpec, ViewerScopePayload } from "./Graph/StudioGraph";
+import type {
+  ScopeNavigationSpec,
+  ScopeVisualEmptyDetail,
+  ViewerScopePayload,
+} from "./Graph/StudioGraph";
 import {
   ancestryChain,
   CANONICAL_SCOPES,
@@ -111,6 +116,10 @@ function navigationSpecForScopeRecord(
     return { kind: "file", path: r.pathPrefix };
   if (r.pathPrefix) return { kind: "directory", path: r.pathPrefix };
   return { kind: "repo" };
+}
+
+function normalizeScopeFsPath(p: string | undefined): string {
+  return (p ?? "").replace(/\\/g, "/");
 }
 
 function scopeIdFromViewerPayload(
@@ -184,6 +193,9 @@ export function Workspace({
   const [graphEdges, setGraphEdges] = useState<GraphEdge[]>([]);
   const [scopeRecords, setScopeRecords] =
     useState<ScopeRecord[]>(CANONICAL_SCOPES);
+  const [emptyScopeOverlay, setEmptyScopeOverlay] =
+    useState<ScopeVisualEmptyDetail | null>(null);
+  const [viewerScopePathEcho, setViewerScopePathEcho] = useState("");
 
   const { currentScope, selectedNodeId } = useScope();
   const [constellationMountEpoch, setConstellationMountEpoch] = useState(0);
@@ -193,6 +205,11 @@ export function Workspace({
   );
   const scopeById = scopeMaps.byId;
   const pathToScopeId = scopeMaps.pathToId;
+
+  const pathToScopeIdRef = useRef(pathToScopeId);
+  pathToScopeIdRef.current = pathToScopeId;
+  const scopeByIdRef = useRef(scopeById);
+  scopeByIdRef.current = scopeById;
 
   const nodesList = useMemo(
     () => Array.from(graphNodes.values()),
@@ -229,6 +246,8 @@ export function Workspace({
   );
 
   const graphNodesRef = useRef(graphNodes);
+  const lastViewerScopePayloadRef = useRef<ViewerScopePayload>({ kind: "repo" });
+  const constellationScopePathRef = useRef<string>("");
   const graphRef = useRef<GraphCanvasHandle | null>(null);
   const codeRef = useRef<CodeTabHandle | null>(null);
   const codePathRef = useRef<string | null>(null);
@@ -357,17 +376,44 @@ export function Workspace({
 
   const onViewerScope = useCallback(
     (payload: ViewerScopePayload) => {
-      const id = scopeIdFromViewerPayload(payload, pathToScopeId);
+      lastViewerScopePayloadRef.current = payload;
+      constellationScopePathRef.current =
+        payload.kind === "repo" ? "" : normalizeScopeFsPath(payload.path);
+      setViewerScopePathEcho(constellationScopePathRef.current);
+      const id = scopeIdFromViewerPayload(payload, pathToScopeIdRef.current);
       syncScopeFromViewer(id, {
-        pathPrefixForScope: (sid) => scopeById.get(sid)?.pathPrefix ?? null,
+        pathPrefixForScope: (sid) => scopeByIdRef.current.get(sid)?.pathPrefix ?? null,
         selectedFilePath: () => {
           const sid = getStudioScopeSnapshot().selectedNodeId;
           return sid ? graphNodesRef.current.get(sid)?.file_path ?? null : null;
         },
       });
+      queueMicrotask(() => {
+        const expected = scopeIdFromViewerPayload(
+          lastViewerScopePayloadRef.current,
+          pathToScopeIdRef.current
+        );
+        const snap = getStudioScopeSnapshot();
+        if (snap.selectedNodeId != null) return;
+        if (snap.currentScope !== expected) {
+          showToastStable("Scope resynchronized", 2000);
+          syncScopeFromViewer(expected, {
+            pathPrefixForScope: (sid) =>
+              scopeByIdRef.current.get(sid)?.pathPrefix ?? null,
+            selectedFilePath: () => {
+              const sid = getStudioScopeSnapshot().selectedNodeId;
+              return sid ? graphNodesRef.current.get(sid)?.file_path ?? null : null;
+            },
+          });
+        }
+      });
     },
-    [pathToScopeId, scopeById]
+    [showToastStable]
   );
+
+  const onScopeVisualEmpty = useCallback((detail: ScopeVisualEmptyDetail | null) => {
+    setEmptyScopeOverlay(detail);
+  }, []);
 
   const refreshFiles = useCallback(async () => {
     try {
@@ -744,6 +790,7 @@ export function Workspace({
       content: (
         <XRayTab
           workspaceId={workspaceId}
+          scopeAtomId={currentScope}
           graphNodes={graphNodes}
           graphEdges={graphEdges}
           stats={displayStats}
@@ -780,6 +827,16 @@ export function Workspace({
   const activateScopeFromBreadcrumb = useCallback((id: string) => {
     if (id === "repo") setSelectedNode(null);
     void setScope(id);
+  }, []);
+
+  const handleEmptyScopeBack = useCallback(() => {
+    setEmptyScopeOverlay(null);
+    if (graphRef.current?.canGoBack()) {
+      graphRef.current.goBack();
+      return;
+    }
+    void setScope("repo");
+    graphRef.current?.applyScopeNavigation({ kind: "repo" });
   }, []);
 
   const crumbChain = ancestryChain(currentScope, scopeById);
@@ -910,6 +967,7 @@ export function Workspace({
             <div
               className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border border-omnix-accent-indigo/20 bg-[rgba(2,6,21,0.5)]"
               data-omnix-constellation="1"
+              data-studio-viewer-scope-path={viewerScopePathEcho}
             >
               <ConstellationBoundary
                 onRetry={() => setConstellationMountEpoch((n) => n + 1)}
@@ -926,8 +984,15 @@ export function Workspace({
                   onDeselect={() => undefined}
                   onNavigationStateChange={setGraphCanGoBack}
                   onViewerScope={onViewerScope}
+                  onScopeVisualEmpty={onScopeVisualEmpty}
                 />
               </ConstellationBoundary>
+              {emptyScopeOverlay ? (
+                <EmptyScopeState
+                  scopePath={emptyScopeOverlay.scopePath}
+                  onBack={handleEmptyScopeBack}
+                />
+              ) : null}
               <div
                 data-omnix-stats-card="1"
                 className="pointer-events-auto absolute right-4 top-4 z-20 font-mono"

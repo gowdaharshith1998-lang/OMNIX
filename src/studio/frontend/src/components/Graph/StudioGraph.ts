@@ -15,6 +15,11 @@ export type ViewerScopePayload =
 
 export type ScopeNavigationSpec = ViewerScopePayload;
 
+export type ScopeVisualEmptyDetail = {
+  scopePath: string;
+  viewLevel: "galaxy" | "star" | "planet";
+};
+
 export type StudioGraphOptions = {
   onFunctionNodeClick?: (nodeId: string) => void;
   onFileOrDirClick?: (filePath: string) => void;
@@ -22,6 +27,8 @@ export type StudioGraphOptions = {
   onNavigationStateChange?: (canGoBack: boolean) => void;
   /** Slice 15 — constellation reports semantic scope for React shell (breadcrumb / X-Ray / stats). */
   onViewerScope?: (payload: ViewerScopePayload) => void;
+  /** Slice 17c — constellation has zero visible hex cells for this drill (R3 empty-state overlay). */
+  onScopeVisualEmpty?: (detail: ScopeVisualEmptyDetail | null) => void;
   /** Same role as T1 `onT1GraphNodes`: DrillDown catalog after full graph snapshot. */
   onDrilldownCatalog?: (nodes: GraphNode[]) => void;
   /** X-Ray catalog after full graph snapshot. */

@@ -21,6 +21,7 @@ type ScopeModel = {
 type Props = {
   active: XRayInnerTab;
   workspaceId: string;
+  scopeAtomId: string;
   selectedNode: GraphNode | null;
   scopeModel: ScopeModel;
   issues: XRayIssue[];
@@ -35,10 +36,12 @@ function isSymbol(node: GraphNode | null) {
 }
 
 function DiagnosticsBody({
+  scopeAtomId,
   issues,
   onSuggestedAction,
   filesystemHygieneCleanLine,
 }: {
+  scopeAtomId: string;
   issues: XRayIssue[];
   onSuggestedAction: () => void;
   filesystemHygieneCleanLine: string | null;
@@ -54,14 +57,23 @@ function DiagnosticsBody({
             {filesystemHygieneCleanLine}
           </div>
         ) : null}
-        <div className="xray-ok rounded border border-omnix-accent-indigo/15 bg-[rgba(99,102,241,0.06)] px-3 py-2 font-mono text-[11px] text-omnix-text-muted">
+        <div
+          data-testid="xray-diagnostics-healthy"
+          className="xray-ok rounded border border-omnix-accent-indigo/15 bg-[rgba(99,102,241,0.06)] px-3 py-2 font-mono text-[11px] text-omnix-text-muted"
+        >
           No issues detected — this scope looks healthy.
+          <span data-testid="xray-diagnostics-scope-key" className="hidden">
+            {scopeAtomId}
+          </span>
         </div>
       </div>
     );
   }
   return (
     <div className="xray-issues space-y-2">
+      <span data-testid="xray-diagnostics-scope-key" className="hidden">
+        {scopeAtomId}
+      </span>
       {filesystemHygieneCleanLine ? (
         <div
           data-testid="xray-fs-hygiene-clean"
@@ -95,6 +107,7 @@ function DiagnosticsBody({
 export function XRayContent({
   active,
   workspaceId,
+  scopeAtomId,
   selectedNode,
   scopeModel,
   issues,
@@ -157,6 +170,7 @@ export function XRayContent({
   if (active === "diagnostics") {
     return (
       <DiagnosticsBody
+        scopeAtomId={scopeAtomId}
         issues={issues}
         onSuggestedAction={onSuggestedAction}
         filesystemHygieneCleanLine={filesystemHygieneCleanLine}

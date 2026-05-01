@@ -173,6 +173,7 @@ describe("XRayTab", () => {
     const { container } = render(
       <XRayTab
         workspaceId="ws"
+        scopeAtomId="repo"
         graphNodes={nodes}
         graphEdges={edges}
         stats={stats}
@@ -194,6 +195,7 @@ describe("XRayTab", () => {
     const { container } = render(
       <XRayTab
         workspaceId="ws"
+        scopeAtomId="repo"
         graphNodes={nodes}
         graphEdges={edges}
         stats={stats}
@@ -214,6 +216,7 @@ describe("XRayTab", () => {
     const { container } = render(
       <XRayTab
         workspaceId="ws"
+        scopeAtomId="repo"
         graphNodes={nodes}
         graphEdges={edges}
         stats={stats}
@@ -242,6 +245,7 @@ describe("XRayTab", () => {
     const { container } = render(
       <XRayTab
         workspaceId="ws"
+        scopeAtomId="repo"
         graphNodes={nodes}
         graphEdges={manyEntangled}
         stats={stats}
@@ -269,6 +273,7 @@ describe("XRayTab", () => {
     const { container } = render(
       <XRayTab
         workspaceId="ws"
+        scopeAtomId="repo"
         graphNodes={new Map()}
         graphEdges={[]}
         stats={{ ...stats, files: 0, functions: 0, edges: 0 }}
@@ -300,6 +305,7 @@ describe("XRayTab", () => {
     const { container } = render(
       <XRayTab
         workspaceId="ws"
+        scopeAtomId="repo"
         graphNodes={nodes}
         graphEdges={manyEntangled}
         stats={stats}
