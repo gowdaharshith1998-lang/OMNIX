@@ -18,6 +18,7 @@ import { CodeTab, type CodeTabHandle, type CodeTarget } from "./CodeTab";
 import { BugsDrawer } from "./drawers/BugsDrawer";
 import { FilesDrawer } from "./drawers/FilesDrawer";
 import { ReceiptsDrawer } from "./drawers/ReceiptsDrawer";
+import { GrammarHealthDrawer } from "./drawers/GrammarHealthDrawer";
 import { SearchDrawer } from "./drawers/SearchDrawer";
 import { SettingsDrawer } from "./drawers/SettingsDrawer";
 import { FindBar } from "./FindBar";
@@ -810,6 +811,7 @@ export function Workspace({
       />
     ),
     receipts: <ReceiptsDrawer workspaceId={workspaceId} />,
+    grammar: <GrammarHealthDrawer />,
     settings: <SettingsDrawer projectPath={projectPath} />,
   };
 

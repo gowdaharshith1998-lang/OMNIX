@@ -182,9 +182,9 @@ describe("RightPanel", () => {
 });
 
 describe("LeftRail", () => {
-  it("mounts five surfaces", () => {
+  it("mounts six surfaces", () => {
     const { container } = render(<LeftRail active={null} drawerWidth={300} onSelect={vi.fn()} onClose={vi.fn()} onResizeEnd={vi.fn()} />);
-    expect(container.querySelectorAll(".omnix-rail-btn")).toHaveLength(5);
+    expect(container.querySelectorAll(".omnix-rail-btn")).toHaveLength(6);
   });
 
   it("interacts by opening a drawer", () => {
