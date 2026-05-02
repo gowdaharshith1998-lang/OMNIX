@@ -65,6 +65,9 @@ type StudioHandle = {
   setViewContext?: (context: "planet-ready" | "non-planet") => void;
   _canGoBack?: () => boolean;
   _goBack?: () => void;
+  /** Slice 18a-lite.1 — synthetic graph catalog for React (stress mode). */
+  _stressCatalogNodes?: unknown[];
+  _stressCatalogLinks?: unknown[];
 };
 
 type BootstrapBuffer = {
@@ -249,19 +252,31 @@ export class StudioGraph {
     // does not interleave with React commit (avoids removeChild DOM races on large graphs).
     const cb = this._studio._options.onDrilldownCatalog;
     const edgeCb = this._studio._options.onDrilldownEdges;
+    const stressNodes = this._studio._stressCatalogNodes;
+    const stressLinks = this._studio._stressCatalogLinks;
+    const useStressCatalog =
+      Array.isArray(stressNodes) && stressNodes.length > 0;
+    const nodesForCatalog = useStressCatalog ? stressNodes : rawNodes;
+    const linksForCatalog = useStressCatalog
+      ? Array.isArray(stressLinks)
+        ? stressLinks
+        : []
+      : rawLinks;
     queueMicrotask(() => {
       if (cb) {
         const list: GraphNode[] = [];
-        for (let i = 0; i < rawNodes.length; i++) {
-          const rec = recordFromGraphPayload(rawNodes[i] as Record<string, unknown>);
+        for (let i = 0; i < nodesForCatalog.length; i++) {
+          const rec = recordFromGraphPayload(
+            nodesForCatalog[i] as Record<string, unknown>
+          );
           if (rec) list.push(rec);
         }
         cb(list);
       }
       if (edgeCb) {
         const list: GraphEdge[] = [];
-        for (let i = 0; i < rawLinks.length; i++) {
-          const edge = rawLinks[i] as Record<string, unknown>;
+        for (let i = 0; i < linksForCatalog.length; i++) {
+          const edge = linksForCatalog[i] as Record<string, unknown>;
           const source = typeof edge.source === "string" ? edge.source : null;
           const target = typeof edge.target === "string" ? edge.target : null;
           if (source && target) {

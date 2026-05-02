@@ -16,6 +16,7 @@ import {
   type StudioGraphOptions,
 } from "./StudioGraph";
 import { useScope } from "@/store/studioScopeStore";
+import { StressFpsOverlay } from "./StressFpsOverlay";
 
 export type GraphCanvasHandle = {
   ingestMessage: (msg: unknown) => void;
@@ -236,6 +237,7 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(
           className="absolute inset-0 h-full w-full"
           data-omnix-graph="1"
         />
+        <StressFpsOverlay />
       </>
     );
   }

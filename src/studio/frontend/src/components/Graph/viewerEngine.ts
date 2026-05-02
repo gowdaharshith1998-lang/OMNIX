@@ -3,6 +3,13 @@
 import * as PIXI from "pixi.js";
 import * as d3 from "d3";
 import { gsap } from "gsap";
+import {
+  activateGalaxyStressTier,
+  detectGalaxyStressTier,
+  getActiveGalaxyStressTier,
+} from "./galaxyStressHarness";
+import { generateStressGraph } from "./syntheticStressGraph";
+import { setOmnixFpsSample } from "./omnixViewerMetrics";
 
 export function installOmnixViewerEngine(studio) {
   'use strict';
@@ -5813,6 +5820,7 @@ export function installOmnixViewerEngine(studio) {
       const now = performance.now();
       if (now - lastFps >= 500) {
         const fps = Math.round((frames * 1000) / (now - lastFps));
+        setOmnixFpsSample(fps);
         document.getElementById('fps-counter').textContent = fps + ' FPS';
         frames = 0;
         lastFps = now;
@@ -6284,25 +6292,58 @@ export function installOmnixViewerEngine(studio) {
   window.addEventListener('resize', __omnixResizeHandler);
 
   studio._loadGraphFromData = function (data) {
-    if (!data || !Array.isArray(data.nodes) || !Array.isArray(data.links)) {
+    let payload = data;
+    if (getActiveGalaxyStressTier() == null) {
+      const tier =
+        typeof window !== 'undefined' ? detectGalaxyStressTier(window) : null;
+      if (tier) {
+        activateGalaxyStressTier(tier);
+        payload = generateStressGraph(tier);
+        // eslint-disable-next-line no-console
+        console.debug('[slice18a-lite.1] stress harness active', {
+          tier,
+          nodes: payload.nodes.length,
+          edges: payload.links.length,
+        });
+      }
+    } else if (!payload || payload.fromStress !== true) {
+      // eslint-disable-next-line no-console
+      console.debug('[slice18a-lite.1] bootstrap_complete suppressed', {
+        reason: 'stress harness active',
+        tier: getActiveGalaxyStressTier(),
+      });
+      return;
+    }
+
+    if (
+      !payload ||
+      !Array.isArray(payload.nodes) ||
+      !Array.isArray(payload.links)
+    ) {
       showLoadError('Invalid graph payload (expected nodes + links arrays).');
       return;
     }
-    const sanitized = sanitizePayload(data);
-    const payload = sanitized;
-    rawGraphData = payload;
-    model = buildGraphModel(payload);
+    const sanitized = sanitizePayload(payload);
+    if (getActiveGalaxyStressTier()) {
+      studio._stressCatalogNodes = sanitized.nodes;
+      studio._stressCatalogLinks = sanitized.links;
+    } else {
+      studio._stressCatalogNodes = undefined;
+      studio._stressCatalogLinks = undefined;
+    }
+    rawGraphData = sanitized;
+    model = buildGraphModel(sanitized);
     void ensureAiStatus();
     try {
-      updateStatsPanel(payload.stats || {});
+      updateStatsPanel(sanitized.stats || {});
     } catch (_e) { /* */ }
     const sdd = document.getElementById('stat-dark');
     if (sdd) {
-      sdd.textContent = String(payload.nodes.filter((n) => n.type === 'dark_matter').length);
+      sdd.textContent = String(sanitized.nodes.filter((n) => n.type === 'dark_matter').length);
     }
     const sde = document.getElementById('stat-entangled');
     if (sde) {
-      sde.textContent = String(payload.links.filter((l) => l.type === 'ENTANGLED').length);
+      sde.textContent = String(sanitized.links.filter((l) => l.type === 'ENTANGLED').length);
     }
     if (!app) {
       initPixi();
@@ -6332,7 +6373,7 @@ export function installOmnixViewerEngine(studio) {
     if (localStorage.getItem(STORAGE_VISITED) === '1') {
       entranceDone = true;
     }
-    playEntrance((payload && payload.stats) || {});
+    playEntrance((sanitized && sanitized.stats) || {});
   };
 
   /** Studio: incremental updates (T2+); T1 is no-op */
