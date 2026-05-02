@@ -13,121 +13,20 @@ from typing import Any
 
 import click
 
+from .grammar_status_query import (
+    collect_grammar_status,
+    open_readonly,
+    resolve_db_path,
+)
+
 _EXIT_OK = 0
 _EXIT_NO_DB = 1
 _EXIT_NO_GRAMMAR_DATA = 2
 _EXIT_INTERNAL = 3
 
 
-def resolve_db_path(explicit: str | None) -> Path:
-    """Walk up from CWD to find `.omnix/omnix.db`, or use `--db` path."""
-    if explicit:
-        p = Path(explicit).expanduser().resolve()
-        if not p.is_file():
-            raise FileNotFoundError(
-                f"Database file not found or not a file: {p}",
-            )
-        return p
-
-    cwd = Path.cwd().resolve()
-    for parent in [cwd, *cwd.parents]:
-        candidate = parent / ".omnix" / "omnix.db"
-        if candidate.is_file():
-            return candidate.resolve()
-
-    raise FileNotFoundError(
-        "No .omnix/omnix.db found in this directory or any parent. "
-        "Run `omnix analyze .` (or `python omnix.py analyze <path>`) first, "
-        "or pass --db /path/to/omnix.db.",
-    )
-
-
-def open_readonly(db_path: Path) -> sqlite3.Connection:
-    uri = f"file:{db_path}?mode=ro"
-    conn = sqlite3.connect(uri, uri=True, timeout=30.0)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA query_only = 1;")
-    return conn
-
-
 def _iso_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def collect_grammar_status(
-    conn: sqlite3.Connection,
-    grammar_filter: str | None,
-) -> dict[str, Any]:
-    """Aggregate per-grammar rows plus footer data. All queries parameterized."""
-    params: tuple[Any, ...] = ()
-    where_grammar = ""
-    if grammar_filter:
-        where_grammar = " WHERE grammar_name = ? "
-        params = (grammar_filter,)
-
-    grammar_rows = conn.execute(
-        "SELECT grammar_name, total_files_parsed, total_quality_score "
-        "FROM grammar_profile" + where_grammar + " ORDER BY grammar_name",
-        params,
-    ).fetchall()
-
-    grammars: list[dict[str, Any]] = []
-    for row in grammar_rows:
-        g = str(row["grammar_name"])
-        tf = int(row["total_files_parsed"] or 0)
-        tq = float(row["total_quality_score"] or 0.0)
-        avg_q = round((tq / tf), 3) if tf else 0.0
-
-        n_pat = conn.execute(
-            "SELECT COUNT(*) FROM query_pattern WHERE grammar_name = ?",
-            (g,),
-        ).fetchone()[0]
-
-        n_mut_30 = conn.execute(
-            "SELECT COUNT(*) FROM pattern_mutation WHERE grammar_name = ? "
-            "AND observed_at >= datetime('now', '-30 days')",
-            (g,),
-        ).fetchone()[0]
-
-        last_r = conn.execute(
-            "SELECT receipt_path FROM pattern_mutation WHERE grammar_name = ? "
-            "ORDER BY observed_at DESC LIMIT 1",
-            (g,),
-        ).fetchone()
-        receipt = ""
-        if last_r and last_r[0] is not None:
-            receipt = str(last_r[0]).strip()
-        if not receipt:
-            receipt_out: str | None = None
-        else:
-            receipt_out = receipt
-
-        grammars.append(
-            {
-                "grammar_name": g,
-                "files_parsed": tf,
-                "avg_quality": avg_q,
-                "parse_modes": {},
-                "active_patterns": int(n_pat),
-                "recent_mutations_30d": int(n_mut_30),
-                "last_evolution_receipt": receipt_out,
-            }
-        )
-
-    unk_rows = conn.execute(
-        "SELECT extension FROM unknown_extensions ORDER BY extension ASC",
-    ).fetchall()
-    unknown_extensions: list[dict[str, Any]] = [
-        {"ext": str(r["extension"]), "count": 1} for r in unk_rows
-    ]
-    top3 = [str(r["extension"]) for r in unk_rows[:3]]
-
-    return {
-        "grammars": grammars,
-        "unknown_extensions": unknown_extensions,
-        "unknown_extensions_top3": top3,
-        "llm_fallback": {"calls": None, "budget_remaining": "n/a"},
-    }
 
 
 def _format_parse_mode_cell(_modes: Mapping[str, int]) -> str:

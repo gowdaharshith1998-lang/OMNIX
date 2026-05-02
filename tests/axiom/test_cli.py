@@ -11,6 +11,14 @@ from click.testing import CliRunner
 from cli import main
 
 
+def test_main_exposes_analyze_grammar_axiom() -> None:
+    """Pip entry `omnix` must register analyze (Studio) alongside grammar and axiom."""
+    names = set(main.commands.keys())
+    assert "analyze" in names
+    assert "grammar" in names
+    assert "axiom" in names
+
+
 def test_keygen_creates_pem_and_mode() -> None:
     runner = CliRunner()
     with tempfile.TemporaryDirectory() as tmp:

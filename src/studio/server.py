@@ -26,6 +26,8 @@ if os.environ.get("OMNIX_STUDIO_DEBUG") == "1":
 import asyncio
 import contextlib
 import json
+import subprocess
+import sys
 import time
 import hashlib
 import uuid
@@ -35,7 +37,7 @@ from typing import Any
 import re
 
 import sqlite3
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -44,6 +46,15 @@ from pydantic import BaseModel, Field
 from src.graph.store import GraphStore, NodeRow
 from src.parser import evolution
 from src.parser.grammar_detect import detect_for_path
+from src.parser.grammar_status_query import (
+    collect_grammar_status,
+    collect_mutations,
+    collect_unknown_extensions,
+    open_readonly,
+    read_llm_budget_state,
+    resolve_db_path,
+    utc_now_iso,
+)
 from src.parser.ingest_dispatch import ingest_unified_codebase
 from src.omnix_version import __version__
 from src.studio.bugs_scan import run_scan_for_workspace
@@ -111,6 +122,92 @@ class FilePutBody(BaseModel):
     )
 
 
+class VerifyReceiptBody(BaseModel):
+    receipt_path: str = Field(min_length=1)
+
+
+def _parse_host_hostname_studio(host_header: str) -> str:
+    h = host_header.strip()
+    if h.startswith("["):
+        end = h.find("]")
+        if end > 0:
+            return h[: end + 1].lower()
+    return h.split(":")[0].strip().lower()
+
+
+def _is_localhost_request_starlette(request: Request) -> bool:
+    """Match :func:`scan.handler.is_localhost_request` for ASGI (FastAPI)."""
+    client = request.client
+    ip = client.host if client else ""
+    asgi_test = ip == "testclient"
+    if not asgi_test:
+        ok_ip = ip in ("127.0.0.1", "::1")
+        if isinstance(ip, str) and ip.startswith("::ffff:"):
+            ok_ip = ip.split(":")[-1] == "127.0.0.1"
+        if not ok_ip:
+            return False
+
+    host = request.headers.get("Host", "")
+    hn = _parse_host_hostname_studio(host)
+    if asgi_test:
+        if hn not in ("127.0.0.1", "localhost", "[::1]", "::1", "testserver"):
+            return False
+    elif hn not in ("127.0.0.1", "localhost", "[::1]", "::1"):
+        return False
+
+    origin = request.headers.get("Origin")
+    if not origin:
+        return True
+    o = origin.strip()
+    if o in ("null", "file://"):
+        return True
+    if re.match(
+        r"^http://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?/?$",
+        o,
+    ):
+        return True
+    return False
+
+
+def _require_localhost_starlette(request: Request) -> None:
+    if not _is_localhost_request_starlette(request):
+        raise HTTPException(status_code=403, detail="grammar_api_localhost_only")
+
+
+def _grammar_db_search_root() -> Path | None:
+    if INITIAL_STUDIO_PATH:
+        return Path(INITIAL_STUDIO_PATH).resolve()
+    return None
+
+
+def _canonical_receipt_roots() -> list[Path]:
+    roots: list[Path] = [
+        (Path.home() / ".omnix" / "receipts").expanduser().resolve(),
+    ]
+    if INITIAL_STUDIO_PATH:
+        roots.append((Path(INITIAL_STUDIO_PATH) / ".omnix" / "receipts").resolve())
+    return roots
+
+
+def _receipt_resolves_under_allowed(abs_path: Path) -> bool:
+    try:
+        rp = abs_path.resolve()
+    except OSError:
+        return False
+    for root in _canonical_receipt_roots():
+        try:
+            if root.is_dir():
+                rp.relative_to(root)
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _omnix_cli_argv() -> list[str]:
+    return [sys.executable, str(_REPO_ROOT / "omnix.py")]
+
+
 def _row_to_node_public(r: sqlite3.Row) -> NodeRow:
     m = r["metadata"]
     return NodeRow(
@@ -167,6 +264,183 @@ async def _start_background_ingest(w: Workspace, loop: asyncio.AbstractEventLoop
 @app.get("/api/health")
 def api_health() -> dict[str, str]:
     return {"status": "ok", "version": __version__}
+
+
+@app.get("/api/grammar/status")
+def api_grammar_status(
+    request: Request,
+    grammar: str | None = None,
+    db: str | None = None,
+) -> dict[str, Any]:
+    _require_localhost_starlette(request)
+    root = _grammar_db_search_root()
+    try:
+        db_path = resolve_db_path(db, search_from=root)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    try:
+        conn = open_readonly(db_path)
+    except sqlite3.Error as e:
+        raise HTTPException(
+            status_code=500, detail=f"cannot open database (read-only): {e}"
+        ) from e
+    try:
+        inner = collect_grammar_status(conn, grammar)
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=500, detail=f"query failed: {e}") from e
+    finally:
+        conn.close()
+    return {
+        "db_path": str(db_path),
+        "generated_at": utc_now_iso(),
+        "grammars": inner["grammars"],
+        "unknown_extensions": inner["unknown_extensions"],
+        "llm_fallback": inner["llm_fallback"],
+    }
+
+
+@app.get("/api/grammar/mutations")
+def api_grammar_mutations(
+    request: Request,
+    grammar: str | None = None,
+    limit: int = 50,
+    db: str | None = None,
+) -> dict[str, Any]:
+    _require_localhost_starlette(request)
+    root = _grammar_db_search_root()
+    try:
+        db_path = resolve_db_path(db, search_from=root)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    try:
+        conn = open_readonly(db_path)
+    except sqlite3.Error as e:
+        raise HTTPException(
+            status_code=500, detail=f"cannot open database (read-only): {e}"
+        ) from e
+    try:
+        mutations = collect_mutations(conn, grammar, limit)
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=500, detail=f"query failed: {e}") from e
+    finally:
+        conn.close()
+    return {
+        "db_path": str(db_path),
+        "generated_at": utc_now_iso(),
+        "mutations": mutations,
+    }
+
+
+@app.get("/api/grammar/unknown-extensions")
+def api_grammar_unknown_extensions(
+    request: Request,
+    limit: int = 100,
+    db: str | None = None,
+) -> dict[str, Any]:
+    _require_localhost_starlette(request)
+    root = _grammar_db_search_root()
+    try:
+        db_path = resolve_db_path(db, search_from=root)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    try:
+        conn = open_readonly(db_path)
+    except sqlite3.Error as e:
+        raise HTTPException(
+            status_code=500, detail=f"cannot open database (read-only): {e}"
+        ) from e
+    try:
+        total_row = conn.execute(
+            "SELECT COUNT(*) FROM unknown_extensions",
+        ).fetchone()
+        total = int(total_row[0] or 0) if total_row else 0
+        extensions = collect_unknown_extensions(conn, limit)
+    except sqlite3.Error as e:
+        raise HTTPException(status_code=500, detail=f"query failed: {e}") from e
+    finally:
+        conn.close()
+    return {
+        "db_path": str(db_path),
+        "generated_at": utc_now_iso(),
+        "total": total,
+        "extensions": extensions,
+    }
+
+
+@app.get("/api/fabric/llm-budget")
+def api_fabric_llm_budget(request: Request) -> dict[str, Any]:
+    _require_localhost_starlette(request)
+    return {"generated_at": utc_now_iso(), **read_llm_budget_state()}
+
+
+@app.post("/api/grammar/verify-receipt", response_model=None)
+def api_grammar_verify_receipt(
+    request: Request,
+    body: VerifyReceiptBody,
+) -> Any:
+    _require_localhost_starlette(request)
+    raw = body.receipt_path.strip()
+    if not raw.startswith("/"):
+        raise HTTPException(
+            status_code=400,
+            detail="receipt_path must be an absolute path under ~/.omnix/receipts/ "
+            "or <project>/.omnix/receipts/",
+        )
+    receipt = Path(raw)
+    try:
+        resolved = receipt.resolve()
+    except OSError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not _receipt_resolves_under_allowed(receipt):
+        raise HTTPException(
+            status_code=400,
+            detail="receipt_path must resolve under ~/.omnix/receipts/ "
+            "or the opened project's .omnix/receipts/",
+        )
+    if not resolved.is_file():
+        raise HTTPException(status_code=404, detail="receipt not found")
+
+    sig_path = resolved.with_suffix(".sig")
+    pub = (Path.home() / ".omnix" / "keys" / "public.pem").expanduser()
+    cmd = [
+        *_omnix_cli_argv(),
+        "axiom",
+        "verify",
+        str(resolved),
+        str(sig_path),
+        "--pubkey",
+        str(pub),
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return JSONResponse(
+            status_code=504,
+            content={
+                "receipt_path": str(resolved),
+                "sig_path": str(sig_path),
+                "verified": False,
+                "verifier_output": "verifier timed out",
+                "verified_at": utc_now_iso(),
+            },
+        )
+    verified = result.returncode == 0
+    out = (result.stdout or "").strip()
+    err = (result.stderr or "").strip()
+    verifier_output = out if verified else (err or out)
+    return {
+        "receipt_path": str(resolved),
+        "sig_path": str(sig_path),
+        "verified": verified,
+        "verifier_output": verifier_output,
+        "verified_at": utc_now_iso(),
+    }
 
 
 @app.get("/favicon.ico", response_class=Response)
