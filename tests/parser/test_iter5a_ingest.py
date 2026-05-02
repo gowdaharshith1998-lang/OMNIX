@@ -122,8 +122,8 @@ def test_grammar_status_command_returns_per_grammar_summary(
     )
     assert r.returncode == 0
     assert "python" in r.stdout
-    assert "files=4" in r.stdout
-    assert "avg_quality" in r.stdout
+    assert "Files parsed" in r.stdout
+    assert "0.750" in r.stdout
 
 
 def test_grammar_verify_command_validates_signature(

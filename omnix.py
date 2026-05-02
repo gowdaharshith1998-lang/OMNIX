@@ -107,13 +107,25 @@ def main() -> None:
     g0sub.add_parser("list", help="Installed tree_sitter_* language packages")
     gstat = g0sub.add_parser(
         "status",
-        help="Per-grammar profile from a codebase omnix.db (default: ./omnix.db)",
+        help="Per-grammar profile from .omnix/omnix.db (walk up from cwd; override with --db)",
     )
     gstat.add_argument(
         "--db",
         dest="grammar_db",
         default=None,
-        help="Path to graph SQLite (default: ./omnix.db in cwd)",
+        help="Path to omnix SQLite (default: find .omnix/omnix.db upward from cwd)",
+    )
+    gstat.add_argument(
+        "--json",
+        dest="status_json",
+        action="store_true",
+        help="Emit JSON instead of a table",
+    )
+    gstat.add_argument(
+        "--grammar",
+        dest="grammar_filter",
+        default=None,
+        help="Show only this grammar (e.g. python)",
     )
     g0sub.add_parser(
         "receipts",

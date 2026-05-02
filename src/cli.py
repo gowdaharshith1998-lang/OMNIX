@@ -7,6 +7,7 @@ from __future__ import annotations
 import click
 
 from axiom.cli import axiom_group
+from parser.cli import grammar_group
 
 
 @click.group()
@@ -16,6 +17,7 @@ def main() -> None:
 
 
 main.add_command(axiom_group, name="axiom")
+main.add_command(grammar_group, name="grammar")
 
 
 if __name__ == "__main__":

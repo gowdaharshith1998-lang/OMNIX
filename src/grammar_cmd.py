@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -40,50 +39,20 @@ def cmd_list() -> int:
     return 0 if rows else 0
 
 
-def _resolve_grammar_db(arg_path: str | None) -> Path:
-    if arg_path:
-        p = Path(arg_path).expanduser()
-        if not p.is_file():
-            print(f"grammar status: not a file: {p}", file=sys.stderr)
-            return Path()
-        return p.resolve()
-    c = (Path.cwd() / "omnix.db").resolve()
-    if c.is_file():
-        return c
-    print("grammar status: use --db PATH or run from a tree with ./omnix.db", file=sys.stderr)
-    return Path()
+def cmd_status(
+    grammar_db: str | None,
+    *,
+    status_json: bool = False,
+    grammar_filter: str | None = None,
+) -> int:
+    """Per-codebase grammar health (read-only). Delegates to :mod:`src.parser.cli`."""
+    from src.parser.cli import run_grammar_status
 
-
-def cmd_status(grammar_db: str | None) -> int:
-    db = _resolve_grammar_db(grammar_db)
-    if not db or not str(db):
-        return _EERR
-    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
-    try:
-        con.row_factory = sqlite3.Row
-        for row in con.execute(
-            "SELECT grammar_name, total_files_parsed, total_quality_score "
-            "FROM grammar_profile ORDER BY grammar_name"
-        ):
-            g = str(row["grammar_name"])
-            tf = int(row["total_files_parsed"] or 0)
-            tq = float(row["total_quality_score"] or 0.0)
-            avg = (tq / tf) if tf else 0.0
-            n_pat = con.execute(
-                "SELECT count(*) FROM query_pattern WHERE grammar_name = ? AND is_active = 1",  # noqa: E501
-                (g,),
-            ).fetchone()[0]
-            n_mut = con.execute(
-                "SELECT count(*) FROM pattern_mutation WHERE grammar_name = ?",
-                (g,),
-            ).fetchone()[0]
-            print(
-                f"{g}\tfiles={tf}\tavg_quality={avg:.4f}\t"
-                f"active_patterns={int(n_pat)}\tmutations={int(n_mut)}"
-            )
-    finally:
-        con.close()
-    return _ECODE
+    return run_grammar_status(
+        db=grammar_db,
+        as_json=status_json,
+        grammar_filter=grammar_filter,
+    )
 
 
 def cmd_receipts() -> int:
@@ -152,7 +121,11 @@ def run_grammar(args: argparse.Namespace) -> int:
     if sub == "list":
         return cmd_list()
     if sub == "status":
-        return cmd_status(getattr(args, "grammar_db", None))
+        return cmd_status(
+            getattr(args, "grammar_db", None),
+            status_json=bool(getattr(args, "status_json", False)),
+            grammar_filter=getattr(args, "grammar_filter", None),
+        )
     if sub == "receipts":
         return cmd_receipts()
     if sub == "verify":
