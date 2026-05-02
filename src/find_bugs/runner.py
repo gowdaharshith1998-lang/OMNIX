@@ -702,6 +702,7 @@ def run_find_bugs(
     incremental: bool = False,
     plan_only: bool = False,
     turboscan_workers: int | None = None,
+    emit_receipts: bool = False,
 ) -> tuple[int, str, dict[str, Any] | None]:
     hypothesis_cleanup_dirs: list[str] = []
     try:
@@ -723,6 +724,7 @@ def run_find_bugs(
             incremental=incremental,
             plan_only=plan_only,
             turboscan_workers=turboscan_workers,
+            emit_receipts=emit_receipts,
         )
     finally:
         for d in hypothesis_cleanup_dirs:
@@ -958,11 +960,15 @@ def _run_find_bugs_core(
     incremental: bool = False,
     plan_only: bool = False,
     turboscan_workers: int | None = None,
+    emit_receipts: bool = False,
 ) -> tuple[int, str, dict[str, Any] | None]:
     t0 = time.perf_counter()
     root = Path(codebase_path).resolve()
     if not root.is_dir():
         return (2, f"not a directory: {root}\n", None)
+    from axiom.finding_receipt import now_iso8601_utc
+
+    scan_started_at = now_iso8601_utc()
     oroot = str(_omnix_root())
     gdb_t, gerr = ensure_find_bugs_graph_db(root, graph_db)
     if gerr or gdb_t is None:
@@ -1363,6 +1369,92 @@ def _run_find_bugs_core(
             json_text, rdir, codebase_name=root.name
         )
         bpath = str(w)
+    if (
+        emit_receipts
+        and not plan_only
+        and os.environ.get("OMNIX_FUZZ_DRY", "").strip().lower()
+        not in ("1", "true", "yes")
+    ):
+        from find_bugs.receipt_emitter import (
+            MissingEd25519ProjectKeyError,
+            MissingMldsaKeystoreError,
+            emit_scan_receipts,
+        )
+
+        try:
+            scan_dir = emit_scan_receipts(
+                ranked,
+                root,
+                scan_started_at=scan_started_at,
+                scan_finished_at=now_iso8601_utc(),
+                files_scanned=files_scanned,
+            )
+            print(f"Receipts written to: {scan_dir}", file=sys.stderr)
+        except MissingEd25519ProjectKeyError:
+            print("error: run 'omnix axiom keygen' first", file=sys.stderr)
+            if json_mode:
+                pout_err: dict[str, Any] | None = json.loads(json_text)
+                if code_fix_detail is not None and pout_err is not None:
+                    pout_err["code_fix"] = code_fix_detail
+                out_err = (
+                    json_text if json_text.endswith("\n") else json_text + "\n"
+                )
+                if code_fix_detail is not None:
+                    out_err += (
+                        json.dumps({"code_fix": code_fix_detail}, ensure_ascii=False)
+                        + "\n"
+                    )
+                return (2, out_err, pout_err)
+            return (
+                2,
+                _summary_text(
+                    top,
+                    ranked,
+                    files_scanned,
+                    fcount,
+                    ex_total,
+                    wall,
+                    bpath,
+                    code_fix_out,
+                )
+                + "error: run 'omnix axiom keygen' first\n",
+                None,
+            )
+        except MissingMldsaKeystoreError as e:
+            p = e.path
+            msg = (
+                "error: AXIOM keystore not found at "
+                f"{p}; run 'omnix axiom keygen --out ~/.omnix/keys/' first\n"
+            )
+            print(msg, end="", file=sys.stderr)
+            if json_mode:
+                pout_err2: dict[str, Any] | None = json.loads(json_text)
+                if code_fix_detail is not None and pout_err2 is not None:
+                    pout_err2["code_fix"] = code_fix_detail
+                out_err2 = (
+                    json_text if json_text.endswith("\n") else json_text + "\n"
+                )
+                if code_fix_detail is not None:
+                    out_err2 += (
+                        json.dumps({"code_fix": code_fix_detail}, ensure_ascii=False)
+                        + "\n"
+                    )
+                return (2, out_err2, pout_err2)
+            return (
+                2,
+                _summary_text(
+                    top,
+                    ranked,
+                    files_scanned,
+                    fcount,
+                    ex_total,
+                    wall,
+                    bpath,
+                    code_fix_out,
+                )
+                + msg,
+                None,
+            )
     exitv = 1 if ranked else 0
     if json_mode:
         pout = json.loads(json_text)

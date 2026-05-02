@@ -113,6 +113,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print budget plan and targets without running PBT (dry run)",
     )
+    p.add_argument(
+        "--emit-receipts",
+        action="store_true",
+        default=False,
+        help="Write per-finding Ed25519 receipts and ML-DSA-signed scan manifest under ~/.omnix/receipts/findings/",
+    )
     return p
 
 
@@ -148,13 +154,17 @@ def run(
             turboscan=not bool(getattr(a, "no_turboscan", False)),
             incremental=incremental,
             plan_only=bool(getattr(a, "plan", False)),
+            emit_receipts=bool(getattr(a, "emit_receipts", False)),
         )
     except (OSError, RuntimeError, TypeError) as e:
         print(f"omnix find-bugs: {e}", file=sys.stderr)
         return _EXIT_ERR
     if ex == 2:
         if out:
-            print(out, end="", file=sys.stderr)
+            if bool(getattr(a, "json", False)):
+                print(out, end="")
+            else:
+                print(out, end="", file=sys.stderr)
         return _EXIT_ERR
     if out:
         if a.json:

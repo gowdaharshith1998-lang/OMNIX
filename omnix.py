@@ -99,6 +99,12 @@ def main() -> None:
         action="store_true",
         help="Layer 7: run sandbox-only Fabric code_fix for the top fixable finding (P28); no direct repo writes",
     )
+    fb.add_argument(
+        "--emit-receipts",
+        action="store_true",
+        default=False,
+        help="Write per-finding cryptographic receipts + ML-DSA scan manifest under ~/.omnix/receipts/findings/",
+    )
 
     g0 = subparsers.add_parser("grammar", help="Tree-Sitter / grammar learning tools")
     g0sub = g0.add_subparsers(
