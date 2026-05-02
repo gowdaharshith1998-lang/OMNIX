@@ -35,7 +35,10 @@ from .entry_points import (
 from .severity import compute_severity, rank_findings
 from .walker import scan_codebase_sources
 
-VERIFY_TIMEOUT_S = 30.0
+VERIFY_TIMEOUT_S = 30.0  # legacy default; workers pass this if run_args omit per_fn_timeout_s
+DEFAULT_PER_FN_TIMEOUT_S = 30.0
+DEFAULT_TOTAL_TIMEOUT_S = 300.0
+DEFAULT_RSS_CAP_MB = 512
 DEFAULT_MAX_RSS_PER_VERIFY = 512 * 1024 * 1024  # 512 MB
 MAX_RSS_PER_VERIFY = int(
     os.environ.get("OMNIX_FIND_BUGS_RSS_CAP_BYTES", str(DEFAULT_MAX_RSS_PER_VERIFY))
@@ -52,13 +55,21 @@ def _max_rss_per_verify() -> int:
     return MAX_RSS_PER_VERIFY
 
 
+def _set_subprocess_limits_for_cap(cap_bytes: int) -> None:
+    """Apply RLIMIT_AS in child / preexec (Unix)."""
+    if sys.platform == "win32":
+        return
+    try:
+        resource.setrlimit(resource.RLIMIT_AS, (cap_bytes, cap_bytes))
+    except (ValueError, OSError):
+        pass
+
+
 def _set_subprocess_limits() -> None:
     # Address-space cap (best-effort RSS ceiling) so pathological allocations
     # raise MemoryError inside the worker instead of kernel OOM-killing us.
     cap = _max_rss_per_verify()
-    resource.setrlimit(
-        resource.RLIMIT_AS, (cap, cap)
-    )
+    _set_subprocess_limits_for_cap(cap)
 
 
 def _verify_subprocess_cmd(run_args: dict[str, Any]) -> list[str]:
@@ -395,8 +406,9 @@ def _child_verify(
 
 def _child_verify_limited(out_q: object, run_args: dict[str, Any]) -> None:
     os.environ["HOME"] = _real_home_dir()
+    cap = int(run_args.get("rss_cap_bytes") or _max_rss_per_verify())
     try:
-        _set_subprocess_limits()
+        _set_subprocess_limits_for_cap(cap)
     except Exception:
         pass
     _child_verify(out_q, run_args)
@@ -450,6 +462,13 @@ def _run_verify_limited(
             Path(vws).mkdir(parents=True, exist_ok=True)
         except OSError:
             vws = None
+    cap_bytes = int(run_args.get("rss_cap_bytes") or _max_rss_per_verify())
+    eff_timeout = float(run_args.get("per_fn_timeout_s", timeout_s))
+
+    def _preexec_rss() -> None:
+        _set_subprocess_limits_for_cap(cap_bytes)
+
+    pre = _preexec_rss if sys.platform != "win32" else None
     p = subprocess.Popen(
         _verify_subprocess_cmd(run_args),
         stdout=subprocess.PIPE,
@@ -458,20 +477,20 @@ def _run_verify_limited(
         env=env,
         cwd=str(Path(vws).resolve()) if vws else str(_omnix_root()),
         start_new_session=True,
-        preexec_fn=_set_subprocess_limits,
+        preexec_fn=pre,
     )
     try:
-        if os.environ.get("OMNIX_FIND_BUGS_NO_TIMEOUT") or timeout_s <= 0:
+        if os.environ.get("OMNIX_FIND_BUGS_NO_TIMEOUT") or eff_timeout <= 0:
             out, err = p.communicate()
         else:
-            out, err = p.communicate(timeout=float(timeout_s))
+            out, err = p.communicate(timeout=float(eff_timeout))
     except subprocess.TimeoutExpired:
         try:
             os.killpg(p.pid, signal.SIGKILL)
         except Exception:
             p.kill()
         _ = p.communicate(timeout=2.0)
-        return (2, "", f"verify timed out after {int(timeout_s)}s")
+        return (2, "", f"verify timed out after {int(eff_timeout)}s")
     rc = int(p.returncode or 0)
     err_s = err.strip() if err and err.strip() else ""
     werr = err_s if (rc != 0 and not out.strip() and err_s) else (err_s if rc == 2 else None)
@@ -483,11 +502,11 @@ def _run_verify_limited(
         q: Any = ctx.Queue()
         wp = ctx.Process(target=_child_verify_limited, args=(q, run_args), daemon=True)
         wp.start()
-        wp.join(timeout=timeout_s if timeout_s > 0 else None)
+        wp.join(timeout=eff_timeout if eff_timeout > 0 else None)
         if wp.is_alive():
             wp.terminate()
             wp.join(3.0)
-            return (2, "", f"verify timed out after {int(timeout_s)}s")
+            return (2, "", f"verify timed out after {int(eff_timeout)}s")
         try:
             c2, t2, w2 = q.get(block=True, timeout=0.5)
         except Exception:
@@ -582,6 +601,8 @@ def _failures_for_name(j: dict[str, Any], fn: str) -> list[dict[str, Any]]:
 
 def _layer7_python_fixable(finding: dict[str, Any]) -> bool:
     if finding.get("kind") == "memory_pathology":
+        return False
+    if finding.get("kind") == "timeout_pathology":
         return False
     if finding.get("kind") == "filesystem_hygiene":
         return False
@@ -686,7 +707,7 @@ def _prepare_hypothesis_output_dir(
 
 def run_find_bugs(
     codebase_path: str,
-    examples: int = 50,
+    examples: int = 5,
     top: int = 10,
     json_mode: bool = False,
     no_bundle: bool = False,
@@ -703,6 +724,9 @@ def run_find_bugs(
     plan_only: bool = False,
     turboscan_workers: int | None = None,
     emit_receipts: bool = False,
+    rss_cap_mb: int = DEFAULT_RSS_CAP_MB,
+    per_fn_timeout_s: float = DEFAULT_PER_FN_TIMEOUT_S,
+    total_timeout_s: float = DEFAULT_TOTAL_TIMEOUT_S,
 ) -> tuple[int, str, dict[str, Any] | None]:
     hypothesis_cleanup_dirs: list[str] = []
     try:
@@ -725,6 +749,9 @@ def run_find_bugs(
             plan_only=plan_only,
             turboscan_workers=turboscan_workers,
             emit_receipts=emit_receipts,
+            rss_cap_mb=rss_cap_mb,
+            per_fn_timeout_s=per_fn_timeout_s,
+            total_timeout_s=total_timeout_s,
         )
     finally:
         for d in hypothesis_cleanup_dirs:
@@ -796,12 +823,36 @@ def _apply_one_verify_outcome(
         )
     if werr_eff:
         if w_timeout:
-            timeouts.append(
+            fk_t = graph_id_for(relp, fn)
+            note_t = werr_eff or "verify timed out"
+            to_row = {
+                "kind": "timeout_pathology",
+                "file": relp,
+                "function": fn,
+                "message": note_t,
+            }
+            timeouts.append(to_row)
+            findings.append(
                 {
-                    "kind": "timeout_skip",
+                    "kind": "timeout_pathology",
                     "file": relp,
                     "function": fn,
-                    "message": werr_eff or "timeout",
+                    "lineno": lineno,
+                    "severity_score": 100,
+                    "caller_count": in_cnt.get(fk_t, 0),
+                    "reachable_from_entries": bool(
+                        entry_reach_map.get(fk_t, False)
+                    ),
+                    "cluster_id": cc.get(fk_t),
+                    "input": "(unknown)",
+                    "reason": note_t,
+                    "failures": [
+                        {
+                            "shrunk_input": "(unknown)",
+                            "exception_type": "TimeoutError",
+                            "message": "verify subprocess exceeded wall-clock limit",
+                        }
+                    ],
                 }
             )
         elif _looks_like_memory_error(werr_eff):
@@ -944,7 +995,7 @@ def _apply_one_verify_outcome(
 def _run_find_bugs_core(
     codebase_path: str,
     *,
-    examples: int = 50,
+    examples: int = 5,
     top: int = 10,
     json_mode: bool = False,
     no_bundle: bool = False,
@@ -961,11 +1012,19 @@ def _run_find_bugs_core(
     plan_only: bool = False,
     turboscan_workers: int | None = None,
     emit_receipts: bool = False,
+    rss_cap_mb: int = DEFAULT_RSS_CAP_MB,
+    per_fn_timeout_s: float = DEFAULT_PER_FN_TIMEOUT_S,
+    total_timeout_s: float = DEFAULT_TOTAL_TIMEOUT_S,
 ) -> tuple[int, str, dict[str, Any] | None]:
     t0 = time.perf_counter()
+    scan_mono_start = time.monotonic()
     root = Path(codebase_path).resolve()
     if not root.is_dir():
         return (2, f"not a directory: {root}\n", None)
+    if rss_cap_mb > 0:
+        os.environ["OMNIX_FIND_BUGS_RSS_CAP_BYTES"] = str(
+            int(rss_cap_mb) * 1024 * 1024
+        )
     from axiom.finding_receipt import now_iso8601_utc
 
     scan_started_at = now_iso8601_utc()
@@ -1077,6 +1136,8 @@ def _run_find_bugs_core(
         "hypothesis_database_directory": hyp_dir,
         "verify_workspace_dir": verify_ws,
         "max_shrink_seconds": 5,
+        "rss_cap_bytes": int(rss_cap_mb) * 1024 * 1024,
+        "per_fn_timeout_s": float(per_fn_timeout_s),
     }
     budget_plan_summary: Any = None
     turboscan_paths: list[str] = []
@@ -1108,11 +1169,14 @@ def _run_find_bugs_core(
             croot=croot,
             verify_ws=verify_ws,
             plan_only=plan_only,
+            total_timeout_s=float(total_timeout_s),
+            scan_monotonic_start=scan_mono_start,
         )
         fcount += fc_inc
         ex_total += ex_inc
         budget_plan_summary = bp
     else:
+        scan_deadline_hit = False
         for fpath in paths_verify:
             relp = _relpos(fpath, root)
             try:
@@ -1156,6 +1220,17 @@ def _run_find_bugs_core(
                         f"--codebase-root {shlex.quote(croot)} "
                         f"--verify-workspace {shlex.quote(str(Path(verify_ws).resolve()))}"
                     )
+                if total_timeout_s > 0 and (
+                    time.monotonic() - scan_mono_start
+                ) > float(total_timeout_s):
+                    print(
+                        f"WARN: total scan timeout ({int(total_timeout_s)}s) reached "
+                        f"after collecting {len(findings)} finding(s); "
+                        "partial results returned",
+                        file=sys.stderr,
+                    )
+                    scan_deadline_hit = True
+                    break
                 code, out, werr = _run_verify_limited(ra, VERIFY_TIMEOUT_S)
                 ex_total += _apply_one_verify_outcome(
                     code=code,
@@ -1174,6 +1249,8 @@ def _run_find_bugs_core(
                     cc=cc,
                     gctx=gctx,
                 )
+            if scan_deadline_hit:
+                break
     if (
         not plan_only
         and os.environ.get("OMNIX_DISABLE_LAYER6", "").lower()

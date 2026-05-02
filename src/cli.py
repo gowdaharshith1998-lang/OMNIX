@@ -24,12 +24,17 @@ if str(_repo_root) not in sys.path:
 
 import click
 
+try:
+    from omnix_version import __version__ as _OMNIX_VERSION  # pip-entry (src on path)
+except ImportError:
+    from src.omnix_version import __version__ as _OMNIX_VERSION
+
 from axiom.cli import axiom_group
 from parser.cli import grammar_group
 
 
 @click.group()
-@click.version_option(version="0.1.0", prog_name="omnix")
+@click.version_option(version=_OMNIX_VERSION, prog_name="omnix")
 def main() -> None:
     """OMNIX — code intelligence and AXIOM provenance."""
 

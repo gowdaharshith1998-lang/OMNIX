@@ -58,7 +58,61 @@ Open **Grammar Health** in the left rail (chart icon between Receipts and Settin
 
 ### Roadmap
 
-**Slice 18d (in progress)** — extend the same receipt story to `find_bugs` / LLM outputs (Compliance Vault tier). Not shipped in v0.4.
+**Slice 18d (shipped as v0.5)** — Compliance Vault foundation: signed finding receipts + ML-DSA scan manifests. See [SLICE_18d.md](slices/SLICE_18d.md).
+
+## Compliance Vault (since v0.5)
+
+OMNIX can emit **cryptographically signed evidence** for findings from `find-bugs`: each finding has an **Ed25519** signature; each scan has a **ML-DSA-65** signature over a **Merkle root** of finding hashes. Any changed byte, removed finding, or altered manifest should fail **`omnix axiom verify-scan`** quickly.
+
+This is the foundation for the **Compliance Vault** tier (**in beta with design partners**) — **designed to align with** EU AI Act Article 12 (logging and traceability) and DORA Article 17 (ICT incident reporting) expectations. OMNIX is **not** a certified compliance product; it is **compliance-aligned** infrastructure that produces audit-ready evidence.
+
+### Demo
+
+```bash
+# 1) Project Ed25519 keypair (one-time; idempotent)
+omnix axiom keygen --project ~/my-codebase
+
+# 2) Scan with signed receipts (opt-in)
+omnix find-bugs ~/my-codebase --emit-receipts
+# Output includes receipt path under ~/.omnix/receipts/findings/<project_id>/<scan_id>/
+
+# 3) Verify the latest scan directory (use paths from your machine)
+omnix axiom verify-scan ~/.omnix/receipts/findings/<project_id>/<scan_id>/ \
+  --ed25519-pubkey ~/my-codebase/.omnix/pubkey.pem \
+  --mldsa-pubkey ~/.omnix/keys/public.pem
+# Example: verified  finding_count=3
+
+# 4) Export auditor zip (keys + scans + index + README)
+omnix axiom export-vault ~/my-codebase --out audit.zip
+# Example: wrote audit.zip  (2 scans included, 0 excluded as tampered)
+```
+
+The zip is intended for **offline verification** by a third party using the bundled instructions and public keys.
+
+![Compliance Vault demo](docs/videos/compliance-vault-demo.mp4)
+
+*(Placeholder until `docs/videos/compliance-vault-demo.mp4` is recorded — see slice 18d step 4 screencast brief.)*
+
+### API (read-only, localhost-only)
+
+| Route | Returns |
+|-------|---------|
+| `GET /api/findings/scans` | `{ scans: [...] }` with `scan_id`, timestamps, `finding_count`, `dir_path_relative`, `manifest_kind` |
+| `POST /api/findings/verify-scan` | Body `{ "scan_id": "..." }` → `verified`, `reason`, `finding_count`, `manifest_summary` |
+
+Non-localhost → **403**. Malformed or traversal `scan_id` → **400**.
+
+### Studio
+
+**Receipts** drawer → **Finding Scans** tab: lists scans; **Verify** calls `/api/findings/verify-scan` and shows pass/fail inline.
+
+### Tampering
+
+One **`verify-scan`** checks: modified receipt (Merkle / sig mismatch), missing receipt vs manifest roster, invalid ML-DSA on manifest.
+
+### Deferred public docs
+
+Standalone verifier without a full OMNIX install is planned for **v0.6** (not in this README). Detailed regulatory mappings stay in design-partner conversations.
 
 ## What It Does
 

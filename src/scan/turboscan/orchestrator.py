@@ -90,6 +90,8 @@ def dispatch_turboscan_python_phase(
     croot: str,
     verify_ws: str,
     plan_only: bool,
+    total_timeout_s: float = 300.0,
+    scan_monotonic_start: float | None = None,
 ) -> tuple[int, int, BudgetPlan | None, list[str]]:
     """Run (or plan) parallel verify for Python targets.
 
@@ -230,12 +232,30 @@ def dispatch_turboscan_python_phase(
             "true",
             "yes",
         )
-        if serial or workers_w <= 1:
-            raw_results = map_verify_tasks_serial(payloads, slots)
-        else:
-            raw_results = map_verify_tasks(
-                workers_w, payloads, shared_slots=slots
-            )
+        raw_results: list[dict[str, Any]] = []
+        chunk_sz = max(workers_w * 4, 16)
+        mono0 = (
+            float(scan_monotonic_start)
+            if scan_monotonic_start is not None
+            else time.monotonic()
+        )
+        use_deadline = bool(total_timeout_s and total_timeout_s > 0)
+        for i in range(0, len(payloads), chunk_sz):
+            if use_deadline and (time.monotonic() - mono0) > float(total_timeout_s):
+                print(
+                    f"WARN: total scan timeout ({int(total_timeout_s)}s) reached "
+                    f"after processing {len(raw_results)} / {len(payloads)} function "
+                    "verifies; partial results returned",
+                    file=sys.stderr,
+                )
+                break
+            chunk = payloads[i : i + chunk_sz]
+            if serial or workers_w <= 1:
+                raw_results.extend(map_verify_tasks_serial(chunk, slots))
+            else:
+                raw_results.extend(
+                    map_verify_tasks(workers_w, chunk, shared_slots=slots)
+                )
 
         for r in raw_results:
             ex_total += _apply_one_verify_outcome(

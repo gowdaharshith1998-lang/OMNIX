@@ -47,8 +47,29 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--examples",
         type=int,
-        default=50,
-        help="PBT examples per function (default: 50)",
+        default=5,
+        help="PBT examples per function (default: 5; higher = more thorough but slower)",
+    )
+    p.add_argument(
+        "--rss-cap-mb",
+        dest="rss_cap_mb",
+        type=int,
+        default=512,
+        help="RSS memory cap per verify subprocess in MB (default: 512)",
+    )
+    p.add_argument(
+        "--per-fn-timeout-s",
+        dest="per_fn_timeout_s",
+        type=int,
+        default=30,
+        help="Wall-clock timeout per function verify in seconds (default: 30)",
+    )
+    p.add_argument(
+        "--total-timeout-s",
+        dest="total_timeout_s",
+        type=int,
+        default=300,
+        help="Total scan wall-clock budget in seconds (default: 300; use 0 for unbounded)",
     )
     p.add_argument(
         "--top", type=int, default=10, help="Max findings in text summary (default: 10)"
@@ -155,6 +176,9 @@ def run(
             incremental=incremental,
             plan_only=bool(getattr(a, "plan", False)),
             emit_receipts=bool(getattr(a, "emit_receipts", False)),
+            rss_cap_mb=int(getattr(a, "rss_cap_mb", 512)),
+            per_fn_timeout_s=float(getattr(a, "per_fn_timeout_s", 30)),
+            total_timeout_s=float(getattr(a, "total_timeout_s", 300)),
         )
     except (OSError, RuntimeError, TypeError) as e:
         print(f"omnix find-bugs: {e}", file=sys.stderr)
