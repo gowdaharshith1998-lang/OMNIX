@@ -51,6 +51,11 @@ export function installOmnixViewerEngine(studio) {
   const GALAXY_WARP_RADIUS = 150;
   const GALAXY_ORBIT_HOVER_PAD_SCREEN = 30;
   const GALAXY_MAX_WARP_SCALE = 2.5;
+  /** Baked galaxy directory hex texture radius; must match default `sn.radius || 20` scale divisor in syncPixiFromSim. */
+  const HEX_BASE_RADIUS = 20;
+  /** Baked radial glow: outer radius in local px; world radius is `(sn.radius || 12) * 2.5` via scale. */
+  const GLOW_TEXTURE_BASE_RADIUS = 50;
+  const GLOW_TEXTURE_RING_COUNT = 12;
 
   /** Screen-space pick radius: hex-center circle (150px) ∪ circle through full orbit (world orbit × scale + pad). */
   function galaxyDirectoryHoverScreenRadius(dirNode, worldScale) {
@@ -475,6 +480,10 @@ export function installOmnixViewerEngine(studio) {
 
   /** --- Pixi + sim --- */
   let app = null;
+  /** slice18a-lite.1: single white hex RenderTexture for all galaxy directory pool sprites */
+  let galaxyDirectoryHexTexture = null;
+  /** slice18a-lite.1: white radial-falloff glow RenderTexture for galaxy pool glow sprites */
+  let galaxyDirectoryGlowTexture = null;
   let world = null;
   let layerEdges = null;
   /** Single batched Graphics for all galaxy-level directory edges (Physarum). */
@@ -731,8 +740,10 @@ export function installOmnixViewerEngine(studio) {
   function acquireNodePool(i) {
     while (nodePool.length <= i) {
       const c = new PIXI.Container();
-      const glow = new PIXI.Graphics();
-      const shape = new PIXI.Graphics();
+      const glow = new PIXI.Sprite(galaxyDirectoryGlowTexture);
+      glow.anchor.set(0.5, 0.5);
+      const shape = new PIXI.Sprite(galaxyDirectoryHexTexture);
+      shape.anchor.set(0.5, 0.5);
       const label = new PIXI.Text('', {
         fontFamily: 'Outfit, system-ui, sans-serif',
         fontSize: 11,
@@ -774,12 +785,7 @@ export function installOmnixViewerEngine(studio) {
     if (!gravGalaxyDir) {
       gsap.to(c.scale, { x: 1.3, y: 1.3, duration: 0.2, ease: 'back.out(1.7)' });
     }
-    const glow = entry.glow;
-    glow.clear();
-    const col = sn.color;
-    glow.beginFill(col, 0.4);
-    glow.drawCircle(0, 0, (sn.radius || 12) * 2.8);
-    glow.endFill();
+    // Glow appearance: redrawNodeGlow + syncPixiFromSim (pool glow is Sprite; no Graphics draw here)
     const pt = clientFromPixiEvent(e);
     showTooltip(sn, pt.x, pt.y);
     if (!(viewLevel === 'galaxy' && sn.kind === 'directory')) {
@@ -805,13 +811,21 @@ export function installOmnixViewerEngine(studio) {
 
   function redrawNodeGlow(entry, sn, isHover) {
     const g = entry.glow;
-    g.clear();
     let a = isHover ? 0.4 : 0.15;
     if (!isHover && viewLevel === 'galaxy' && sn.kind === 'directory' && model) {
       const nodeWeight = sn.totalEdgeWeight || 0;
       const maxNodeWeight = model.maxNodeWeight || 100;
       a = 0.1 + Math.min(nodeWeight / maxNodeWeight, 1) * 0.25;
     }
+    if (g instanceof PIXI.Sprite) {
+      g.tint = sn.color;
+      g._glowBaseAlpha = a;
+      const rWorld = (sn.radius || 12) * 2.5;
+      g.scale.set(rWorld / GLOW_TEXTURE_BASE_RADIUS);
+      g.alpha = a;
+      return;
+    }
+    g.clear();
     g.beginFill(sn.color, a);
     g.drawCircle(0, 0, (sn.radius || 12) * 2.5);
     g.endFill();
@@ -4227,7 +4241,9 @@ export function installOmnixViewerEngine(studio) {
       const sh = p.shape;
       const kind = sn.kind;
       if (kind === 'directory') {
-        drawHexagon(sh, sn.radius || 20, sn.color, 0.25, 2, sn.color);
+        sh.tint = sn.color;
+        sh.scale.set((sn.radius || HEX_BASE_RADIUS) / HEX_BASE_RADIUS);
+        sh.alpha = 1.0;
         redrawNodeGlow(p, sn, hoveredSimNode === sn);
       } else if (kind === 'file') {
         drawCircleNode(sh, sn.radius || 14, sn.color, 1, sn.color);
@@ -4242,7 +4258,19 @@ export function installOmnixViewerEngine(studio) {
 
       const lab = p.label;
       if (lab) {
-        lab.visible = false;
+        if (kind === 'directory' && hoveredSimNode === sn) {
+          const focal =
+            sn.label != null
+              ? String(sn.label)
+              : sn.name != null
+                ? String(sn.name)
+                : String(sn.dirId || '');
+          lab.text = truncateGraphLabel(focal, 28);
+          lab.visible = true;
+          lab.position.set(0, (sn.radius || HEX_BASE_RADIUS) + 4);
+        } else {
+          lab.visible = false;
+        }
       }
     });
     for (let j = simNodes.length; j < nodePool.length; j++) {
@@ -5303,7 +5331,9 @@ export function installOmnixViewerEngine(studio) {
       const isHover = hoveredSimNode === sn;
       const flash = sn._rippleFlashUntil && nowMs < sn._rippleFlashUntil ? 1.25 : 1;
       const glowRhythm = 1 + 0.12 * Math.sin(time * sn._heartbeatSpeed * Math.PI * 2 + sn._heartbeatPhase);
-      pool.glow.alpha = (isHover ? 1.05 : 1) * (0.94 + 0.06 * glowRhythm) * flash;
+      const pulse = (isHover ? 1.05 : 1) * (0.94 + 0.06 * glowRhythm) * flash;
+      const base = pool.glow._glowBaseAlpha != null ? pool.glow._glowBaseAlpha : 1;
+      pool.glow.alpha = base * pulse;
     }
   }
 
@@ -5671,6 +5701,30 @@ export function installOmnixViewerEngine(studio) {
         console.log('WebGL context restored');
       });
     }
+
+    const hexBlueprint = new PIXI.Graphics();
+    drawHexagon(hexBlueprint, HEX_BASE_RADIUS, 0xffffff, 0.25, 2, 0xffffff);
+    galaxyDirectoryHexTexture = app.renderer.generateTexture(hexBlueprint, { resolution: 4 });
+    hexBlueprint.destroy();
+    console.debug('[slice18a-lite.1] hex texture built', {
+      width: galaxyDirectoryHexTexture.width,
+      height: galaxyDirectoryHexTexture.height,
+    });
+
+    const glowBlueprint = new PIXI.Graphics();
+    for (let ri = GLOW_TEXTURE_RING_COUNT; ri > 0; ri--) {
+      const r = (ri / GLOW_TEXTURE_RING_COUNT) * GLOW_TEXTURE_BASE_RADIUS;
+      const ringA = ((GLOW_TEXTURE_RING_COUNT - ri + 1) / GLOW_TEXTURE_RING_COUNT) * 0.2;
+      glowBlueprint.beginFill(0xffffff, ringA);
+      glowBlueprint.drawCircle(0, 0, r);
+      glowBlueprint.endFill();
+    }
+    galaxyDirectoryGlowTexture = app.renderer.generateTexture(glowBlueprint, { resolution: 2 });
+    glowBlueprint.destroy();
+    console.debug('[slice18a-lite.1] glow texture built', {
+      width: galaxyDirectoryGlowTexture.width,
+      height: galaxyDirectoryGlowTexture.height,
+    });
 
     bgGraphics = new PIXI.Graphics();
     starGraphics = new PIXI.Graphics();
