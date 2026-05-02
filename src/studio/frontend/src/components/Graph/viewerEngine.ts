@@ -5660,15 +5660,6 @@ export function installOmnixViewerEngine(studio) {
     };
     /* slice18a-lite: Pixi v7 @pixi/app Application constructor calls autoDetectRenderer(omnixPixiBootOptions); WebGPU preference requires Pixi v8+ (do not migrate here). */
     app = new PIXI.Application(omnixPixiBootOptions);
-    (function slice18aLiteRendererProbe() {
-      var r = app.renderer;
-      var ty = r.type;
-      var backend = ty === 1 ? 'webgl' : ty === 2 ? 'canvas' : 'unknown';
-      console.debug('[slice18a-lite] renderer', {
-        backend: backend,
-        version: typeof PIXI.VERSION === 'string' ? PIXI.VERSION : 'unknown',
-      });
-    })();
     host.appendChild(app.view);
     const _omnixGlCanvas = app.view;
     if (_omnixGlCanvas && _omnixGlCanvas.addEventListener) {

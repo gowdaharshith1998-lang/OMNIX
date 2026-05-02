@@ -639,8 +639,6 @@ export function Workspace({
           }
           bootstrapHideTimerRef.current = setTimeout(() => {
             bootstrapHideTimerRef.current = null;
-            // eslint-disable-next-line no-console
-            console.debug("[slice18a-lite] bootstrap overlay hidden");
             setBootstrapPhase("hidden");
           }, 300);
         }
@@ -737,8 +735,6 @@ export function Workspace({
       !slice18aOverlayShownProbeRef.current
     ) {
       slice18aOverlayShownProbeRef.current = true;
-      // eslint-disable-next-line no-console
-      console.debug("[slice18a-lite] bootstrap overlay shown");
     }
   }, [bootstrapIndicatorPhase]);
 
