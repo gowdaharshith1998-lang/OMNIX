@@ -10,6 +10,11 @@ const apiMock = vi.hoisted(() => ({
   getReceiptById: vi.fn(),
 }));
 
+const findingsMock = vi.hoisted(() => ({
+  fetchFindingScans: vi.fn(),
+  verifyScan: vi.fn(),
+}));
+
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
   return {
@@ -18,6 +23,11 @@ vi.mock("@/lib/api", async () => {
     getReceiptById: apiMock.getReceiptById,
   };
 });
+
+vi.mock("@/lib/findingsApi", () => ({
+  fetchFindingScans: findingsMock.fetchFindingScans,
+  verifyScan: findingsMock.verifyScan,
+}));
 
 function render(node: React.ReactElement): { root: Root; container: HTMLDivElement } {
   const container = document.createElement("div");
@@ -43,6 +53,14 @@ async function runDebounce() {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  findingsMock.fetchFindingScans.mockResolvedValue({ scans: [] });
+  findingsMock.verifyScan.mockResolvedValue({
+    verified: true,
+    reason: "ok",
+    scan_id: "2026-05-04T19-22-13Z_a3f9d712",
+    finding_count: 1,
+    manifest_summary: { finding_count: 1 },
+  });
   apiMock.listReceipts.mockResolvedValue([
     {
       receipt_id: "call_ok",
@@ -144,5 +162,79 @@ describe("ReceiptsDrawer", () => {
 
     expect(apiMock.getReceiptById).toHaveBeenCalledWith("ws1", "call_ok");
     expect(container.querySelector("pre")?.textContent).toContain('"call_id": "ok"');
+  });
+
+  it("tab switch renders findings section", async () => {
+    findingsMock.fetchFindingScans.mockResolvedValue({
+      scans: [
+        {
+          scan_id: "2026-05-04T19-22-13Z_a3f9d712",
+          scan_started_at: "2026-05-04T19:22:13.000Z",
+          scan_finished_at: null,
+          finding_count: 3,
+          dir_path_relative: "findings/proj/2026-05-04T19-22-13Z_a3f9d712",
+        },
+      ],
+    });
+    const { container } = render(<ReceiptsDrawer workspaceId="ws1" />);
+    await runDebounce();
+
+    const findingsTab = container.querySelector(
+      '[data-testid="tab-finding-scans"]',
+    ) as HTMLButtonElement | null;
+    expect(findingsTab).toBeTruthy();
+
+    await act(async () => {
+      findingsTab!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(findingsMock.fetchFindingScans).toHaveBeenCalled();
+    expect(container.textContent).toContain("2026-05-04");
+    expect(container.textContent).toContain("findings");
+  });
+
+  it("verify scan button calls API and renders badge", async () => {
+    const sid = "2026-05-04T19-22-13Z_a3f9d712";
+    findingsMock.fetchFindingScans.mockResolvedValue({
+      scans: [
+        {
+          scan_id: sid,
+          scan_started_at: "2026-05-04T19:22:13.000Z",
+          scan_finished_at: null,
+          finding_count: 2,
+          dir_path_relative: `findings/x/${sid}`,
+        },
+      ],
+    });
+    findingsMock.verifyScan.mockResolvedValue({
+      verified: true,
+      reason: "ok",
+      scan_id: sid,
+      finding_count: 2,
+      manifest_summary: { finding_count: 2, merkle_root: "abc" },
+    });
+
+    const { container } = render(<ReceiptsDrawer workspaceId="ws1" />);
+    await runDebounce();
+
+    await act(async () => {
+      (container.querySelector('[data-testid="tab-finding-scans"]') as HTMLButtonElement).click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const btn = container.querySelector(`[data-testid="verify-scan-${sid}"]`) as HTMLButtonElement | null;
+    expect(btn).toBeTruthy();
+
+    await act(async () => {
+      btn!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(findingsMock.verifyScan).toHaveBeenCalledWith(sid);
+    expect(container.textContent).toContain("verified");
   });
 });

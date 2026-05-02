@@ -56,6 +56,8 @@ from src.parser.grammar_status_query import (
     utc_now_iso,
 )
 from src.parser.ingest_dispatch import ingest_unified_codebase
+from src.axiom.finding_receipt import compute_project_id
+from src.find_bugs.receipt_emitter import verify_scan_directory
 from src.omnix_version import __version__
 from src.studio.bugs_scan import run_scan_for_workspace
 from src.studio.parser_bridge import ParserBridge, broadcast_to_workspace
@@ -124,6 +126,20 @@ class FilePutBody(BaseModel):
 
 class VerifyReceiptBody(BaseModel):
     receipt_path: str = Field(min_length=1)
+
+
+_FINDINGS_SCAN_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{20,80}$")
+
+
+def _studio_project_root_path() -> Path | None:
+    envp = (os.environ.get("OMNIX_STUDIO_INITIAL") or "").strip()
+    raw = INITIAL_STUDIO_PATH or envp or None
+    if not raw:
+        return None
+    try:
+        return Path(raw).resolve()
+    except OSError:
+        return None
 
 
 def _parse_host_hostname_studio(host_header: str) -> str:
@@ -440,6 +456,110 @@ def api_grammar_verify_receipt(
         "verified": verified,
         "verifier_output": verifier_output,
         "verified_at": utc_now_iso(),
+    }
+
+
+@app.get("/api/findings/scans")
+def api_findings_scans(request: Request) -> dict[str, Any]:
+    _require_localhost_starlette(request)
+    studio_root = _studio_project_root_path()
+    if studio_root is None:
+        return {"scans": []}
+    project_id = compute_project_id(studio_root)
+    receipts_root = (
+        Path.home() / ".omnix" / "receipts" / "findings" / project_id
+    ).resolve()
+    if not receipts_root.is_dir():
+        return {"scans": []}
+    scans: list[dict[str, Any]] = []
+    for sd in receipts_root.iterdir():
+        if not sd.is_dir():
+            continue
+        mp = sd / "scan_manifest.json"
+        if not mp.is_file():
+            continue
+        try:
+            m = json.loads(mp.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        scans.append(
+            {
+                "scan_id": str(m.get("scan_id") or sd.name),
+                "scan_started_at": m.get("scan_started_at"),
+                "scan_finished_at": m.get("scan_finished_at"),
+                "finding_count": int(m.get("finding_count") or 0),
+                "dir_path_relative": f"findings/{project_id}/{sd.name}",
+                "manifest_kind": m.get("manifest_kind"),
+            }
+        )
+    scans.sort(key=lambda s: str(s.get("scan_started_at") or ""), reverse=True)
+    return {"scans": scans}
+
+
+@app.post("/api/findings/verify-scan")
+async def api_findings_verify_scan(request: Request) -> dict[str, Any]:
+    _require_localhost_starlette(request)
+    try:
+        body = await request.json()
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail="invalid JSON body") from e
+    scan_id = str(body.get("scan_id") or "")
+    if not _FINDINGS_SCAN_ID_RE.fullmatch(scan_id):
+        raise HTTPException(
+            status_code=400,
+            detail="invalid scan_id format",
+        )
+    studio_root = _studio_project_root_path()
+    if studio_root is None:
+        raise HTTPException(
+            status_code=400,
+            detail="studio project path not configured",
+        )
+    project_id = compute_project_id(studio_root)
+    receipts_root = (
+        Path.home() / ".omnix" / "receipts" / "findings" / project_id
+    ).resolve()
+    try:
+        cand = (receipts_root / scan_id).resolve(strict=False)
+    except OSError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    try:
+        cand.relative_to(receipts_root)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="scan_id escapes canonical receipts root",
+        ) from None
+    if cand.name != scan_id:
+        raise HTTPException(status_code=400, detail="invalid scan path") from None
+    if not cand.is_dir():
+        raise HTTPException(status_code=404, detail="scan_id not found")
+
+    ed_pub = studio_root / ".omnix" / "pubkey.pem"
+    mldsa_pub = (Path.home() / ".omnix" / "keys" / "public.pem").expanduser()
+    ok, reason = verify_scan_directory(cand, ed_pub, mldsa_pub)
+
+    manifest_summary: dict[str, Any] = {}
+    finding_count = 0
+    mp = cand / "scan_manifest.json"
+    if mp.is_file():
+        try:
+            m = json.loads(mp.read_text(encoding="utf-8"))
+            finding_count = int(m.get("finding_count") or 0)
+            manifest_summary = {
+                "finding_count": finding_count,
+                "scan_summary": m.get("scan_summary", {}),
+                "merkle_root": m.get("merkle_root"),
+            }
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            manifest_summary = {}
+
+    return {
+        "verified": ok,
+        "reason": reason,
+        "scan_id": scan_id,
+        "finding_count": finding_count,
+        "manifest_summary": manifest_summary,
     }
 
 
