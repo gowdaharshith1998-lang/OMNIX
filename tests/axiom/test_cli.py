@@ -6,6 +6,7 @@ import os
 import tempfile
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from cli import main
@@ -29,6 +30,24 @@ def test_keygen_creates_pem_and_mode() -> None:
         sec = t / "secret.pem"
         assert pub.is_file() and sec.is_file()
         assert (os.stat(sec).st_mode & 0o777) == 0o600
+
+
+def test_keygen_project_ed25519_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = CliRunner()
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        monkeypatch.setenv("HOME", str(base / "home"))
+        proj = base / "repo"
+        proj.mkdir()
+        r = runner.invoke(main, ["axiom", "keygen", "--project", str(proj)])
+        assert r.exit_code == 0, r.output
+        assert "Generated new Ed25519 keypair" in r.output
+        assert "public key:" in r.output
+        pub = proj / ".omnix" / "pubkey.pem"
+        assert pub.is_file()
+        r2 = runner.invoke(main, ["axiom", "keygen", "--project", str(proj)])
+        assert r2.exit_code == 0, r2.output
+        assert "Key already exists" in r2.output
 
 
 def test_keygen_fails_unwritable() -> None:

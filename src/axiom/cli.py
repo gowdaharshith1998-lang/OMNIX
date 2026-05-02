@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import secrets
-import sys
 from pathlib import Path
 
 import click
@@ -17,7 +16,7 @@ _DEFAULT_KEY_DIR = Path.home() / ".omnix" / "keys"
 
 @click.group("axiom")
 def axiom_group() -> None:
-    """AXIOM ML-DSA-65 (FIPS 204) commands."""
+    """AXIOM: ML-DSA-65 (evolution receipts) and Ed25519 project keys (finding receipts)."""
 
 
 @axiom_group.command("keygen")
@@ -25,24 +24,49 @@ def axiom_group() -> None:
     "--out",
     "out_dir",
     type=click.Path(path_type=Path),
-    required=True,
-    help="Directory for public.pem and secret.pem",
+    default=None,
+    help="ML-DSA (legacy): write public.pem and secret.pem into this directory.",
 )
-def cmd_keygen(out_dir: Path) -> None:
-    try:
-        out_dir = out_dir.expanduser()
-        out_dir.mkdir(parents=True, exist_ok=True)
-        test = out_dir / ".omnix_write_test"
+@click.option(
+    "--project",
+    "project_path",
+    type=click.Path(path_type=Path, exists=True, file_okay=False, resolve_path=True),
+    default=".",
+    help="Ed25519 project key: repository root (default: cwd). Used when --out is omitted.",
+)
+def cmd_keygen(out_dir: Path | None, project_path: Path) -> None:
+    if out_dir is not None:
         try:
-            test.write_text("x", encoding="ascii")
-            test.unlink()
+            out_dir = out_dir.expanduser()
+            out_dir.mkdir(parents=True, exist_ok=True)
+            test = out_dir / ".omnix_write_test"
+            try:
+                test.write_text("x", encoding="ascii")
+                test.unlink()
+            except OSError as e:
+                click.echo(f"not writable: {out_dir}: {e}", err=True)
+                raise SystemExit(1) from e
+            keystore.write_keypair_dir(out_dir)
         except OSError as e:
-            click.echo(f"not writable: {out_dir}: {e}", err=True)
+            click.echo(str(e), err=True)
             raise SystemExit(1) from e
-        keystore.write_keypair_dir(out_dir)
+        return
+
+    from .finding_keys import ensure_project_key
+    from .finding_receipt import compute_project_id
+
+    try:
+        project_root = project_path.expanduser().resolve(strict=True)
+        project_id = compute_project_id(project_root)
+        _priv_path, pub_path, created = ensure_project_key(project_root)
     except OSError as e:
         click.echo(str(e), err=True)
         raise SystemExit(1) from e
+    if created:
+        click.echo(f"Generated new Ed25519 keypair for project {project_id}")
+    else:
+        click.echo(f"Key already exists for project {project_id}")
+    click.echo(f"  public key: {pub_path}")
 
 
 @axiom_group.command("sign")
