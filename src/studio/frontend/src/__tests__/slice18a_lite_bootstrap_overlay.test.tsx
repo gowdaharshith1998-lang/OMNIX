@@ -88,19 +88,15 @@ vi.mock("@/lib/t1Mode", () => ({
   isT1Mode: vi.fn(() => false),
 }));
 
-import { Workspace } from "../Workspace";
+import { Workspace } from "@/components/Workspace";
 
-function findLoadingOverlay(): Element | null {
-  const byData = document.querySelector("[data-omnix-bootstrap-overlay]");
-  if (byData) return byData;
-  for (const el of document.body.querySelectorAll('[aria-live="polite"]')) {
-    if (el.textContent?.includes("Building graph from")) return el;
-  }
-  return null;
+function findBootstrapOverlay(): HTMLElement | null {
+  const el = document.querySelector("[data-omnix-bootstrap-overlay]");
+  return el instanceof HTMLElement ? el : null;
 }
 
 const initialStats = {
-  files: 1,
+  files: 3,
   functions: 0,
   classes: 0,
   edges: 0,
@@ -123,7 +119,7 @@ function renderWorkspace(): Root {
   return root;
 }
 
-describe("slice 6d bootstrap overlay (Option A)", () => {
+describe("slice 18a-lite bootstrap overlay", () => {
   beforeEach(() => {
     wsHarness.reset();
     vi.useFakeTimers();
@@ -134,13 +130,89 @@ describe("slice 6d bootstrap overlay (Option A)", () => {
     document.body.replaceChildren();
   });
 
-  it("shows overlay during initial connect/open before bootstrap_complete, then removes after fade", async () => {
+  it("overlay visible when bootstrap_start received (file count)", async () => {
     const root = renderWorkspace();
     await act(async () => {
       await Promise.resolve();
     });
 
-    expect(document.body.textContent).toContain("Building graph from");
+    const onMessage = wsHarness.lastOnMessage!;
+    await act(async () => {
+      onMessage({
+        type: "bootstrap_start",
+        ts: 0,
+        workspace_id: "ws-test",
+        total_files: 42,
+        mode: "existing",
+      });
+    });
+
+    const overlay = findBootstrapOverlay();
+    expect(overlay).not.toBeNull();
+    expect(overlay?.textContent).toContain("Building graph from 42 files");
+
+    await act(async () => {
+      onMessage({
+        type: "bootstrap_complete",
+        duration_ms: 1,
+        total_nodes: 0,
+        total_edges: 0,
+      });
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(320);
+    });
+
+    expect(findBootstrapOverlay()).toBeNull();
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("fallback copy when file count unknown", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() => {
+      root.render(
+        React.createElement(Workspace, {
+          workspaceId: "ws-test",
+          projectPath: "/tmp/proj",
+          initialStats: { files: 0, functions: 0, classes: 0, edges: 0 },
+          onBack: () => {},
+        })
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const onMessage = wsHarness.lastOnMessage!;
+    await act(async () => {
+      onMessage({
+        type: "bootstrap_start",
+        ts: 0,
+        workspace_id: "ws-test",
+        total_files: 0,
+        mode: "scratch",
+      });
+    });
+
+    const overlay = findBootstrapOverlay();
+    expect(overlay?.textContent).toContain("your workspace");
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("overlay hidden ~300ms after bootstrap_complete", async () => {
+    const root = renderWorkspace();
+    await act(async () => {
+      await Promise.resolve();
+    });
 
     const onMessage = wsHarness.lastOnMessage!;
     await act(async () => {
@@ -152,27 +224,28 @@ describe("slice 6d bootstrap overlay (Option A)", () => {
       });
     });
 
-    const pill = findLoadingOverlay();
-    expect(pill?.className).toMatch(/opacity-0/);
+    expect(findBootstrapOverlay()).not.toBeNull();
 
     await act(async () => {
-      vi.advanceTimersByTime(300);
+      vi.advanceTimersByTime(299);
     });
+    expect(findBootstrapOverlay()).not.toBeNull();
 
-    expect(document.body.textContent).not.toContain("Building graph from");
+    await act(async () => {
+      vi.advanceTimersByTime(2);
+    });
+    expect(findBootstrapOverlay()).toBeNull();
 
     act(() => {
       root.unmount();
     });
   });
 
-  it("does not show bootstrap overlay while reconnecting (closed/connecting with prior open)", async () => {
+  it("does not show overlay on reconnect bootstrap", async () => {
     const root = renderWorkspace();
     await act(async () => {
       await Promise.resolve();
     });
-
-    expect(document.body.textContent).toContain("Building graph from");
 
     await act(async () => {
       wsHarness.lastOnMessage!({
@@ -183,54 +256,46 @@ describe("slice 6d bootstrap overlay (Option A)", () => {
       });
     });
     await act(async () => {
-      vi.advanceTimersByTime(300);
+      vi.advanceTimersByTime(320);
     });
-    expect(findLoadingOverlay()).toBeNull();
+    expect(findBootstrapOverlay()).toBeNull();
 
     await act(async () => {
       wsHarness.latest!.close();
     });
-    expect(findLoadingOverlay()).toBeNull();
-
     await act(async () => {
       wsHarness.latest!.emitConnecting();
     });
-    expect(findLoadingOverlay()).toBeNull();
-
     await act(async () => {
       wsHarness.latest!.emitOpen();
     });
-    expect(findLoadingOverlay()).toBeNull();
+
+    await act(async () => {
+      wsHarness.lastOnMessage!({
+        type: "bootstrap_start",
+        ts: 0,
+        workspace_id: "ws-test",
+        total_files: 99,
+        mode: "existing",
+      });
+    });
+
+    expect(findBootstrapOverlay()).toBeNull();
 
     act(() => {
       root.unmount();
     });
   });
 
-  it("applies hiding opacity before timer clears the overlay", async () => {
+  it("overlay does not block pointer events (X-Ray remains interactable)", async () => {
     const root = renderWorkspace();
     await act(async () => {
       await Promise.resolve();
     });
 
-    const onMessage = wsHarness.lastOnMessage!;
-    await act(async () => {
-      onMessage({
-        type: "bootstrap_complete",
-        duration_ms: 1,
-        total_nodes: 0,
-        total_edges: 0,
-      });
-    });
-
-    const pill = findLoadingOverlay();
-    expect(pill?.className).toMatch(/opacity-0/);
-    expect(pill?.className).toMatch(/duration-\[280ms\]/);
-
-    await act(async () => {
-      vi.advanceTimersByTime(300);
-    });
-    expect(findLoadingOverlay()).toBeNull();
+    const overlay = findBootstrapOverlay();
+    expect(overlay).not.toBeNull();
+    expect(overlay?.className).toMatch(/pointer-events-none/);
 
     act(() => {
       root.unmount();

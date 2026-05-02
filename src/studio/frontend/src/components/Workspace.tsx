@@ -27,7 +27,7 @@ import { NewFileModal } from "./NewFileModal";
 import { RightPanel, type RightPanelTab, type RightPanelTabId } from "./RightPanel";
 import { StatsPanel } from "./StatsPanel";
 import { XRayTab } from "./XRayTab";
-import { BootstrapIndicator } from "./BootstrapIndicator";
+import { BootstrapOverlay } from "./BootstrapOverlay";
 import { EmptyScopeState } from "./EmptyScopeState";
 import {
   ReconnectIndicator,
@@ -261,6 +261,11 @@ export function Workspace({
   const [bootstrapPhase, setBootstrapPhase] = useState<
     "pending" | "shown" | "hiding" | "hidden"
   >("pending");
+  /** null until first `bootstrap_start` for this session (slice 18a-lite). */
+  const [bootstrapFileHint, setBootstrapFileHint] = useState<{
+    source: "ws";
+    total: number;
+  } | null>(null);
   const [reconnectedPhase, setReconnectedPhase] = useState<
     "hidden" | "shown" | "fade"
   >("hidden");
@@ -619,6 +624,13 @@ export function Workspace({
             setBugsScanSummary(m.summary);
           }
         }
+        if (m.type === "bootstrap_start" && !hasBootstrappedRef.current) {
+          const tf = m.total_files;
+          setBootstrapFileHint({
+            source: "ws",
+            total: typeof tf === "number" ? tf : 0,
+          });
+        }
         if (m.type === "bootstrap_complete" && !hasBootstrappedRef.current) {
           hasBootstrappedRef.current = true;
           setBootstrapPhase("hiding");
@@ -627,8 +639,10 @@ export function Workspace({
           }
           bootstrapHideTimerRef.current = setTimeout(() => {
             bootstrapHideTimerRef.current = null;
+            // eslint-disable-next-line no-console
+            console.debug("[slice18a-lite] bootstrap overlay hidden");
             setBootstrapPhase("hidden");
-          }, 200);
+          }, 300);
         }
         graphRef.current?.ingestMessage(msg);
         ingestWorkspaceMessage(m);
@@ -692,6 +706,13 @@ export function Workspace({
     !hasBootstrappedRef.current &&
     !isReconnecting;
 
+  const bootstrapOverlayFileCount = useMemo(() => {
+    if (bootstrapFileHint?.source === "ws") {
+      return bootstrapFileHint.total > 0 ? bootstrapFileHint.total : null;
+    }
+    return initialStats.files > 0 ? initialStats.files : null;
+  }, [bootstrapFileHint, initialStats.files]);
+
   useEffect(() => {
     if (isT1Mode()) return;
     if (bootstrapPhase === "pending" && loadingGate) {
@@ -707,6 +728,19 @@ export function Workspace({
         : loadingGate
           ? "shown"
           : "hidden";
+
+  const slice18aOverlayShownProbeRef = useRef(false);
+  useEffect(() => {
+    if (isT1Mode()) return;
+    if (
+      bootstrapIndicatorPhase === "shown" &&
+      !slice18aOverlayShownProbeRef.current
+    ) {
+      slice18aOverlayShownProbeRef.current = true;
+      // eslint-disable-next-line no-console
+      console.debug("[slice18a-lite] bootstrap overlay shown");
+    }
+  }, [bootstrapIndicatorPhase]);
 
   useEffect(() => {
     if (!codeTarget?.nodeId) return;
@@ -956,7 +990,10 @@ export function Workspace({
       </nav>
 
       <ReconnectIndicator mode={reconnectIndicatorMode} />
-      <BootstrapIndicator phase={bootstrapIndicatorPhase} />
+      <BootstrapOverlay
+        phase={bootstrapIndicatorPhase}
+        fileCount={bootstrapOverlayFileCount}
+      />
 
       <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
         <div className="relative min-h-0 w-full min-w-0 flex-1">
