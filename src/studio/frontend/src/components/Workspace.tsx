@@ -773,10 +773,8 @@ export function Workspace({
     };
   }, [openXRayNode]);
 
-  const onDrillSaveShell = useCallback(() => {
-    setToast("Code tab save lands next");
-    setTimeout(() => setToast(null), 2200);
-  }, []);
+  /** Cmd+S when no code target: intentional noop — CodeTab handles save when focused with a file. */
+  const onCmdSWhenNoDrill = useCallback(() => {}, []);
 
   const pName = projectLabel(projectPath);
   const searchFallbackNodes = useMemo(() => Array.from(graphNodes.values()), [graphNodes]);
@@ -873,6 +871,10 @@ export function Workspace({
 
   const crumbChain = ancestryChain(currentScope, scopeById);
 
+  const handleGraphDeselect = useCallback(() => {
+    setSelectedNode(null);
+  }, []);
+
   useStudioKeybindings({
     drillOpen: codeTarget != null,
     onEscape: () => {
@@ -894,7 +896,7 @@ export function Workspace({
     onToggleRightPanel: () =>
       setRightPanelCollapsed(!shellLayout.rightPanel.collapsed),
     onNewFile: () => setNewFile(true),
-    onCmdSWhenNoDrill: onDrillSaveShell,
+    onCmdSWhenNoDrill,
     onSaveDrill: () => codeRef.current?.save(),
   });
 
@@ -1016,7 +1018,7 @@ export function Workspace({
                   onT1GraphNodes={onT1GraphNodes}
                   onT1GraphEdges={onT1GraphEdges}
                   onFileOrDirClick={openXRayFileOrDir}
-                  onDeselect={() => undefined}
+                  onDeselect={handleGraphDeselect}
                   onNavigationStateChange={setGraphCanGoBack}
                   onViewerScope={onViewerScope}
                   onScopeVisualEmpty={onScopeVisualEmpty}

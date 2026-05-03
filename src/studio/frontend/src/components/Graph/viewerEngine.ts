@@ -5821,7 +5821,6 @@ export function installOmnixViewerEngine(studio) {
       if (now - lastFps >= 500) {
         const fps = Math.round((frames * 1000) / (now - lastFps));
         setOmnixFpsSample(fps);
-        document.getElementById('fps-counter').textContent = fps + ' FPS';
         frames = 0;
         lastFps = now;
       }

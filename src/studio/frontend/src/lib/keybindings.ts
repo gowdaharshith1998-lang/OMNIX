@@ -1,7 +1,7 @@
 /**
  * Global Studio keyboard policy: Esc priority, Cmd+P, Cmd+S, Cmd+N.
- * Cmd+S: when the drill-down is open, the caller should save the editor
- * (via ref); when closed, a shell no-op (toast) can be shown.
+ * Cmd+S: CodeTab.save via ref when `drillOpen` (code target present); otherwise
+ * `onCmdSWhenNoDrill` — intentionally silent (no save-page dialog; no stub toast).
  */
 
 import { useEffect, useRef } from "react";

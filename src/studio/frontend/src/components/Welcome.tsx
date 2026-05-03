@@ -60,14 +60,6 @@ export function Welcome({ onOpenPath, busy }: Props) {
             >
               Open folder
             </button>
-            <button
-              type="button"
-              disabled={busy || !path.trim()}
-              onClick={() => onOpenPath(path.trim())}
-              className="omnix-glass cursor-pointer rounded-md border px-4 py-2 text-sm text-omnix-text-primary transition hover:shadow-omnix-glow disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              New project
-            </button>
           </div>
         </div>
 

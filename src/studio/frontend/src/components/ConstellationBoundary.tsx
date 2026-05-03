@@ -50,16 +50,10 @@ export class ConstellationBoundary extends Component<Props, State> {
             >
               Retry
             </button>
-            <button
-              type="button"
-              title="Press F12 (Chromium) to open developer tools"
-              className="rounded-md border border-omnix-accent-indigo/25 px-3 py-1.5 text-xs uppercase tracking-wide text-omnix-text-muted transition hover:border-omnix-accent-indigo/40 hover:text-omnix-text-primary"
-            >
-              Open devtools
-            </button>
           </div>
-          <p className="text-[10px] text-omnix-text-dim">
-            Use browser devtools (F12) — Console / WebGPU tabs for engine detail.
+          <p className="max-w-sm text-[11px] text-omnix-text-muted">
+            Press F12 (or right-click → Inspect) to open DevTools — Console / WebGPU tabs for engine
+            detail.
           </p>
         </div>
       );

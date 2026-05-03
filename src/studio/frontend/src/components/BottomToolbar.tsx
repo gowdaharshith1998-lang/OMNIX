@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { getOmnixFpsSample } from "./Graph/omnixViewerMetrics";
 
 const btnClass =
   "shrink-0 cursor-pointer rounded-lg border font-sans text-xs font-medium transition-all " +
@@ -15,6 +16,11 @@ type Props = {
 };
 
 export function BottomToolbar({ onExportJson, onDarkMatter, onTimeline }: Props) {
+  const [fps, setFps] = useState(() => getOmnixFpsSample());
+  useEffect(() => {
+    const id = window.setInterval(() => setFps(getOmnixFpsSample()), 500);
+    return () => window.clearInterval(id);
+  }, []);
   const [fs, setFs] = useState(!!document.fullscreenElement);
   useEffect(() => {
     const s = () => setFs(!!document.fullscreenElement);
@@ -52,13 +58,16 @@ export function BottomToolbar({ onExportJson, onDarkMatter, onTimeline }: Props)
       <button type="button" className={btnClass} onClick={onExportJson}>
         Export JSON
       </button>
-      <span
-        id="fps-counter"
-        className="ml-2 flex items-center font-mono text-[11px] text-[#4ade80]"
-      >
-        <span className="omnix-fps-dot" aria-hidden />
-        60 FPS
-      </span>
+      {fps > 0 ? (
+        <span
+          id="fps-counter"
+          className="ml-2 flex items-center font-mono text-[11px] text-[#4ade80]"
+          aria-live="polite"
+        >
+          <span className="omnix-fps-dot" aria-hidden />
+          {Math.round(fps)} FPS
+        </span>
+      ) : null}
     </div>
   );
 }
