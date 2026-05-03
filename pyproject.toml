@@ -13,6 +13,7 @@ dependencies = [
     "click>=8.1",
     "fastapi>=0.110",
     "hypothesis>=6.100",
+    "keyring>=25.0",
     "uvicorn[standard]>=0.25",
     "watchdog>=6.0",
 ]
@@ -25,7 +26,7 @@ omnix = "cli:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
-packages = ["axiom", "scan", "scan.turboscan", "fabric", "verify", "find_bugs", "parser"]
+packages = ["axiom", "scan", "scan.turboscan", "fabric", "fabric.providers", "providers", "verify", "find_bugs", "parser"]
 py-modules = ["cli"]
 
 [tool.pytest.ini_options]

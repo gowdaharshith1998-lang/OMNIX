@@ -9,6 +9,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from providers.registry import PROVIDERS
+
 CONFIG_PATH = Path.home() / ".omnix" / "fabric_config.json"
 
 _DEFAULT: dict[str, Any] = {
@@ -23,16 +25,10 @@ _DEFAULT: dict[str, Any] = {
     },
     "agent_overrides": {},
     "budgets_usd_per_day": {
-        "anthropic": 20.0,
-        "openai": 20.0,
-        "google": 20.0,
-        "ollama": 1000000.0,
+        name: (1000000.0 if name == "ollama" else 20.0) for name in PROVIDERS
     },
     "default_models": {
-        "anthropic": "claude-haiku-4-5",
-        "openai": "gpt-4.1-mini",
-        "google": "gemini-2.5-flash",
-        "ollama": "llama3.2:3b",
+        name: spec.default_model for name, spec in PROVIDERS.items() if spec.default_model
     },
     "pricing_usd_per_million_tokens": {
         "anthropic:claude-haiku-4-5": {"in": 0.80, "out": 4.00},
@@ -44,6 +40,7 @@ _DEFAULT: dict[str, Any] = {
     "n_max_attempts_default": 3,
     "max_concurrent_dispatches": 4,
 }
+_DEFAULT["default_models"]["anthropic"] = "claude-haiku-4-5"
 
 
 def default_config() -> dict[str, Any]:

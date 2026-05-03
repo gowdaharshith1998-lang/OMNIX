@@ -79,6 +79,11 @@ from src.studio.ws_protocol import (
     msg_pong,
     msg_stats,
 )
+from axiom import provider_vault
+from providers.detect import identify_provider
+from providers.registry import PROVIDERS
+
+_LOG = logging.getLogger("omnix.studio")
 
 INITIAL_STUDIO_PATH: str | None = None
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -275,6 +280,106 @@ async def _start_background_ingest(w: Workspace, loop: asyncio.AbstractEventLoop
 
 
 # --- API ---
+
+
+class ProviderDetectBody(BaseModel):
+    raw_key: str = Field(default="")
+    custom_base_url: str | None = None
+
+
+class ProviderKeyBody(BaseModel):
+    raw_key: str = Field(default="")
+    scope: str = Field(default="global")
+    project_id: str | None = None
+    override_provider: str | None = None
+    custom_base_url: str | None = None
+    custom_model: str | None = None
+
+
+def _provider_meta_dict(meta: provider_vault.KeyMetadata) -> dict[str, Any]:
+    return {
+        "id": meta.id,
+        "provider": meta.provider,
+        "display_name": PROVIDERS.get(meta.provider).display_name
+        if meta.provider in PROVIDERS
+        else meta.provider,
+        "scope": meta.scope,
+        "fingerprint": meta.fingerprint,
+        "registered_at": meta.registered_at,
+        "project_id": meta.project_id,
+        "custom_base_url": meta.custom_base_url,
+        "custom_model": meta.custom_model,
+    }
+
+
+@app.post("/api/providers/detect")
+async def api_provider_detect(
+    request: Request, body: ProviderDetectBody
+) -> dict[str, Any]:
+    _require_localhost_starlette(request)
+    raw = body.raw_key.strip()
+    if not raw:
+        raise HTTPException(status_code=422, detail="raw_key is required")
+    result = await identify_provider(raw, body.custom_base_url)
+    return result.to_dict()
+
+
+@app.post("/api/providers/keys")
+async def api_provider_keys_post(
+    request: Request, body: ProviderKeyBody
+) -> dict[str, Any]:
+    _require_localhost_starlette(request)
+    raw = body.raw_key.strip()
+    if not raw:
+        raise HTTPException(status_code=422, detail="raw_key is required")
+    if body.scope not in ("global", "project"):
+        raise HTTPException(status_code=422, detail="scope must be global or project")
+    provider = body.override_provider
+    if provider:
+        if provider not in PROVIDERS:
+            raise HTTPException(status_code=422, detail="unknown provider")
+    else:
+        result = await identify_provider(raw, body.custom_base_url)
+        provider = result.provider
+    if provider == "unknown":
+        raise HTTPException(status_code=422, detail="provider could not be detected")
+    if provider == "custom" and not body.custom_base_url:
+        raise HTTPException(status_code=422, detail="custom_base_url is required")
+    scope = "project" if body.scope == "project" else "global"
+    project_id = body.project_id if scope == "project" else None
+    if any(
+        k.provider == provider and k.scope == scope and k.project_id == project_id
+        for k in provider_vault.list_keys(project_id)
+    ):
+        raise HTTPException(status_code=409, detail="provider key already registered")
+    try:
+        meta = provider_vault.encrypt_key(
+            provider,
+            raw,
+            scope,  # type: ignore[arg-type]
+            project_id,
+            custom_base_url=body.custom_base_url if provider == "custom" else None,
+            custom_model=body.custom_model if provider == "custom" else None,
+        )
+    except Exception as e:
+        _LOG.warning("provider vault encryption failed: %s", type(e).__name__)
+        raise HTTPException(status_code=500, detail="provider vault encryption failed") from e
+    return _provider_meta_dict(meta)
+
+
+@app.get("/api/providers/keys")
+def api_provider_keys_get(request: Request, project_id: str | None = None) -> dict[str, Any]:
+    _require_localhost_starlette(request)
+    return {"keys": [_provider_meta_dict(k) for k in provider_vault.list_keys(project_id)]}
+
+
+@app.delete("/api/providers/keys/{key_id:path}")
+def api_provider_keys_delete(request: Request, key_id: str) -> dict[str, Any]:
+    _require_localhost_starlette(request)
+    deleted = provider_vault.delete_key_id(key_id)
+    if not deleted:
+        return {"deleted": False, "reason": "not_found"}
+    return {"deleted": True, "id": key_id}
 
 
 @app.get("/api/health")

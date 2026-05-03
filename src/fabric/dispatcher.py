@@ -16,12 +16,13 @@ from typing import Any
 
 from fabric import budget, dedup, health, policy, pricing, receipts, telemetry
 from fabric.config import load_config
-from fabric.providers import anthropic, google, ollama, openai
+from fabric.providers import anthropic, google, ollama, openai_compatible
 from fabric.providers.common import is_transient_http_status
+from providers.registry import PROVIDERS, valid_provider_names
 
 _LOG = logging.getLogger("omnix.fabric")
 
-_VALID = frozenset({"anthropic", "openai", "google", "ollama"})
+_VALID = valid_provider_names()
 _inflight_lock = threading.Lock()
 _inflight_by_provider: dict[str, int] = defaultdict(int)
 
@@ -130,16 +131,24 @@ def _call_provider(
             timeout_s=timeout_s,
         )
         return anthropic.normalize_response(st, data)
-    if provider == "openai":
-        st, data = openai.call(
+    spec = PROVIDERS.get(provider)
+    if spec and spec.adapter == "openai_compatible":
+        base_url = spec.base_url
+        if provider == "custom":
+            custom_base = options.get("custom_base_url")
+            if isinstance(custom_base, str) and custom_base.strip():
+                base_url = custom_base.strip()
+        st, data = openai_compatible.call(
             model=model,
             api_key=key,
             messages=messages,
             max_tokens=max_tokens,
             timeout_s=timeout_s,
+            base_url=base_url,
+            chat_endpoint=spec.chat_endpoint,
         )
-        return openai.normalize_response(st, data)
-    if provider == "google":
+        return openai_compatible.normalize_response(st, data)
+    if spec and spec.adapter == "google":
         st, data = google.call(
             model=model,
             api_key=key,
@@ -148,8 +157,8 @@ def _call_provider(
             timeout_s=timeout_s,
         )
         return google.normalize_response(st, data)
-    if provider == "ollama":
-        base = str(cfg.get("ollama_base_url") or "http://127.0.0.1:11434")
+    if spec and spec.adapter == "ollama":
+        base = str(spec.base_url or cfg.get("ollama_base_url") or "http://127.0.0.1:11434")
         st, data = ollama.call(
             model=model,
             api_key=key,

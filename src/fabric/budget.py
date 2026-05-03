@@ -9,6 +9,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from providers.registry import PROVIDERS
+
 _lock = threading.Lock()
 _used: dict[str, float] = {}
 _day: str | None = None
@@ -70,7 +72,7 @@ def budget_snapshot(cfg: dict[str, Any]) -> dict[str, dict[str, float]]:
     with _lock:
         _rollover_if_needed()
         out: dict[str, dict[str, float]] = {}
-        for p in ("anthropic", "openai", "google", "ollama"):
+        for p in PROVIDERS:
             cap = cap_for_provider(cfg, p)
             out[p] = {"budget_used_today": float(_used.get(p, 0.0)), "budget_cap_today": cap}
         return out

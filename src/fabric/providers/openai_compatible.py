@@ -1,5 +1,6 @@
-"""src/fabric/providers/openai.py — OpenAI Chat Completions adapter
-Compliance: P11, P20, P22
+"""OpenAI-compatible Chat Completions adapter.
+
+Used for OpenAI plus provider endpoints that implement the OpenAI chat shape.
 """
 
 from __future__ import annotations
@@ -8,7 +9,7 @@ from typing import Any
 
 from fabric.providers import common
 
-_API = "https://api.openai.com/v1/chat/completions"
+_DEFAULT_BASE_URL = "https://api.openai.com/v1"
 
 
 def call(
@@ -18,6 +19,8 @@ def call(
     messages: list[dict[str, str]],
     max_tokens: int,
     timeout_s: float,
+    base_url: str | None = None,
+    chat_endpoint: str = "/chat/completions",
 ) -> tuple[int, dict[str, Any]]:
     openai_msgs: list[dict[str, str]] = []
     for m in messages:
@@ -34,8 +37,14 @@ def call(
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
+    root = (base_url or _DEFAULT_BASE_URL).rstrip("/")
+    endpoint = chat_endpoint if chat_endpoint.startswith("/") else f"/{chat_endpoint}"
     status, data = common.request_json(
-        _API, method="POST", headers=headers, body=body, timeout_s=timeout_s
+        root + endpoint,
+        method="POST",
+        headers=headers,
+        body=body,
+        timeout_s=timeout_s,
     )
     return status, data if isinstance(data, dict) else {"raw": data}
 
@@ -49,8 +58,8 @@ def normalize_response(status: int, data: dict[str, Any]) -> dict[str, Any]:
             "usage": {"tokens_in": 0, "tokens_out": 0},
             "raw_response": {"status": status},
         }
-    choices = data.get("choices") or []
     text = ""
+    choices = data.get("choices") or []
     if choices and isinstance(choices[0], dict):
         msg = choices[0].get("message") or {}
         text = str(msg.get("content", ""))

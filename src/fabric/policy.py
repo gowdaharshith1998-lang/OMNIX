@@ -6,7 +6,9 @@ from __future__ import annotations
 
 from typing import Any
 
-_VALID = frozenset({"anthropic", "openai", "google", "ollama"})
+from providers.registry import valid_provider_names
+
+_VALID = valid_provider_names()
 
 
 def chain_for_task(cfg: dict[str, Any], task_kind: str) -> list[str]:
