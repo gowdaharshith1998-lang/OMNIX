@@ -49,7 +49,7 @@ export function XRayContent({
   }
 
   if (active === "receipts") {
-    return <ReceiptsTab />;
+    return <ReceiptsTab workspaceId={workspaceId} />;
   }
 
   if (active === "history") {
