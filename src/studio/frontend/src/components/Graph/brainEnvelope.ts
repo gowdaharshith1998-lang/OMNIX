@@ -163,9 +163,6 @@ export function generateBrainEnvelope(spec: EnvelopeSpec): Hex[] {
     return { d, f };
   };
 
-  let { d: dataCount, f: fillerCount } = countDF();
-  let ratio = dataCount === 0 ? ratioMax : fillerCount / Math.max(1, dataCount);
-
   const farFromCluster = (c: Cell) => {
     const clId = clusterOf.get(c.key);
     const cl = spec.clusters.find((k) => k.id === clId);
