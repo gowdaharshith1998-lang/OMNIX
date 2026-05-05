@@ -232,7 +232,7 @@ describe("XRayTab", () => {
     expect(container.textContent).toContain("CALLS");
   });
 
-  it("fires no-op suggested action affordance from diagnostics tab", () => {
+  it("renders RECEIPTS stub (no actions) in Phase 1", () => {
     const onAction = vi.fn();
     const manyEntangled = Array.from({ length: 9 }, (_, i): GraphEdge => ({
       id: `ent-${i}`,
@@ -257,18 +257,16 @@ describe("XRayTab", () => {
       />
     );
     act(() => {
-      const diag = [...container.querySelectorAll(".xray-itabs [role='tab']")].find(
-        (b) => b.textContent?.trim() === "Diagnostics"
+      const receipts = [...container.querySelectorAll(".xray-itabs [role='tab']")].find(
+        (b) => b.textContent?.trim() === "RECEIPTS"
       );
-      diag?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      receipts?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    act(() =>
-      container.querySelector(".xray-issue button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
-    );
-    expect(onAction).toHaveBeenCalled();
+    expect(container.textContent).toContain("No receipts yet");
+    expect(onAction).not.toHaveBeenCalled();
   });
 
-  it("renders healthy empty diagnostics state", () => {
+  it("renders RECEIPTS stub empty state with no graph", () => {
     resetStudioScopeForTests();
     const { container } = render(
       <XRayTab
@@ -285,15 +283,15 @@ describe("XRayTab", () => {
       />
     );
     act(() => {
-      const diag = [...container.querySelectorAll(".xray-itabs [role='tab']")].find(
-        (b) => b.textContent?.trim() === "Diagnostics"
+      const receipts = [...container.querySelectorAll(".xray-itabs [role='tab']")].find(
+        (b) => b.textContent?.trim() === "RECEIPTS"
       );
-      diag?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      receipts?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(container.textContent).toContain("No issues detected");
+    expect(container.textContent).toContain("No receipts yet");
   });
 
-  it("surfaces entanglement diagnostics on the Diagnostics tab", () => {
+  it("renders HISTORY stub (inner inspector history is no longer a redirect)", () => {
     const manyEntangled = Array.from({ length: 9 }, (_, i): GraphEdge => ({
       id: `ent-${i}`,
       source_id: "n1",
@@ -317,12 +315,12 @@ describe("XRayTab", () => {
       />
     );
     act(() => {
-      const diag = [...container.querySelectorAll(".xray-itabs [role='tab']")].find(
-        (b) => b.textContent?.trim() === "Diagnostics"
+      const history = [...container.querySelectorAll(".xray-itabs [role='tab']")].find(
+        (b) => b.textContent?.trim() === "HISTORY"
       );
-      diag?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      history?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(container.textContent).toContain("extreme coupling");
+    expect(container.textContent).toContain("No history yet");
   });
 
   it("routes graph node clicks to X-Ray in Workspace", async () => {

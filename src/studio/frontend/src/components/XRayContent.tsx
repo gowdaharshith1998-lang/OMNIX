@@ -3,6 +3,9 @@ import { getFile } from "@/lib/api";
 import type { GraphNode } from "@/types/drilldown";
 import type { XRayIssue } from "@/lib/xray_diagnostics";
 import type { XRayInnerTab } from "./XRayItabs";
+import { AgentTab } from "./inspector/AgentTab";
+import { EntityHistoryTab } from "./inspector/EntityHistoryTab";
+import { ReceiptsTab } from "./inspector/ReceiptsTab";
 
 type Conn = {
   direction: "out" | "in";
@@ -118,7 +121,7 @@ export function XRayContent({
   const [codeErr, setCodeErr] = useState<string | null>(null);
 
   useEffect(() => {
-    if (active !== "code") return;
+    if (active !== "brain") return;
     const sym = isSymbol(selectedNode) ? selectedNode : null;
     const path = sym?.file_path;
     if (!path) {
@@ -144,51 +147,18 @@ export function XRayContent({
   }, [active, workspaceId, selectedNode]);
 
   if (active === "agent") {
-    return (
-      <section className="xray-agent space-y-2 font-mono text-[11px] text-omnix-text-muted">
-        <p>Quick actions</p>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            className="rounded-md border border-omnix-accent-indigo/35 px-2 py-1 text-[10px] uppercase text-omnix-text-primary transition hover:bg-[rgba(99,102,241,0.12)]"
-            onClick={onSuggestedAction}
-          >
-            Explain selection
-          </button>
-          <button
-            type="button"
-            className="rounded-md border border-omnix-accent-indigo/35 px-2 py-1 text-[10px] uppercase text-omnix-text-primary transition hover:bg-[rgba(99,102,241,0.12)]"
-            onClick={onSuggestedAction}
-          >
-            Find callers
-          </button>
-        </div>
-      </section>
-    );
+    return <AgentTab />;
   }
 
-  if (active === "diagnostics") {
-    return (
-      <DiagnosticsBody
-        scopeAtomId={scopeAtomId}
-        issues={issues}
-        onSuggestedAction={onSuggestedAction}
-        filesystemHygieneCleanLine={filesystemHygieneCleanLine}
-      />
-    );
+  if (active === "receipts") {
+    return <ReceiptsTab />;
   }
 
   if (active === "history") {
-    return (
-      <p className="font-mono text-[11px] text-omnix-text-muted">
-        Workspace revision history lives in the{" "}
-        <span className="text-omnix-text-primary">History</span> panel tab in the
-        right rail.
-      </p>
-    );
+    return <EntityHistoryTab />;
   }
 
-  /* Code */
+  /* BRAIN */
   if (selectedNode != null && isSymbol(selectedNode)) {
     const sym = selectedNode;
     return (

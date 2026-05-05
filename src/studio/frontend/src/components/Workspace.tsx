@@ -816,7 +816,7 @@ export function Workspace({
   const rightTabs: RightPanelTab[] = [
     {
       id: "xray",
-      label: "X-Ray",
+      label: "BRAIN",
       content: (
         <XRayTab
           workspaceId={workspaceId}

@@ -229,7 +229,7 @@ export function XRayTab({
   onSuggestedAction,
 }: Props) {
   const { currentScope, selectedNodeId } = useScope();
-  const [innerTab, setInnerTab] = useState<XRayInnerTab>("code");
+  const [innerTab, setInnerTab] = useState<XRayInnerTab>("brain");
 
   const scopeRecord = scopeById.get(currentScope) ?? null;
 

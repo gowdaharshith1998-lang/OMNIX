@@ -1,4 +1,4 @@
-export type XRayInnerTab = "code" | "agent" | "diagnostics" | "history";
+export type XRayInnerTab = "brain" | "agent" | "receipts" | "history";
 
 type Props = {
   active: XRayInnerTab;
@@ -6,10 +6,10 @@ type Props = {
 };
 
 const TABS: { id: XRayInnerTab; label: string }[] = [
-  { id: "code", label: "Code" },
-  { id: "agent", label: "Agent" },
-  { id: "diagnostics", label: "Diagnostics" },
-  { id: "history", label: "History" },
+  { id: "brain", label: "BRAIN" },
+  { id: "agent", label: "AGENT" },
+  { id: "receipts", label: "RECEIPTS" },
+  { id: "history", label: "HISTORY" },
 ];
 
 export function XRayItabs({ active, onSelect }: Props) {
@@ -17,7 +17,7 @@ export function XRayItabs({ active, onSelect }: Props) {
     <div
       className="xray-itabs mb-3 flex flex-wrap gap-1 border-b border-omnix-accent-indigo/15 pb-2"
       role="tablist"
-      aria-label="X-Ray tabs"
+      aria-label="Brain tabs"
     >
       {TABS.map((t) => (
         <button
