@@ -10,6 +10,32 @@ import {
 } from "./galaxyStressHarness";
 import { generateStressGraph } from "./syntheticStressGraph";
 import { setOmnixFpsSample } from "./omnixViewerMetrics";
+import { generateBrainEnvelope } from './brainEnvelope';
+import { colorForType, FALLBACK_COLOR } from './entityPalette';
+
+/** Slice-20 test anchors — keep in sync with inner HEX_BASE_RADIUS / ring pass */
+export const SLICE20_HEX_BASE_RADIUS = 4;
+export const SLICE20_MIN_ZOOM_FOR_RINGS = 0.6;
+export const SLICE20_RING_RADIUS_MULT = 1.4;
+export const SLICE20_RING_ALPHA = 0.35;
+export const SLICE20_RING_STROKE_PX = 0.5;
+export const RING_TEXTURE_BASE_RADIUS = 20;
+export const MAX_FILLER_HEX_POOL = 5000;
+
+export function slice20CssHexToPixi(hex) {
+  const s = String(hex).replace('#', '');
+  const n = parseInt(s.length >= 6 ? s.slice(0, 6) : '9ca3af', 16);
+  return Number.isFinite(n) ? n : 0x9ca3af;
+}
+
+/** AXIOM-V2-shaped world-space clusters — becomes data-driven with multi-source connectors */
+export const SLICE20_BRAIN_CLUSTERS_WORLD = [
+  { id: 'billing', cx: -200, cy: -120, radius: 260, density: 0.52 },
+  { id: 'auth', cx: 220, cy: -90, radius: 240, density: 0.58 },
+  { id: 'onboarding', cx: 0, cy: 160, radius: 250, density: 0.55 },
+  { id: 'infra', cx: -240, cy: 140, radius: 230, density: 0.56 },
+  { id: 'sales', cx: 200, cy: 180, radius: 220, density: 0.54 },
+];
 
 export function installOmnixViewerEngine(studio) {
   'use strict';
@@ -58,8 +84,8 @@ export function installOmnixViewerEngine(studio) {
   const GALAXY_WARP_RADIUS = 150;
   const GALAXY_ORBIT_HOVER_PAD_SCREEN = 30;
   const GALAXY_MAX_WARP_SCALE = 2.5;
-  /** Baked galaxy directory hex texture radius; must match default `sn.radius || 20` scale divisor in syncPixiFromSim. */
-  const HEX_BASE_RADIUS = 20;
+  /** Baked galaxy directory hex texture radius; slice-20 brain density (was 20 px pre–slice-20). */
+  const HEX_BASE_RADIUS = SLICE20_HEX_BASE_RADIUS;
   /** Baked radial glow: outer radius in local px; world radius is `(sn.radius || 12) * 2.5` via scale. */
   const GLOW_TEXTURE_BASE_RADIUS = 50;
   const GLOW_TEXTURE_RING_COUNT = 12;
@@ -267,18 +293,31 @@ export function installOmnixViewerEngine(studio) {
     const topDirs = dirsSorted.slice(0, MAX_GALAXY_DIRS);
     const visibleDirSet = new Set(topDirs.map(d => d.id));
 
-    const galaxyNodes = topDirs.map(d => ({
-      id: 'dir:' + d.id,
-      kind: 'directory',
-      dirId: d.id,
-      name: d.name,
-      label: d.name,
-      childCount: d.childCount,
-      types: { ...d.types },
-      lang: { ...d.lang },
-      color: directoryColor(d.lang),
-      radius: 18 + Math.sqrt(d.childCount) * 1.2,
-    }));
+    const galaxyNodes = topDirs.map(d => {
+      let axiomSigned = false;
+      let entityType = 'code';
+      raw.nodes.forEach(n => {
+        if (nodeDir(n) !== d.id) return;
+        const md = n.metadata;
+        if (md && typeof md === 'object' && md.axiom_signed === true) axiomSigned = true;
+        const t = n.type || '';
+        if (['people', 'decision', 'thread', 'ticket', 'document', 'process'].includes(t)) entityType = t;
+      });
+      return {
+        id: 'dir:' + d.id,
+        kind: 'directory',
+        dirId: d.id,
+        name: d.name,
+        label: d.name,
+        childCount: d.childCount,
+        types: { ...d.types },
+        lang: { ...d.lang },
+        color: directoryColor(d.lang),
+        radius: 18 + Math.sqrt(d.childCount) * 1.2,
+        entityType,
+        metadata: { axiom_signed: axiomSigned },
+      };
+    });
 
     const galaxyLinks = [];
     dirEdges.forEach(e => {
@@ -529,6 +568,15 @@ export function installOmnixViewerEngine(studio) {
   let bgGraphics = null;
   let starGraphics = null;
   let gridGraphics = null;
+  /** slice-20: ambient filler hex tessellation behind galaxy (world space) */
+  let brainFillerLayer = null;
+  /** slice-20: AXIOM governance rings (world space, under directory sprites) */
+  let ringLayer = null;
+  let galaxyRingTexture = null;
+  /** Last envelope for adjacency / future agent traces */
+  let lastBrainHexes = [];
+  const fillerHexPool = [];
+  const ringSpritePool = [];
   let darkMatterGfx = null;
   let entanglementGfx = null;
   let darkMatterVisible = false;
@@ -769,7 +817,7 @@ export function installOmnixViewerEngine(studio) {
       c.on('pointerout', onNodeOut);
       c.on('pointerdown', onNodeRightDown);
       c.on('pointertap', onNodeClick);
-      nodePool.push({ container: c, glow, shape, label, simNode: null });
+      nodePool.push({ container: c, glow, shape, label, ringSprite: null, simNode: null });
       layerNodes.addChild(c);
     }
     return nodePool[i];
@@ -824,8 +872,10 @@ export function installOmnixViewerEngine(studio) {
       const maxNodeWeight = model.maxNodeWeight || 100;
       a = 0.1 + Math.min(nodeWeight / maxNodeWeight, 1) * 0.25;
     }
+    const tintPixi =
+      sn.kind === 'directory' && viewLevel === 'galaxy' ? slice20EntityTint(sn) : sn.color;
     if (g instanceof PIXI.Sprite) {
-      g.tint = sn.color;
+      g.tint = tintPixi;
       g._glowBaseAlpha = a;
       const rWorld = (sn.radius || 12) * 2.5;
       g.scale.set(rWorld / GLOW_TEXTURE_BASE_RADIUS);
@@ -833,7 +883,7 @@ export function installOmnixViewerEngine(studio) {
       return;
     }
     g.clear();
-    g.beginFill(sn.color, a);
+    g.beginFill(tintPixi, a);
     g.drawCircle(0, 0, (sn.radius || 12) * 2.5);
     g.endFill();
   }
@@ -4222,6 +4272,16 @@ export function installOmnixViewerEngine(studio) {
       for (let i = 0; i < nodePool.length; i++) {
         const p = nodePool[i];
         if (!p || !p.container) continue;
+        if (p.ringSprite && ringLayer) {
+          try {
+            ringLayer.removeChild(p.ringSprite);
+          } catch (_e) {
+            /* */
+          }
+          ringSpritePool.push(p.ringSprite);
+          p.ringSprite.visible = false;
+          p.ringSprite = null;
+        }
         p.container.visible = false;
         p.container.eventMode = 'none';
         p.simNode = null;
@@ -4236,6 +4296,16 @@ export function installOmnixViewerEngine(studio) {
 
     simNodes.forEach((sn, i) => {
       const p = acquireNodePool(i);
+      if (p.ringSprite && ringLayer) {
+        try {
+          ringLayer.removeChild(p.ringSprite);
+        } catch (_e) {
+          /* */
+        }
+        ringSpritePool.push(p.ringSprite);
+        p.ringSprite.visible = false;
+        p.ringSprite = null;
+      }
       p.simNode = sn;
       p.container.visible = true;
       p.container.eventMode = 'static';
@@ -4248,10 +4318,33 @@ export function installOmnixViewerEngine(studio) {
       const sh = p.shape;
       const kind = sn.kind;
       if (kind === 'directory') {
-        sh.tint = sn.color;
+        sh.tint = slice20EntityTint(sn);
         sh.scale.set((sn.radius || HEX_BASE_RADIUS) / HEX_BASE_RADIUS);
         sh.alpha = 1.0;
+        sh._brainNeighborIds = brainNeighborsForWorldPos(sn.x, sn.y);
         redrawNodeGlow(p, sn, hoveredSimNode === sn);
+        const showRing =
+          sn.metadata &&
+          sn.metadata.axiom_signed === true &&
+          worldScale >= SLICE20_MIN_ZOOM_FOR_RINGS;
+        if (showRing && galaxyRingTexture) {
+          let rs = ringSpritePool.pop();
+          if (!rs) {
+            rs = new PIXI.Sprite(galaxyRingTexture);
+            rs.anchor.set(0.5, 0.5);
+            rs.eventMode = 'none';
+          }
+          rs.texture = galaxyRingTexture;
+          rs.x = sn.x;
+          rs.y = sn.y;
+          rs.tint = slice20EntityTint(sn);
+          rs.alpha = SLICE20_RING_ALPHA;
+          const rScale = (HEX_BASE_RADIUS * SLICE20_RING_RADIUS_MULT) / RING_TEXTURE_BASE_RADIUS;
+          rs.scale.set(rScale, rScale);
+          rs.visible = true;
+          ringLayer.addChild(rs);
+          p.ringSprite = rs;
+        }
       } else if (kind === 'file') {
         drawCircleNode(sh, sn.radius || 14, sn.color, 1, sn.color);
         redrawNodeGlow(p, sn, hoveredSimNode === sn);
@@ -4281,9 +4374,20 @@ export function installOmnixViewerEngine(studio) {
       }
     });
     for (let j = simNodes.length; j < nodePool.length; j++) {
-      nodePool[j].container.visible = false;
-      nodePool[j].simNode = null;
-      if (nodePool[j].label) nodePool[j].label.visible = false;
+      const pj = nodePool[j];
+      if (pj.ringSprite && ringLayer) {
+        try {
+          ringLayer.removeChild(pj.ringSprite);
+        } catch (_e) {
+          /* */
+        }
+        ringSpritePool.push(pj.ringSprite);
+        pj.ringSprite.visible = false;
+        pj.ringSprite = null;
+      }
+      pj.container.visible = false;
+      pj.simNode = null;
+      if (pj.label) pj.label.visible = false;
     }
 
     galaxyEdgeFrameCounter++;
@@ -5659,27 +5763,91 @@ export function installOmnixViewerEngine(studio) {
     });
   }
 
+  function slice20EntityTint(sn) {
+    const typ = sn.entityType || 'code';
+    return slice20CssHexToPixi(colorForType(typ));
+  }
+
+  function brainNeighborsForWorldPos(wx, wy) {
+    let best = null;
+    let bd = Infinity;
+    for (let i = 0; i < lastBrainHexes.length; i++) {
+      const hx = lastBrainHexes[i];
+      const d = (wx - hx.cx) * (wx - hx.cx) + (wy - hx.cy) * (wy - hx.cy);
+      if (d < bd) {
+        bd = d;
+        best = hx;
+      }
+    }
+    return best ? best.neighbors : [];
+  }
+
+  function releaseFillerChildrenToPool() {
+    if (!brainFillerLayer) return;
+    while (brainFillerLayer.children.length) {
+      const ch = brainFillerLayer.removeChildAt(0);
+      ch.visible = false;
+      fillerHexPool.push(ch);
+    }
+  }
+
+  function acquireFillerSprite() {
+    let spr = fillerHexPool.pop();
+    if (!spr && galaxyDirectoryHexTexture) {
+      spr = new PIXI.Sprite(galaxyDirectoryHexTexture);
+      spr.anchor.set(0.5, 0.5);
+      spr.eventMode = 'none';
+    }
+    return spr;
+  }
+
   function drawHexGrid() {
     gridGraphics.clear();
-    const h = 40;
+    if (!app || !brainFillerLayer || !galaxyDirectoryHexTexture) return;
+    gridGraphics.lineStyle(1, 0x6366f1, 0.04);
+    const _ecx = app.screen.width / 2;
+    const _ecy = app.screen.height / 2;
+    const _erx = app.screen.width * 0.48;
+    const _ery = app.screen.height * 0.4;
+    gridGraphics.drawEllipse(_ecx, _ecy, _erx * 2, _ery * 2);
+
+    releaseFillerChildrenToPool();
+
     const w = app.screen.width;
-    const ht = app.screen.height;
-    gridGraphics.lineStyle(1, 0x6366f1, 0.06);
-    for (let y = -h; y < ht + h; y += h * 0.866) {
-      let row = 0;
-      for (let x = -w; x < w + w; x += h * 1.5) {
-        const ox = (row % 2) * h * 0.75;
-        const cx = x + ox;
-        const pts = [];
-        for (let i = 0; i < 6; i++) {
-          const a = (Math.PI / 3) * i - Math.PI / 6;
-          pts.push(cx + Math.cos(a) * h * 0.45, y + Math.sin(a) * h * 0.45);
-        }
-        gridGraphics.moveTo(pts[0], pts[1]);
-        for (let k = 2; k < pts.length; k += 2) gridGraphics.lineTo(pts[k], pts[k + 1]);
-        gridGraphics.closePath();
-        row++;
-      }
+    const h = app.screen.height;
+    const scaleRef = Math.min(w, h);
+    const spec = {
+      canvasW: w,
+      canvasH: h,
+      hexRadius: HEX_BASE_RADIUS,
+      envelopeRx: scaleRef * 0.48,
+      envelopeRy: scaleRef * 0.38,
+      envelopeCx: 0,
+      envelopeCy: 0,
+      clusters: SLICE20_BRAIN_CLUSTERS_WORLD,
+      fillerToDataRatio: [2, 4],
+      seed: 0x62726169,
+    };
+    lastBrainHexes = generateBrainEnvelope(spec);
+
+    const fbTint = slice20CssHexToPixi(FALLBACK_COLOR);
+    let used = 0;
+    for (let hi = 0; hi < lastBrainHexes.length; hi++) {
+      const hx = lastBrainHexes[hi];
+      if (hx.isData) continue;
+      if (used >= MAX_FILLER_HEX_POOL) break;
+      const spr = acquireFillerSprite();
+      if (!spr) break;
+      spr.x = hx.cx;
+      spr.y = hx.cy;
+      spr.alpha = 0.16;
+      spr.tint = fbTint;
+      spr.scale.set(1, 1);
+      spr.visible = true;
+      spr._hexId = hx.id;
+      spr._neighborIds = hx.neighbors;
+      brainFillerLayer.addChild(spr);
+      used++;
     }
   }
 
@@ -5733,10 +5901,21 @@ export function installOmnixViewerEngine(studio) {
       height: galaxyDirectoryGlowTexture.height,
     });
 
+    const ringBlueprint = new PIXI.Graphics();
+    ringBlueprint.lineStyle(SLICE20_RING_STROKE_PX, 0xffffff, 1);
+    ringBlueprint.drawCircle(0, 0, RING_TEXTURE_BASE_RADIUS);
+    galaxyRingTexture = app.renderer.generateTexture(ringBlueprint, { resolution: 2 });
+    ringBlueprint.destroy();
+
     bgGraphics = new PIXI.Graphics();
     starGraphics = new PIXI.Graphics();
     gridGraphics = new PIXI.Graphics();
     world = new PIXI.Container();
+    brainFillerLayer = new PIXI.Container();
+    brainFillerLayer.eventMode = 'none';
+    brainFillerLayer.sortableChildren = false;
+    ringLayer = new PIXI.Container();
+    ringLayer.eventMode = 'none';
     darkMatterGfx = new PIXI.Graphics();
     darkMatterGfx.eventMode = 'none';
     layerEdges = new PIXI.Container();
@@ -5754,6 +5933,7 @@ export function installOmnixViewerEngine(studio) {
     rippleGfx.eventMode = 'none';
     window._aiTraceGfx = new PIXI.Graphics();
     window._aiTraceGfx.eventMode = 'none';
+    world.addChild(brainFillerLayer);
     world.addChild(darkMatterGfx);
     world.addChild(layerEdges);
     world.addChild(signalFlowGfx);
@@ -5761,6 +5941,7 @@ export function installOmnixViewerEngine(studio) {
     world.addChild(childrenGfx);
     world.addChild(rippleGfx);
     world.addChild(window._aiTraceGfx);
+    world.addChild(ringLayer);
     world.addChild(layerNodes);
     layerEdges.eventMode = 'none';
 
