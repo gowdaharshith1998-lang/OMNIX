@@ -3129,7 +3129,7 @@ export function installOmnixViewerEngine(studio) {
 
     return (
       '<div style="margin-bottom: 20px;">' +
-      '<div style="font-family: \'Syne\', sans-serif; font-size: 13px; color: #6366f1; letter-spacing: 2px; margin-bottom: 4px;">X-RAY</div>' +
+      '<div style="font-family: \'Syne\', sans-serif; font-size: 13px; color: #6366f1; letter-spacing: 2px; margin-bottom: 4px;">BRAIN</div>' +
       '<div style="font-size: 18px; font-weight: 600; color: #fff;">' + escapeHtml(dirName) + '</div>' +
       '<div style="font-size: 12px; color: #64748b; margin-top: 2px;">' + escapeHtml(dirId || '·') + '</div>' +
       '</div>' +
@@ -3994,7 +3994,7 @@ export function installOmnixViewerEngine(studio) {
       '</span>';
     return (
       '<div style="margin-bottom: 18px;">' +
-      '<div style="font-family: \'Syne\', sans-serif; font-size: 13px; color: #6366f1; letter-spacing: 2px; margin-bottom: 4px;">X-RAY · SYMBOL</div>' +
+      '<div style="font-family: \'Syne\', sans-serif; font-size: 13px; color: #6366f1; letter-spacing: 2px; margin-bottom: 4px;">BRAIN · ENTITY</div>' +
       '<div style="font-size: 18px; font-weight: 600; color: #fff; word-break: break-word;">' +
       escapeHtml(nm) +
       '</div>' +

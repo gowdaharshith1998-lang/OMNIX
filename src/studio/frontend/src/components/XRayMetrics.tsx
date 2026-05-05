@@ -27,9 +27,9 @@ export function XRayMetrics({ scopedNodes, scopedEdges }: Props) {
   const packages = packageBuckets(scopedNodes.map((n) => n.file_path));
 
   const rows: { k: string; v: number }[] = [
-    { k: "Packages (tree)", v: packages },
-    { k: "Call edges", v: calls },
-    { k: "Import edges", v: imports },
+    { k: "Entities", v: packages },
+    { k: "Connections", v: calls },
+    { k: "Sources", v: imports },
   ];
 
   return (

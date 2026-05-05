@@ -16,7 +16,7 @@ export function FindBar({ value, onChange, onClear, placeholder }: Props) {
         className="shrink-0 font-display text-[10px] font-bold tracking-[0.2em] text-omnix-accent-indigo"
         id="search-label"
       >
-        FIND
+        ASK BRAIN
       </span>
       <input
         id="search-input"

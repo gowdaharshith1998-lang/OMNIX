@@ -184,7 +184,7 @@ describe("XRayTab", () => {
         onSuggestedAction={vi.fn()}
       />
     );
-    expect(container.textContent).toContain("Repository");
+    expect(container.textContent).toContain("Workspace");
     expect(container.textContent).toContain("Scope metrics");
     expect(container.textContent?.includes("HEALTH")).toBe(false);
   });
@@ -352,7 +352,7 @@ describe("XRayTab", () => {
       (button) => button.textContent === "graph node"
     );
     act(() => graphButton?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
-    expect(container.textContent).toContain("X-RAY");
+    expect(container.textContent).toContain("BRAIN");
     expect(container.textContent).toContain("govern");
   });
 

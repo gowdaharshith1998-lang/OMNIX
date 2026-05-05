@@ -211,7 +211,7 @@ function resolveHeader(
   }
   return {
     badge: "REPO",
-    name: "Repository",
+    name: "Workspace",
     pathLine: projectPath,
   };
 }

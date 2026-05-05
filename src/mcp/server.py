@@ -36,7 +36,7 @@ class OmnixMCPServer:
             tools = [
                 {
                     "name": "omnix_search_graph",
-                    "description": "Search the OMNIX code knowledge graph for functions, classes, files, and their relationships",
+                    "description": "Search the OMNIX knowledge graph for functions, classes, files, and their relationships",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -55,7 +55,7 @@ class OmnixMCPServer:
                 },
                 {
                     "name": "omnix_trace_connections",
-                    "description": "Trace all code connections from a node — what it calls, what calls it, imports, entangled pairs",
+                    "description": "Trace all entity connections from a node — what it calls, what calls it, imports, entangled pairs",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -74,7 +74,7 @@ class OmnixMCPServer:
                 },
                 {
                     "name": "omnix_get_diagnostics",
-                    "description": "Get code health diagnostics for a directory — complexity, entanglement, dark matter dependencies",
+                    "description": "Get system health diagnostics for a directory — complexity, entanglement, dark matter dependencies",
                     "inputSchema": {
                         "type": "object",
                         "properties": {

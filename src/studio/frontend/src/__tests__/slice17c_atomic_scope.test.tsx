@@ -232,7 +232,7 @@ describe("slice17c atomic scope coordination", () => {
       expect(ti(container, "stats-files")?.textContent?.trim()).toBe(
         String(fixture.statsAv2.files)
       );
-      const cons = container.querySelector('[data-omnix-constellation="1"]');
+      const cons = container.querySelector('[data-omnix-brain="1"]');
       expect(cons?.getAttribute("data-studio-viewer-scope-path")).toBe(
         "apps/backend/src/axiom"
       );
@@ -275,7 +275,7 @@ describe("slice17c atomic scope coordination", () => {
         "FUNCTION"
       );
       expect(ti(container, "xray-path")?.textContent).toContain("hybrid_signer");
-      const cons = container.querySelector('[data-omnix-constellation="1"]');
+      const cons = container.querySelector('[data-omnix-brain="1"]');
       expect(cons?.getAttribute("data-studio-viewer-scope-path")).toBe(
         "apps/backend/src/axiom/services/crypto"
       );

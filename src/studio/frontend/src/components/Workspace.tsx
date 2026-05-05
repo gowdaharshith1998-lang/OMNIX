@@ -1003,7 +1003,7 @@ export function Workspace({
             </div>
             <div
               className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border border-omnix-accent-indigo/20 bg-[rgba(2,6,21,0.5)]"
-              data-omnix-constellation="1"
+              data-omnix-brain="1"
               data-studio-viewer-scope-path={viewerScopePathEcho}
             >
               <ConstellationBoundary
@@ -1035,7 +1035,7 @@ export function Workspace({
                 className="pointer-events-auto absolute right-4 top-4 z-20 font-mono"
                 aria-label="Graph stats"
               >
-                <StatsPanel stats={displayStats} variant="constellation" />
+                <StatsPanel stats={displayStats} variant="brain" />
               </div>
               <div
                 data-omnix-find-slot="1"

@@ -192,7 +192,7 @@ describe("slice15.1 constellation error boundary", () => {
       await Promise.resolve();
     });
 
-    expect(container.querySelector("[data-omnix-constellation-fallback]")).toBeNull();
+    expect(container.querySelector("[data-omnix-brain-fallback]")).toBeNull();
     expect(container.querySelector('[data-testid="mock-graph"]')).not.toBeNull();
 
     await act(async () => {
@@ -226,7 +226,7 @@ describe("slice15.1 X-Ray errors stay out of constellation boundary", () => {
     await act(async () => {
       root.render(
         <div>
-          <div data-omnix-constellation="1">
+          <div data-omnix-brain="1">
             <span data-omnix-graph-placeholder="1">graph ok</span>
           </div>
           <Eb>
@@ -236,7 +236,7 @@ describe("slice15.1 X-Ray errors stay out of constellation boundary", () => {
       );
     });
     expect(ti(container, "xray-local-fallback")?.textContent).toContain("xray busted");
-    expect(container.querySelector("[data-omnix-constellation-fallback]")).toBeNull();
+    expect(container.querySelector("[data-omnix-brain-fallback]")).toBeNull();
     expect(container.textContent).toContain("graph ok");
     await act(async () => root.unmount());
   });

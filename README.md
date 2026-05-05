@@ -1,8 +1,8 @@
 # OMNIX
 
-**OMNIX is, to our current knowledge, the only open-core code intelligence product that bundles universal Tree-Sitter parsing + self-evolving query patterns with ML-DSA-65 signed audit trail + hybrid universal PBT + sandbox-isolated auto-fix in one shipping repo.**
+**OMNIX is, to our current knowledge, the only open-core company brain — a visual knowledge graph that AI agents navigate to do work, with AXIOM cryptographic governance and Calibra confidence calibration that bundles universal Tree-Sitter parsing + self-evolving query patterns with ML-DSA-65 signed audit trail + hybrid universal PBT + sandbox-isolated auto-fix in one shipping repo.**
 
-Point OMNIX at a codebase. Get an interactive 3D graph of every file, function, class, and connection.
+Point OMNIX at a codebase. Get an interactive 3D graph of every entity, every relationship, every signed action.
 
 ## Quick Start
 

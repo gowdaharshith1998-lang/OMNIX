@@ -16,7 +16,7 @@ export const CANONICAL_SCOPES: ScopeRecord[] = [
   {
     id: "repo",
     parentId: null,
-    label: "Repository",
+    label: "Workspace",
     badge: "REPO",
     pathPrefix: null,
   },

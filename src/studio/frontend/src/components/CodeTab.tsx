@@ -188,7 +188,7 @@ export const CodeTab = forwardRef<CodeTabHandle, Props>(function CodeTab(
   if (!target) {
     return (
       <div className="flex h-full items-center justify-center p-6 text-center text-sm text-omnix-text-dim">
-        Select a file or symbol in the constellation to open the Code tab.
+        Select an entity in the brain to open the Code tab.
       </div>
     );
   }

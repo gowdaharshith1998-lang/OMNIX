@@ -218,7 +218,7 @@ async function renderWorkspace() {
 }
 
 function constellation(container: HTMLElement): HTMLElement | null {
-  return container.querySelector('[data-omnix-constellation="1"]');
+  return container.querySelector('[data-omnix-brain="1"]');
 }
 
 describe("slice15.1 atomic drill integration", () => {
@@ -354,7 +354,7 @@ describe("slice15.1 atomic drill integration", () => {
       const bc = ti(container, "breadcrumb");
       expect(bc?.textContent).not.toContain("AXIOM-V2");
       expect(ti(container, "xray-badge")?.textContent?.trim()).toBe("REPO");
-      expect(ti(container, "xray-name")?.textContent?.trim()).toBe("Repository");
+      expect(ti(container, "xray-name")?.textContent?.trim()).toBe("Workspace");
       expect(ti(container, "stats-files")?.textContent?.trim()).toBe(
         String(fixture.statsRepo.files)
       );

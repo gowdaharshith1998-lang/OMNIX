@@ -12,8 +12,8 @@ type Stats = {
 
 type Props = {
   stats: Stats;
-  /** Slice 15 — smaller blurred overlay inside the constellation canvas. */
-  variant?: "default" | "constellation";
+  /** Slice 15 — smaller blurred overlay inside the brain canvas. */
+  variant?: "default" | "brain";
 };
 
 const row = "stat-row flex justify-between gap-4 font-mono text-xs leading-tight last:mb-0";
@@ -25,7 +25,7 @@ function Label({ children }: { children: ReactNode }) {
 export function StatsPanel({ stats, variant = "default" }: Props) {
   useScope();
   const shell =
-    variant === "constellation"
+    variant === "brain"
       ? "omnix-glass pointer-events-auto min-w-[180px] rounded-lg px-3 py-2.5 backdrop-blur-md"
       : "omnix-glass pointer-events-auto min-w-[200px] rounded-xl px-4 py-3.5";
   return (

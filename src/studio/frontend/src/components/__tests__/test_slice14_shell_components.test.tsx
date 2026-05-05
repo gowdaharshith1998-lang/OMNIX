@@ -204,7 +204,7 @@ describe("LeftRail", () => {
 describe("CodeTab", () => {
   it("mounts empty state", () => {
     const { container } = render(<CodeTab workspaceId="w" target={null} externalFileEpoch={0} onToast={vi.fn()} />);
-    expect(container.textContent).toContain("Select a file");
+    expect(container.textContent).toContain("Select an entity in the brain");
   });
 
   it("interacts by saving edited Monaco content", async () => {

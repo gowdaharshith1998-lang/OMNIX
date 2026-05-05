@@ -8,7 +8,7 @@ export function XRayHead({ badge, name, pathLine }: Props) {
   return (
     <header className="xray-header mb-3 border-b border-omnix-accent-indigo/15 pb-3">
       <div className="xray-label mb-1 font-mono text-[10px] uppercase tracking-[0.2em] text-omnix-text-dim">
-        X-RAY
+        BRAIN
       </div>
       <div
         data-testid="xray-badge"

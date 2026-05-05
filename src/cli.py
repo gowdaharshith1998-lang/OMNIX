@@ -36,7 +36,7 @@ from parser.cli import grammar_group
 @click.group()
 @click.version_option(version=_OMNIX_VERSION, prog_name="omnix")
 def main() -> None:
-    """OMNIX — code intelligence and AXIOM provenance."""
+    """OMNIX — knowledge intelligence and AXIOM provenance."""
 
 
 def _ensure_repo_root_on_syspath() -> None:

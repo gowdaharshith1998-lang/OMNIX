@@ -149,7 +149,7 @@ describe("slice17c constellation / X-Ray agreement", () => {
       });
 
       await act(async () => {
-        const cons = container.querySelector('[data-omnix-constellation="1"]');
+        const cons = container.querySelector('[data-omnix-brain="1"]');
         const viewerPath = cons?.getAttribute("data-studio-viewer-scope-path") ?? "";
         const pathLine = ti(container, "xray-path")?.textContent?.replace(/\\/g, "/").trim() ?? "";
         expect(pathLine).toBe(viewerPath);

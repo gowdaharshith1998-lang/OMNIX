@@ -14,7 +14,28 @@ _TYPE_COLORS: dict[str, str] = {
     "method": "#22d3ee",
     "import": "#f97316",
     "dark_matter": "#8b5cf6",
+    # Company-brain entity types (slice-19): code (cyan), people (amber), decision (purple),
+    # thread (lavender), ticket (orange), document (blue-gray), process (teal-green).
+    "code": "#5eead4",
+    "people": "#fbbf24",
+    "decision": "#d8b4fe",
+    "thread": "#a5b4fc",
+    "ticket": "#fb923c",
+    "document": "#5fa3ff",
+    "process": "#34d399",
 }
+
+FALLBACK_COLOR = "#9ca3af"
+
+
+def color_for_type(node_type: str) -> str:
+    """Return the registered color for a node type, or the fallback for unknowns.
+
+    Used by exporters and by the WebSocket `node_added` payload builder to
+    stamp a `color` field that the frontend can read directly without
+    having to know the palette mapping itself.
+    """
+    return _TYPE_COLORS.get(node_type, FALLBACK_COLOR)
 
 
 def export_json(store: GraphStore, out_path: str) -> dict[str, Any]:
@@ -30,7 +51,7 @@ def export_json(store: GraphStore, out_path: str) -> dict[str, Any]:
                 "file": n.file_path or "",
                 "line": line,
                 "val": max(1, n.complexity),
-                "color": _TYPE_COLORS.get(n.type, "#94a3b8"),
+                "color": color_for_type(n.type),
             }
         )
 

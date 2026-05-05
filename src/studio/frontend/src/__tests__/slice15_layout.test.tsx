@@ -36,7 +36,7 @@ vi.mock("../components/Graph/GraphCanvas", () => ({
     }));
     return (
       <div data-testid="mock-graph" className="absolute inset-0">
-        <div data-omnix-constellation-root="1" className="relative h-full w-full">
+        <div data-omnix-brain-root="1" className="relative h-full w-full">
           <div data-testid="layout-probe-stats" />
         </div>
       </div>
@@ -102,7 +102,7 @@ describe("slice15 layout", () => {
     const stats = container.querySelector('[data-omnix-stats-card="1"]') as HTMLElement | null;
     expect(stats).toBeTruthy();
     expect(right?.contains(stats)).toBe(false);
-    const graphHost = stats!.closest("[data-omnix-constellation=\"1\"]");
+    const graphHost = stats!.closest("[data-omnix-brain=\"1\"]");
     expect(graphHost).toBeTruthy();
     expect(stats!.className.split(/\s+/).includes("absolute")).toBe(true);
     await act(async () => {
@@ -127,7 +127,7 @@ describe("slice15 layout", () => {
     });
     const findHost = container.querySelector('[data-omnix-find-slot="1"]') as HTMLElement | null;
     expect(findHost).toBeTruthy();
-    const shell = findHost!.closest("[data-omnix-constellation=\"1\"]");
+    const shell = findHost!.closest("[data-omnix-brain=\"1\"]");
     expect(shell).toBeTruthy();
     expect(findHost!.className.split(/\s+/).includes("absolute")).toBe(true);
     expect(findHost!.className).toContain("left-1/2");

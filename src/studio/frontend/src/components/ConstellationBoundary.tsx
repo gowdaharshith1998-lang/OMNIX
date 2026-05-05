@@ -32,7 +32,7 @@ export class ConstellationBoundary extends Component<Props, State> {
       return (
         <div
           className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-[rgba(2,6,21,0.92)] px-6 text-center font-mono text-sm text-omnix-text-primary backdrop-blur-md"
-          data-omnix-constellation-fallback="1"
+          data-omnix-brain-fallback="1"
         >
           <p className="max-w-md text-omnix-text-muted">
             Constellation render failed
