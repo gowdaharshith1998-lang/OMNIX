@@ -5,6 +5,7 @@ import { AgentTab } from "./inspector/AgentTab";
 import { BrainTabContent } from "./inspector/BrainTabContent";
 import { EntityHistoryTab } from "./inspector/EntityHistoryTab";
 import { ReceiptsTab } from "./inspector/ReceiptsTab";
+import { useWireEvents } from "@/lib/wireEventBuffer";
 
 type Conn = {
   direction: "out" | "in";
@@ -41,8 +42,10 @@ export function XRayContent({
   filesystemHygieneCleanLine,
   onSuggestedAction,
 }: Props) {
+  const wireEvents = useWireEvents(workspaceId);
+
   if (active === "agent") {
-    return <AgentTab />;
+    return <AgentTab events={wireEvents} />;
   }
 
   if (active === "receipts") {
@@ -50,6 +53,7 @@ export function XRayContent({
   }
 
   if (active === "history") {
+    // Phase 5 will replace stub body; for now still stubbed.
     return <EntityHistoryTab />;
   }
 

@@ -68,6 +68,8 @@ import {
   useScope,
 } from "@/store/studioScopeStore";
 import { installGlobalErrorTrap } from "@/lib/globalErrorTrap";
+import { pushWireEvent } from "@/lib/wireEventBuffer";
+import type { WireEventType } from "@/components/inspector/AgentTab";
 
 type Props = {
   workspaceId: string;
@@ -546,6 +548,24 @@ export function Workspace({
   const ingestWorkspaceMessage = useCallback(
     (msg: Record<string, unknown>) => {
       const kind = typeof msg.type === "string" ? msg.type : "";
+      const tsRaw = (msg as { ts?: unknown }).ts;
+      const ts =
+        typeof tsRaw === "number"
+          ? tsRaw < 1_000_000_000_000
+            ? tsRaw * 1000
+            : tsRaw
+          : Date.now();
+      const log = (t: WireEventType, targetId: string) => {
+        pushWireEvent(workspaceId, {
+          id: `${t}:${targetId}:${ts}`,
+          type: t,
+          ts,
+          actor: null,
+          targetId,
+          targetType: "code",
+          confidence: null,
+        });
+      };
       if (kind === "node_added" && msg.node && typeof msg.node === "object") {
         const rec = recordFromGraphPayload(msg.node as Record<string, unknown>);
         if (rec) {
@@ -555,6 +575,7 @@ export function Workspace({
             return next;
           });
           noteCodeFileTouched(rec.file_path);
+          log("node_added", rec.id);
         }
         return;
       }
@@ -565,12 +586,14 @@ export function Workspace({
             if (prev.some((edge) => String(edge.id) === String(rec.id))) return prev;
             return [...prev, rec];
           });
+          log("edge_added", String(rec.id));
         }
         return;
       }
       if (kind === "edge_removed" && msg.edge_id != null) {
         const id = String(msg.edge_id);
         setGraphEdges((prev) => prev.filter((edge) => String(edge.id) !== id));
+        log("edge_removed", id);
         return;
       }
       if (kind === "node_modified" && typeof msg.node_id === "string") {
@@ -588,6 +611,7 @@ export function Workspace({
             return next;
           });
           noteCodeFileTouched(nextNode.file_path);
+          log("node_modified", nextNode.id);
         }
         return;
       }
@@ -599,6 +623,7 @@ export function Workspace({
           next.delete(msg.node_id as string);
           return next;
         });
+        log("node_removed", msg.node_id);
         return;
       }
       if (
@@ -608,7 +633,7 @@ export function Workspace({
         noteCodeFileTouched(msg.path);
       }
     },
-    [noteCodeFileTouched]
+    [noteCodeFileTouched, workspaceId]
   );
 
   useEffect(() => {
