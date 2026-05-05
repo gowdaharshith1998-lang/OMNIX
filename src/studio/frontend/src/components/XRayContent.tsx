@@ -53,8 +53,12 @@ export function XRayContent({
   }
 
   if (active === "history") {
-    // Phase 5 will replace stub body; for now still stubbed.
-    return <EntityHistoryTab />;
+    return (
+      <EntityHistoryTab
+        workspaceId={workspaceId}
+        selectedEntityId={selectedNode?.id ?? null}
+      />
+    );
   }
 
   void scopeAtomId;

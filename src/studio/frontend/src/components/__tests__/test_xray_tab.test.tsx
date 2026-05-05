@@ -232,7 +232,7 @@ describe("XRayTab", () => {
     expect(container.textContent).toContain("CALLS");
   });
 
-  it("renders RECEIPTS stub (no actions) in Phase 1", () => {
+  it("renders RECEIPTS empty state (no actions)", async () => {
     const onAction = vi.fn();
     const manyEntangled = Array.from({ length: 9 }, (_, i): GraphEdge => ({
       id: `ent-${i}`,
@@ -262,11 +262,12 @@ describe("XRayTab", () => {
       );
       receipts?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
+    await flush();
     expect(container.textContent).toContain("No receipts yet");
     expect(onAction).not.toHaveBeenCalled();
   });
 
-  it("renders RECEIPTS stub empty state with no graph", () => {
+  it("renders RECEIPTS empty state with no graph", async () => {
     resetStudioScopeForTests();
     const { container } = render(
       <XRayTab
@@ -288,6 +289,7 @@ describe("XRayTab", () => {
       );
       receipts?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
+    await flush();
     expect(container.textContent).toContain("No receipts yet");
   });
 
