@@ -18,13 +18,9 @@ class _PollHandler(FileSystemEventHandler):
         self._on_event = on_event
 
     def on_created(self, event):  # type: ignore[no-untyped-def]
-        if event.is_directory:
-            return
         self._on_event("created", event.src_path)
 
     def on_moved(self, event):  # type: ignore[no-untyped-def]
-        if event.is_directory:
-            return
         dest = getattr(event, "dest_path", "") or ""
         self._on_event("moved_to", dest)
 

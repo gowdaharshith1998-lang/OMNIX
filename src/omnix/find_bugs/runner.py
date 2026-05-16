@@ -449,6 +449,11 @@ def _run_verify_limited(
         env["HYPOTHESIS_STORAGE_DIRECTORY"] = hpr
     if run_args.get("fs_hygiene_delegated"):
         env["OMNIX_FS_HYGIENE_DELEGATED"] = "1"
+    sub_overrides = run_args.get("subprocess_env_overrides") or {}
+    if isinstance(sub_overrides, dict):
+        for _k, _v in sub_overrides.items():
+            if isinstance(_k, str) and _v is not None:
+                env[_k] = str(_v)
     shrink_s = str(int(run_args.get("max_shrink_seconds") or 5))
     env["OMNIX_PBT_MAX_SHRINK_SEC"] = shrink_s
     src_root = str((_omnix_root() / "src").resolve())
@@ -1125,6 +1130,21 @@ def _run_find_bugs_core(
         set_hypothesis_home_dir(Path(hpr))
     except Exception:
         pass
+    # On Linux Python 3.14+, the turboscan Pool uses forkserver, whose env is
+    # snapshotted at first use. Subsequent updates to os.environ never reach
+    # worker children. Thread the hygiene env explicitly so each subprocess
+    # sees the *current* per-codebase config.
+    _subprocess_env_overrides: dict[str, str] = {}
+    if filesystem_hygiene:
+        _subprocess_env_overrides.update(
+            {
+                "OMNIX_FS_HYGIENE_ENABLED": "1",
+                "OMNIX_FS_HYGIENE_REPO_ROOT": str(root.resolve()),
+                "OMNIX_FS_HYGIENE_HYPOTHESIS_DIR": str(Path(hyp_dir).resolve()),
+                "OMNIX_FS_HYGIENE_VERIFY_WS": str(Path(verify_ws).resolve()),
+                "OMNIX_FS_HYGIENE_STRICT": "1" if strict_fs_hygiene else "0",
+            }
+        )
     base_run: dict[str, Any] = {
         "examples": examples,
         "sign": False,
@@ -1138,6 +1158,7 @@ def _run_find_bugs_core(
         "max_shrink_seconds": 5,
         "rss_cap_bytes": int(rss_cap_mb) * 1024 * 1024,
         "per_fn_timeout_s": float(per_fn_timeout_s),
+        "subprocess_env_overrides": _subprocess_env_overrides,
     }
     budget_plan_summary: Any = None
     turboscan_paths: list[str] = []

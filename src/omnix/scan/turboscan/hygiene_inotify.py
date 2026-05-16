@@ -113,13 +113,12 @@ else:
             self._coord = coord
 
         def on_created(self, event):  # type: ignore[no-untyped-def]
-            if event.is_directory:
-                return
+            # Allow directory events: debt-19-class leaks (mkdir of `.omnix` etc.)
+            # never produce a file event when the verify-subprocess runs in
+            # delegated mode, so this watcher is the only signal we get.
             self._coord.handle_fs_event("created", event.src_path)
 
         def on_moved(self, event):  # type: ignore[no-untyped-def]
-            if event.is_directory:
-                return
             dest = getattr(event, "dest_path", "") or ""
             self._coord.handle_fs_event("moved_to", dest)
 

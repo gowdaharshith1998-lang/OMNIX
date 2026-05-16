@@ -21,7 +21,7 @@ def _installed_tree_sitter_langs() -> list[dict[str, str]]:
         n = m.name
         if not n.startswith("tree_sitter_"):
             continue
-        suf = n[13:]
+        suf = n[len("tree_sitter_"):]
         if not suf or suf in seen:
             continue
         seen.add(suf)
