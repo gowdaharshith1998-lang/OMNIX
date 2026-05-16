@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.graph.exporter import FALLBACK_COLOR, _TYPE_COLORS, color_for_type
+from omnix.graph.exporter import FALLBACK_COLOR, _TYPE_COLORS, color_for_type
 
 _EXPECTED_ENTITY_TYPES = frozenset(
     {"code", "people", "decision", "thread", "ticket", "document", "process"}

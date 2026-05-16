@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from src.studio.server import app
-from src.studio.workspace import MANAGER, open_workspace
+from omnix.studio.server import app
+from omnix.studio.workspace import MANAGER, open_workspace
 
 
 def test_studio_legacy_viewer_compat_routes_are_quiet() -> None:

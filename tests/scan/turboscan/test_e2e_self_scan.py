@@ -9,8 +9,8 @@ import pytest
 
 pytest.importorskip("hypothesis")
 
-from find_bugs.runner import run_find_bugs  # noqa: E402
-from scan.turboscan.orchestrator import scan  # noqa: E402
+from omnix.find_bugs.runner import run_find_bugs  # noqa: E402
+from omnix.scan.turboscan.orchestrator import scan  # noqa: E402
 
 
 @pytest.mark.skipif(

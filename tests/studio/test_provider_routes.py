@@ -5,8 +5,8 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from axiom import provider_vault
-from src.studio.server import app
+from omnix.axiom import provider_vault
+from omnix.studio.server import app
 
 
 def test_detect_route_does_not_persist(tmp_path: Path, monkeypatch: Any) -> None:

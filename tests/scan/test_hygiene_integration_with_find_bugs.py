@@ -10,7 +10,7 @@ import pytest
 
 pytest.importorskip("hypothesis", reason="hypothesis required")
 
-from find_bugs.runner import run_find_bugs_with_hygiene  # noqa: E402
+from omnix.find_bugs.runner import run_find_bugs_with_hygiene  # noqa: E402
 
 # Deterministic leak: ignores fuzzed inputs and always mkdirs under OMNIX_FS_HYGIENE_REPO_ROOT
 # so the hygiene detector must fire without relying on Hypothesis luck.

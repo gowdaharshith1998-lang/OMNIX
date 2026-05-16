@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from src.studio.server import app
+from omnix.studio.server import app
 
 
 def _sub(ws: Any, wid: str) -> None:

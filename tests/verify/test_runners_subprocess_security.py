@@ -5,7 +5,14 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-_RUNNER = Path(__file__).resolve().parents[2] / "src" / "verify" / "runners" / "subprocess_llm.py"
+_RUNNER = (
+    Path(__file__).resolve().parents[2]
+    / "src"
+    / "omnix"
+    / "verify"
+    / "runners"
+    / "subprocess_llm.py"
+)
 
 
 def test_subprocess_llm_no_dynamic_attr_lookup_on_subprocess() -> None:

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from cli import main
+from omnix.cli import main
 
 
 def test_main_exposes_analyze_grammar_axiom() -> None:

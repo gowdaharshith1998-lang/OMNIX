@@ -13,7 +13,7 @@ import pytest
 
 pytest.importorskip("hypothesis", reason="hypothesis required")
 
-from find_bugs import runner
+from omnix.find_bugs import runner
 
 
 def _empty_graph(tmp_path: Path) -> str:
@@ -146,7 +146,7 @@ def test_total_scan_timeout_legacy_partial_results(
 
 
 def test_default_examples_cli_parser_is_5() -> None:
-    from find_bugs.cli import _build_parser
+    from omnix.find_bugs.cli import _build_parser
 
     p = _build_parser()
     act = next(a for a in p._actions if getattr(a, "dest", None) == "examples")
@@ -181,7 +181,7 @@ def test_omnix_version_reports_module_version() -> None:
     repo = Path(__file__).resolve().parents[2]
     env = {**os.environ, "PYTHONPATH": f"{repo}{os.pathsep}{repo / 'src'}"}
     proc = subprocess.run(
-        [sys.executable, "-m", "cli", "--version"],
+        [sys.executable, "-m", "omnix.cli", "--version"],
         cwd=str(repo),
         capture_output=True,
         text=True,

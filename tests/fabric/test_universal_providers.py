@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any
 from unittest import mock
 
-from fabric import config as fc, dispatcher
-from providers.registry import PROVIDERS
+from omnix.fabric import config as fc, dispatcher
+from omnix.providers.registry import PROVIDERS
 from tests.fabric import mocks
 
 
@@ -12,7 +12,7 @@ def test_valid_providers_are_dynamic() -> None:
     assert set(dispatcher._VALID) == set(PROVIDERS)
 
 
-@mock.patch("fabric.providers.common.urllib.request.urlopen")
+@mock.patch("omnix.fabric.providers.common.urllib.request.urlopen")
 def test_openai_compatible_uses_provider_base_url(m_url: Any, tmp_path: Any) -> None:
     m_url.return_value = mocks.openai_ok("groq", 1, 1)
     cfgp = tmp_path / "fabric_config.json"
@@ -35,7 +35,7 @@ def test_openai_compatible_uses_provider_base_url(m_url: Any, tmp_path: Any) -> 
     assert "api.groq.com/openai/v1/chat/completions" in req.full_url
 
 
-@mock.patch("fabric.providers.common.urllib.request.urlopen")
+@mock.patch("omnix.fabric.providers.common.urllib.request.urlopen")
 def test_custom_provider_uses_custom_base_url(m_url: Any, tmp_path: Any) -> None:
     m_url.return_value = mocks.openai_ok("custom", 1, 1)
     cfgp = tmp_path / "fabric_config.json"

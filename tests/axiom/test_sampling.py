@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import axiom.params as P
-import axiom.sampling as smp
+import omnix.axiom.params as P
+import omnix.axiom.sampling as smp
 
 
 def test_sample_in_ball_tau_nnz() -> None:

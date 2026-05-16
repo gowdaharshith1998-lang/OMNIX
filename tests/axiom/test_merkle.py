@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import time
 
-from axiom.merkle import (
+from omnix.axiom.merkle import (
     EMPTY_SENTINEL,
     compute_leaf_hash,
     compute_merkle_root,

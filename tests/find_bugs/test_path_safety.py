@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from find_bugs import path_safety
-from find_bugs import runner
+from omnix.find_bugs import path_safety
+from omnix.find_bugs import runner
 
 pytest.importorskip("hypothesis", reason="hypothesis required")
 
@@ -82,7 +82,7 @@ def test_verify_pbt_sqlite_path_does_not_create_files_in_parent_cwd(
 ) -> None:
     """Regression (debt-19 round 2): PBT targets that call sqlite3.connect(path) must not use CWD=repo root."""
     pytest.importorskip("hypothesis", reason="hypothesis required")
-    from verify import runner as verify_runner
+    from omnix.verify import runner as verify_runner
 
     pollution = tmp_path / "would_be_omnix_repo_root"
     pollution.mkdir()

@@ -11,8 +11,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from src.studio.server import app
-from src.studio.workspace import MANAGER, open_workspace
+from omnix.studio.server import app
+from omnix.studio.workspace import MANAGER, open_workspace
 
 
 def _open_managed_workspace(
@@ -74,8 +74,8 @@ def test_bugs_scan_route_starts_background_scan_and_uses_studio_db(
     async def fake_broadcast(_workspace: Any, message: dict[str, Any]) -> None:
         messages.append(message)
 
-    monkeypatch.setattr("src.studio.bugs_scan.run_find_bugs", fake_run_find_bugs)
-    monkeypatch.setattr("src.studio.bugs_scan.broadcast_to_workspace", fake_broadcast)
+    monkeypatch.setattr("omnix.studio.bugs_scan.run_find_bugs", fake_run_find_bugs)
+    monkeypatch.setattr("omnix.studio.bugs_scan.broadcast_to_workspace", fake_broadcast)
     try:
         with TestClient(app) as client:
             res = client.post(f"/api/workspace/{workspace_id}/bugs/scan")
@@ -108,8 +108,8 @@ def test_bugs_scan_route_broadcasts_runner_errors(
     async def fake_broadcast(_workspace: Any, message: dict[str, Any]) -> None:
         messages.append(message)
 
-    monkeypatch.setattr("src.studio.bugs_scan.run_find_bugs", fake_run_find_bugs)
-    monkeypatch.setattr("src.studio.bugs_scan.broadcast_to_workspace", fake_broadcast)
+    monkeypatch.setattr("omnix.studio.bugs_scan.run_find_bugs", fake_run_find_bugs)
+    monkeypatch.setattr("omnix.studio.bugs_scan.broadcast_to_workspace", fake_broadcast)
     try:
         with TestClient(app) as client:
             res = client.post(f"/api/workspace/{workspace_id}/bugs/scan")
@@ -142,8 +142,8 @@ def test_bugs_scan_uses_1gb_rss_cap(
     async def fake_broadcast(_workspace: Any, message: dict[str, Any]) -> None:
         messages.append(message)
 
-    monkeypatch.setattr("src.studio.bugs_scan.run_find_bugs", fake_run_find_bugs)
-    monkeypatch.setattr("src.studio.bugs_scan.broadcast_to_workspace", fake_broadcast)
+    monkeypatch.setattr("omnix.studio.bugs_scan.run_find_bugs", fake_run_find_bugs)
+    monkeypatch.setattr("omnix.studio.bugs_scan.broadcast_to_workspace", fake_broadcast)
     try:
         with TestClient(app) as client:
             res = client.post(f"/api/workspace/{workspace_id}/bugs/scan")
@@ -171,8 +171,8 @@ def test_bugs_scan_route_rejects_concurrent_scan(
     async def fake_broadcast(_workspace: Any, _message: dict[str, Any]) -> None:
         return None
 
-    monkeypatch.setattr("src.studio.bugs_scan.run_find_bugs", fake_run_find_bugs)
-    monkeypatch.setattr("src.studio.bugs_scan.broadcast_to_workspace", fake_broadcast)
+    monkeypatch.setattr("omnix.studio.bugs_scan.run_find_bugs", fake_run_find_bugs)
+    monkeypatch.setattr("omnix.studio.bugs_scan.broadcast_to_workspace", fake_broadcast)
     try:
         with TestClient(app) as client:
             first = client.post(f"/api/workspace/{workspace_id}/bugs/scan")

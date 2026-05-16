@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from find_bugs import walker
-from src.parser.grammar_detect import detect_for_path
+from omnix.find_bugs import walker
+from omnix.parser.grammar_detect import detect_for_path
 
 
 def test_walker_dispatches_python_to_dedicated_parser(tmp_path) -> None:

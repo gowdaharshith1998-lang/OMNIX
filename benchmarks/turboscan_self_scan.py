@@ -20,8 +20,8 @@ def main() -> None:
     os.environ.setdefault("PYTHONPATH", str(src))
     sys.path.insert(0, str(src))
 
-    from find_bugs.runner import run_find_bugs
-    from scan.turboscan.orchestrator import scan as turboscan_scan
+    from omnix.find_bugs.runner import run_find_bugs
+    from omnix.scan.turboscan.orchestrator import scan as turboscan_scan
 
     t0 = time.perf_counter()
     run_find_bugs(str(root), examples=args.examples, json_mode=True, no_bundle=True, turboscan=False)

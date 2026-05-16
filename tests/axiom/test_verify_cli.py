@@ -9,10 +9,10 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from axiom.finding_keys import ensure_project_key, project_pubkey_path
-from axiom.finding_receipt import now_iso8601_utc
-from cli import main
-from find_bugs.receipt_emitter import emit_scan_receipts
+from omnix.axiom.finding_keys import ensure_project_key, project_pubkey_path
+from omnix.axiom.finding_receipt import now_iso8601_utc
+from omnix.cli import main
+from omnix.find_bugs.receipt_emitter import emit_scan_receipts
 
 
 def _minimal_finding(file_rel: str = "pkg/a.py") -> dict:
@@ -29,7 +29,7 @@ def _setup_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, 
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
-    from axiom import keystore as mldsa_keystore
+    from omnix.axiom import keystore as mldsa_keystore
 
     keys = home / ".omnix" / "keys"
     keys.mkdir(parents=True)

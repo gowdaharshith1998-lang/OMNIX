@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from src.verify import fuzz_fabric
-from src.verify.runners import subprocess_llm
+from omnix.verify import fuzz_fabric
+from omnix.verify.runners import subprocess_llm
 
 pytest.importorskip("subprocess", reason="stdlib")
 
@@ -79,7 +79,7 @@ def test_provider_fabric_budget_respected_for_fuzz_inputs() -> None:
 
 
 def test_runner_layer_isolated_from_evolution_layer() -> None:
-    m = importlib.import_module("src.verify.runners.subprocess_llm")
+    m = importlib.import_module("omnix.verify.runners.subprocess_llm")
     src = Path(m.__file__ or "")
     t = src.read_text(encoding="utf-8", errors="replace")
     assert "evolution" not in t

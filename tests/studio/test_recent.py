@@ -1,11 +1,11 @@
-"""Tests for :mod:`src.studio.recent` with isolated ``OMNIX_STUDIO_OMNIX_DIR``."""
+"""Tests for :mod:`omnix.studio.recent` with isolated ``OMNIX_STUDIO_OMNIX_DIR``."""
 
 import json
 from pathlib import Path
 
 import pytest
 
-from src.studio import recent
+from omnix.studio import recent
 
 
 def test_recent_starts_empty(  # noqa: D103

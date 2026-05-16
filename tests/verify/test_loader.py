@@ -7,14 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from verify.runner import _load_target_module
+from omnix.verify.runner import _load_target_module
 
 REPO = Path(__file__).resolve().parents[2]
 FIX = Path(__file__).parent / "fixtures"
 FLAT = FIX / "sample_typed.py"
 PKG = FIX / "pkg_with_relimport" / "target.py"
 BROKEN = FIX / "syntaxerr_target.py"
-ENCODING = REPO / "src" / "axiom" / "encoding.py"
+ENCODING = REPO / "src" / "omnix" / "axiom" / "encoding.py"
 
 pytest.importorskip("hypothesis", reason="hypothesis required")
 
@@ -52,7 +52,7 @@ def test_load_package_module_with_relative_import() -> None:
 
 def test_load_package_module_smoke_real_axiom() -> None:
     if not ENCODING.is_file():
-        pytest.skip("src/axiom/encoding.py not in tree")
+        pytest.skip("src/omnix/axiom/encoding.py not in tree")
     path_before = sys.path.copy()
     pre_mod = set(sys.modules)
     m = _load_target_module(ENCODING)

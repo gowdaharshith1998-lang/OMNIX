@@ -10,12 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from src.parser.quality import (
+from omnix.parser.quality import (
     QualityInputs,
     compute_score,
     compute_score_v2,
 )
-from src.parser.quality_profiles import load_profile
+from omnix.parser.quality_profiles import load_profile
 
 
 def test_python_does_not_regress() -> None:
