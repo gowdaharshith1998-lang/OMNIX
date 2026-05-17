@@ -45,28 +45,24 @@ Bumping the major is a separate slice (it can shift resolution semantics).
 The vendored JARs and the compiled emitter JAR ship in `vendor/`. To rebuild:
 
 ```bash
-# 1. Fetch deps from Maven Central
-cd src/omnix/semantic/java/vendor
-curl -sSLO https://repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.26.3/javaparser-core-3.26.3.jar
-curl -sSLO https://repo1.maven.org/maven2/com/github/javaparser/javaparser-symbol-solver-core/3.26.3/javaparser-symbol-solver-core-3.26.3.jar
-curl -sSLO https://repo1.maven.org/maven2/org/javassist/javassist/3.30.2-GA/javassist-3.30.2-GA.jar
-sha256sum -c SHA256SUMS    # MUST match — bump = separate slice
-
-# 2. Compile against Java 21
-cd ../jvm
-javac -cp "../vendor/javaparser-core-3.26.3.jar:../vendor/javaparser-symbol-solver-core-3.26.3.jar:../vendor/javassist-3.30.2-GA.jar" \
-  -d . JavaSemanticEmitter.java
-
-# 3. Bundle with a Class-Path manifest so `java -jar` resolves transitively
-cat > /tmp/emitter-manifest.mf <<EOF
-Manifest-Version: 1.0
-Main-Class: JavaSemanticEmitter
-Class-Path: javaparser-core-3.26.3.jar javaparser-symbol-solver-core-3.26.3.jar javassist-3.30.2-GA.jar
-
-EOF
-jar cfm ../vendor/javaparser-emitter.jar /tmp/emitter-manifest.mf *.class
-sha256sum ../vendor/*.jar > ../vendor/SHA256SUMS
+bash src/omnix/semantic/java/jvm/build.sh
 ```
+
+`build.sh` is idempotent + reproducible:
+
+1. Re-downloads the three upstream JARs from Maven Central.
+2. Verifies each against the repo-pinned `SHA256SUMS` (cryptographic trust root)
+   and the upstream `.sha1` sidecar (transport-integrity probe).
+3. Compiles `JavaSemanticEmitter.java` against the vendored classpath.
+4. Packages `javaparser-emitter.jar` with a `Class-Path` manifest and a fixed
+   `--date=2026-01-01T00:00:00Z` so the JAR's SHA256 is byte-stable across
+   machines and clocks. Two consecutive runs produce identical hashes.
+5. Smoke-tests the emitter by parsing a trivial Java source and asserting
+   the expected `SemanticNode` JSON shape.
+
+Exits non-zero on any failure. The CI test `tests/semantic/java/test_vendor_integrity.py`
+re-hashes the vendored JARs on every pytest run, so a JAR byte change without
+a matching `SHA256SUMS` update fails CI loudly.
 
 ## Vendor location (now versioned)
 
