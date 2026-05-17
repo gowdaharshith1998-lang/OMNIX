@@ -85,7 +85,6 @@ def test_returns_gate_error_dataclass_with_correct_gate_metadata() -> None:
 # ----- Real-parser xfail cases ---------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="JVM JAR not vendored")
 def test_real_parser_catches_syntax_error_in_method_body() -> None:
     # Braces balance, so the heuristic passes — only real parse catches the
     # missing semicolon.
@@ -101,7 +100,13 @@ def test_real_parser_catches_syntax_error_in_method_body() -> None:
     assert err.gate_number == 1
 
 
-@pytest.mark.xfail(strict=True, reason="JVM JAR not vendored")
+@pytest.mark.xfail(
+    strict=True,
+    reason="JAR is vendored, but parser.py emits the raw javac stderr without "
+    "extracting ParseProblem line/col into structured fields. Gate1 receives "
+    "the message but details['line']/details['column'] stay None. Wiring "
+    "structured ParseProblem extraction is a follow-up slice.",
+)
 def test_real_parser_reports_line_column_for_error() -> None:
     src = "class Foo { void x() { int y = ; } }"
     err = gate1_syntactic.check(src)
@@ -110,14 +115,16 @@ def test_real_parser_reports_line_column_for_error() -> None:
     assert err.details.get("column") is not None
 
 
-@pytest.mark.xfail(strict=True, reason="JVM JAR not vendored")
+@pytest.mark.xfail(
+    strict=True,
+    reason="Test source is itself unbalanced (3 opens / 1 close) — both the "
+    "heuristic AND the real parser reject it. Test premise was wrong; rewriting "
+    "with valid sealed/record Java 21 source is a follow-up slice. Marker kept "
+    "as a tripwire so the rewrite isn't forgotten.",
+)
 def test_real_parser_succeeds_on_valid_java21_source_with_invalid_brace_count() -> None:
-    # Real parser handles record-component braces; the heuristic counts every `{`
-    # and `}` literally and would (correctly, by its own dumb rule) miscount this.
-    # When the JAR lands, real parse should pass this source and return None.
-    # Today the heuristic surfaces unbalanced_braces because the record syntax
-    # uses brace patterns the count() check can't reconcile. Adjust this case
-    # once the JAR ships and a more faithful Java21 sample is available.
+    # Source is intentionally minimal — see xfail reason. Real parser also
+    # rejects this exact text because it's genuinely truncated.
     src = """
     public class Foo {
         public sealed interface Shape permits Circle, Square {

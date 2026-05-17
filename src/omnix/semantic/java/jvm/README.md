@@ -42,46 +42,45 @@ Bumping the major is a separate slice (it can shift resolution semantics).
 
 ## Build
 
+The vendored JARs and the compiled emitter JAR ship in `vendor/`. To rebuild:
+
 ```bash
-# 1. Fetch deps (e.g. via mvn dependency:get into a temp dir)
-DEPS=/tmp/jp
-mvn dependency:get -Dartifact=com.github.javaparser:javaparser-core:3.26.2 -Ddest=$DEPS
-mvn dependency:get -Dartifact=com.github.javaparser:javaparser-symbol-solver-core:3.26.2 -Ddest=$DEPS
+# 1. Fetch deps from Maven Central
+cd src/omnix/semantic/java/vendor
+curl -sSLO https://repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.26.3/javaparser-core-3.26.3.jar
+curl -sSLO https://repo1.maven.org/maven2/com/github/javaparser/javaparser-symbol-solver-core/3.26.3/javaparser-symbol-solver-core-3.26.3.jar
+curl -sSLO https://repo1.maven.org/maven2/org/javassist/javassist/3.30.2-GA/javassist-3.30.2-GA.jar
+sha256sum -c SHA256SUMS    # MUST match — bump = separate slice
 
 # 2. Compile against Java 21
-javac --release 21 \
-  -cp "$DEPS/javaparser-core-3.26.2.jar:$DEPS/javaparser-symbol-solver-core-3.26.2.jar" \
-  JavaSemanticEmitter.java
+cd ../jvm
+javac -cp "../vendor/javaparser-core-3.26.3.jar:../vendor/javaparser-symbol-solver-core-3.26.3.jar:../vendor/javassist-3.30.2-GA.jar" \
+  -d . JavaSemanticEmitter.java
 
-# 3. Shade into a single executable JAR (preferred — no classpath gymnastics
-#    on the Python side). Either use the maven-shade-plugin, or for the
-#    quick path:
-jar cfe javaparser-emitter.jar JavaSemanticEmitter *.class
+# 3. Bundle with a Class-Path manifest so `java -jar` resolves transitively
+cat > /tmp/emitter-manifest.mf <<EOF
+Manifest-Version: 1.0
+Main-Class: JavaSemanticEmitter
+Class-Path: javaparser-core-3.26.3.jar javaparser-symbol-solver-core-3.26.3.jar javassist-3.30.2-GA.jar
 
-# (If using the quick path, the runtime invocation becomes
-#    `java -cp javaparser-emitter.jar:<deps> JavaSemanticEmitter ...`
-#  Prefer the shaded variant so the Python bridge stays as simple as
-#  `java -jar javaparser-emitter.jar ...`.)
+EOF
+jar cfm ../vendor/javaparser-emitter.jar /tmp/emitter-manifest.mf *.class
+sha256sum ../vendor/*.jar > ../vendor/SHA256SUMS
 ```
 
-## Vendor location
+## Vendor location (now versioned)
 
 ```
+src/omnix/semantic/java/vendor/javaparser-core-3.26.3.jar
+src/omnix/semantic/java/vendor/javaparser-symbol-solver-core-3.26.3.jar
+src/omnix/semantic/java/vendor/javassist-3.30.2-GA.jar
 src/omnix/semantic/java/vendor/javaparser-emitter.jar
-src/omnix/semantic/java/vendor/SHA256SUMS         # one line per JAR
+src/omnix/semantic/java/vendor/SHA256SUMS              # one line per JAR
 ```
 
-`SHA256SUMS` format:
-
-```
-<sha256>  javaparser-emitter.jar
-<sha256>  javaparser-core-3.26.2.jar     # if shipped alongside
-<sha256>  javaparser-symbol-solver-core-3.26.2.jar
-```
-
-The `vendor/` directory is intentionally **not** in version control for this
-slice. `scripts/vendor_javaparser.sh` (separate slice) will fetch, build,
-verify, and place the artifacts.
+All four JARs are checked into git (~2.7 MB total). Bumping any version is a
+separate slice — it can shift symbol-resolution semantics. Always re-verify
+SHA256SUMS in CI on rebuild.
 
 ## JVM lifecycle
 

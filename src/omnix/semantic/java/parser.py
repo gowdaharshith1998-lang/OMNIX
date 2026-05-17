@@ -26,9 +26,8 @@ from omnix.semantic.errors import (
 )
 from omnix.semantic.node import SemanticNode
 
-# Pinned location of the vendored emitter JAR. Build instructions:
-# src/omnix/semantic/java/jvm/README.md. The JAR is intentionally not in
-# version control — vendor it with scripts/vendor_javaparser.sh.
+# Pinned location of the vendored emitter JAR. Build + vendor instructions:
+# src/omnix/semantic/java/jvm/README.md. SHA256 pin: vendor/SHA256SUMS.
 JAR_PATH: Path = Path(__file__).parent / "vendor" / "javaparser-emitter.jar"
 
 # Well-known sentinel emitted by JavaSemanticEmitter on UnsolvedSymbolException.

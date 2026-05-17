@@ -15,6 +15,9 @@ venv/
 dist/
 build/
 
+# java build artifacts (JavaSemanticEmitter — only the bundled .jar is vendored)
+*.class
+
 # node
 node_modules/
 

@@ -31,8 +31,29 @@ _FQN_RE = re.compile(r"^[a-zA-Z_$][\w$]*(?:\.[a-zA-Z_$*][\w$]*)*$")
 
 def check(source_code: str, classpath: list[Path] | None = None) -> GateError | None:
     """Return None on full type-resolution success, GateError on first failure."""
-    # 1. Real JVM symbol-solver path — only invoked when the vendored JAR is
-    # actually present. Missing JAR falls through to the heuristic; mid-flight
+    # 1. Cheap heuristic — malformed import FQNs (e.g. `import 1abc.Foo;`).
+    # Runs FIRST so callers that rely on `details["context"] == "import"` keep
+    # their contract even when the real JVM path is wired. The JVM path subsumes
+    # this case but with different details — heuristic-first preserves the
+    # specific structured details we promise for import-syntax violations.
+    for match in _IMPORT_RE.finditer(source_code):
+        raw_fqn = match.group(1).strip()
+        check_fqn = raw_fqn[:-2] if raw_fqn.endswith(".*") else raw_fqn
+        if not _FQN_RE.match(check_fqn) and check_fqn != "":
+            line = source_code[: match.start(1)].count("\n") + 1
+            return GateError(
+                gate_number=_GATE_NUMBER,
+                gate_name=_GATE_NAME,
+                message=f"malformed import FQN: {raw_fqn!r}",
+                details={
+                    "unresolvable_type": raw_fqn,
+                    "source_line": line,
+                    "context": "import",
+                },
+            )
+
+    # 2. Real JVM symbol-solver path — only invoked when the vendored JAR is
+    # actually present. Missing JAR falls through (no further checks). Mid-flight
     # JVM failures raise GateCrashError so the runner records them.
     try:
         from omnix.semantic.java import parser as java_parser  # noqa: PLC0415
@@ -88,24 +109,5 @@ def check(source_code: str, classpath: list[Path] | None = None) -> GateError | 
             raise
         except Exception as exc:  # noqa: BLE001
             raise GateCrashError(_GATE_NUMBER, f"JVM parser unavailable: {exc}", original=exc) from exc
-
-    # 2. Pure-Python heuristic: import FQN sanity check.
-    for match in _IMPORT_RE.finditer(source_code):
-        raw_fqn = match.group(1).strip()
-        check_fqn = raw_fqn[:-2] if raw_fqn.endswith(".*") else raw_fqn
-        if not _FQN_RE.match(check_fqn) and check_fqn != "":
-            # Compute source line. match.start(1) is the position of the FQN
-            # capture group, which is the most reliable anchor.
-            line = source_code[: match.start(1)].count("\n") + 1
-            return GateError(
-                gate_number=_GATE_NUMBER,
-                gate_name=_GATE_NAME,
-                message=f"malformed import FQN: {raw_fqn!r}",
-                details={
-                    "unresolvable_type": raw_fqn,
-                    "source_line": line,
-                    "context": "import",
-                },
-            )
 
     return None

@@ -141,7 +141,12 @@ def test_whitespace_normalization_passes() -> None:
     assert err is None
 
 
-@pytest.mark.xfail(strict=True, reason="regex param-splitter cannot handle nested generics — needs real parser")
+@pytest.mark.xfail(
+    strict=True,
+    reason="JAR is vendored, but gate3 still uses the regex param-splitter for "
+    "signature extraction — wiring it to consume parse_file().resolved_param_types "
+    "is a follow-up slice. Until then, nested-generic param commas fool the splitter.",
+)
 def test_signature_extraction_uses_real_parser_for_generics() -> None:
     # Source has TWO params, both with internal-comma generics. Naive comma-split
     # fragments each into 2 pieces — heuristic sees 4 params, spec lists 2.
