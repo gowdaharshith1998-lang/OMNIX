@@ -4,6 +4,6 @@ Phase 5 ships the dispatch loop (no retry, no gates). Phase 7 adds the retry wra
 Verification (Phase 6) lives in omnix.gates and is consumed by the retry wrapper here.
 """
 
-from omnix.orchestrator.attempt import RebuildAttempt
+from omnix.orchestrator.attempt import RebuildAttempt, sha256_hex
 
-__all__ = ["RebuildAttempt"]
+__all__ = ["RebuildAttempt", "sha256_hex"]
