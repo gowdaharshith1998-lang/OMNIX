@@ -67,5 +67,14 @@ pytest, can't be xfailed). Depends on `slice-15.3.7-graph-store-locking`.
 
 ---
 
+## P1 — housekeeping (logged by post-M0.5 stand-down)
+
+### slice-21-10-hex-fps-perf-flake
+Investigate why `src/omnix/studio/frontend/src/components/Graph/__tests__/hex-fps-perf.test.tsx::test_fps_floor_at_full_load` passes in isolation (`npm test -- --run hex-fps-perf.test.tsx` → 2/2 green) but fails under full-suite parallel load (`npm test -- --run` → 1 failed). Suspected root cause: shared module state across vitest workers (the FPS ticker/galaxyStressHarness probably leaks singleton state between parallel worker contexts), or worker-isolation config drift. Not blocking — the failure is non-deterministic and the test isn't part of any prod path. Ranks first in the next housekeeping window before CI gets wired, since a CI-wired flake floods the PR-status signal.
+
+Restore criteria: deterministic green/red on `npm test -- --run` across 10 consecutive runs.
+
+---
+
 When a slice lands one of these features and the xfailed/blocked tests start
 passing, remove the corresponding entry from this file in the same PR.
