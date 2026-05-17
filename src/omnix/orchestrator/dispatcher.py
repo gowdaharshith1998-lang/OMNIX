@@ -16,7 +16,7 @@ will catch and reissue; this module stays simple.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
+from typing import Any, Callable, Iterable, Protocol
 
 from omnix.orchestrator.attempt import RebuildAttempt, sha256_hex
 from omnix.orchestrator.prompt_template import (

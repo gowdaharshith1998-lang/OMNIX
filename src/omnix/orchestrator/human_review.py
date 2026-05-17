@@ -13,7 +13,7 @@ and the flat list of every attempt for auditability.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from omnix.gates.result import GateError, GateResult

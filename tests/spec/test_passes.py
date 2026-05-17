@@ -12,7 +12,6 @@ from omnix.spec.passes import signature as signature_pass
 from omnix.spec.passes import target_hints as target_hints_pass
 from omnix.spec.passes import types as types_pass
 
-
 # ---------------------------------------------------------------------------
 # Fixture builder
 # ---------------------------------------------------------------------------

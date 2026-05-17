@@ -25,7 +25,6 @@ from omnix.orchestrator.retry import (
 )
 from omnix.spec import DependencyRef, Identity, Signature, Spec, TypeInfo
 
-
 # ---------- spec + result factories -----------------------------------------
 
 def make_spec(fqn: str) -> Spec:
