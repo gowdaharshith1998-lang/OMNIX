@@ -18,9 +18,10 @@ from omnix.studio.paths import ensure_project_omnix_dir, project_graph_db_path
 from omnix.studio.session import ensure_session_artifact, remove_session_dir
 
 if TYPE_CHECKING:
+    from starlette.websockets import WebSocket
+
     from omnix.studio.parser_bridge import ParserBridge
     from omnix.studio.watcher import ProjectWatcher
-    from starlette.websockets import WebSocket
 
 
 def _is_empty_dir(p: Path) -> bool:

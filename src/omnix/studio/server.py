@@ -25,25 +25,27 @@ if os.environ.get("OMNIX_STUDIO_DEBUG") == "1":
 
 import asyncio
 import contextlib
+import hashlib
 import json
+import re
+import sqlite3
 import subprocess
 import sys
 import time
-import hashlib
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-import re
 
-import sqlite3
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from omnix.find_bugs.receipt_emitter import verify_scan_directory
 from omnix.graph.store import GraphStore, NodeRow
+from omnix.omnix_version import __version__
 from omnix.parser import evolution
 from omnix.parser.grammar_detect import detect_for_path
 from omnix.parser.grammar_status_query import (
@@ -56,20 +58,20 @@ from omnix.parser.grammar_status_query import (
     utc_now_iso,
 )
 from omnix.parser.ingest_dispatch import ingest_unified_codebase
+from omnix.providers.detect import identify_provider
+from omnix.providers.registry import PROVIDERS
+from omnix.receipts import provider_vault
 from omnix.receipts.finding_receipt import compute_project_id
-from omnix.find_bugs.receipt_emitter import verify_scan_directory
-from omnix.omnix_version import __version__
 from omnix.studio.bugs_scan import run_scan_for_workspace
 from omnix.studio.parser_bridge import ParserBridge, broadcast_to_workspace
 from omnix.studio.recent import add_recent, list_recent
-from omnix.studio.watcher import ProjectWatcher
+from omnix.studio.watcher import ProjectWatcher, is_studio_ignored
 from omnix.studio.workspace import (
     MANAGER,
     Workspace,
     node_row_to_dict,
     open_workspace,
 )
-from omnix.studio.watcher import is_studio_ignored
 from omnix.studio.ws_protocol import (
     msg_bootstrap_complete,
     msg_bootstrap_start,
@@ -79,9 +81,6 @@ from omnix.studio.ws_protocol import (
     msg_pong,
     msg_stats,
 )
-from omnix.receipts import provider_vault
-from omnix.providers.detect import identify_provider
-from omnix.providers.registry import PROVIDERS
 
 _LOG = logging.getLogger("omnix.studio")
 
@@ -772,7 +771,8 @@ def _verify_receipt_detached_sig(
     if pk is None:
         return False
     try:
-        from omnix.receipts import keystore, verify as vfy  # type: ignore[import-not-found]
+        from omnix.receipts import keystore  # type: ignore[import-not-found]
+        from omnix.receipts import verify as vfy
     except Exception:
         return False
     try:

@@ -10,7 +10,8 @@ from unittest import mock
 import pytest
 
 from omnix.graph.store import GraphStore
-from omnix.parser import evolution, ingest_dispatch as ind
+from omnix.parser import evolution
+from omnix.parser import ingest_dispatch as ind
 from omnix.parser import ingest_dispatch as ingmod
 
 FIXTURE = Path(__file__).parent / "fixtures" / "parallel_consistency"

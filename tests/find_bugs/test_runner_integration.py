@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import pytest
 from pathlib import Path
+
+import pytest
 
 pytest.importorskip("hypothesis", reason="hypothesis required")
 

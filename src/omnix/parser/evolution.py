@@ -17,8 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from omnix.receipts import keystore, sign
 from omnix.parser.quality_profiles import load_profile
+from omnix.receipts import keystore, sign
 
 _LOG = logging.getLogger("omnix.parser.evolution")
 

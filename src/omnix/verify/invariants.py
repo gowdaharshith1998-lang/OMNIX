@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import Any
 
 from .boundary import _callee_name as callee_name
 

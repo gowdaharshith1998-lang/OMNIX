@@ -9,8 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from omnix.find_bugs import path_safety
-from omnix.find_bugs import runner
+from omnix.find_bugs import path_safety, runner
 
 pytest.importorskip("hypothesis", reason="hypothesis required")
 

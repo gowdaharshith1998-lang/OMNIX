@@ -9,10 +9,10 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from omnix.receipts.finding_keys import ensure_project_key, project_pubkey_path
-from omnix.receipts.finding_receipt import now_iso8601_utc
 from omnix.cli import main
 from omnix.find_bugs.receipt_emitter import emit_scan_receipts
+from omnix.receipts.finding_keys import ensure_project_key, project_pubkey_path
+from omnix.receipts.finding_receipt import now_iso8601_utc
 
 
 def _minimal_finding(file_rel: str = "pkg/a.py") -> dict:

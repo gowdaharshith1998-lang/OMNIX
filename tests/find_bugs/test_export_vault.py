@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from omnix.find_bugs.receipt_emitter import emit_scan_receipts
 from omnix.receipts.export_vault import build_vault_zip
 from omnix.receipts.finding_keys import ensure_project_key, project_pubkey_path
-from omnix.find_bugs.receipt_emitter import emit_scan_receipts
 
 
 def _minimal_finding(file_rel: str = "pkg/a.py") -> dict:

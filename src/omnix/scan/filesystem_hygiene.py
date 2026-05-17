@@ -11,7 +11,7 @@ import os
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Sequence
 
 _LOG = logging.getLogger("omnix.scan.filesystem_hygiene")
 

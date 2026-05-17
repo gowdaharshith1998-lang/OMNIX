@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
-from .runner import ExitCode, run as verify_run
+from .runner import ExitCode
+from .runner import run as verify_run
 
 
 def _build_parser() -> argparse.ArgumentParser:

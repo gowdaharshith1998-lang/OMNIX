@@ -77,8 +77,9 @@ def test_R2_1_3_calibration_emits_top5_report(
 
 def test_R2_1_4_inlined_generators_semantically_equivalent_for_top5() -> None:
     """R2.1.4: inlined singletons match fresh strategies for deterministic RNG seeds."""
-    from hypothesis.internal.conjecture.data import ConjectureData
     from random import Random
+
+    from hypothesis.internal.conjecture.data import ConjectureData
 
     for _name, bundle in INLINED_REGISTRY.items():
         original_strategy = bundle.original

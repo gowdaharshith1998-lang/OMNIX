@@ -11,9 +11,10 @@ import os
 import sys
 from enum import IntEnum
 from pathlib import Path
-from typing import Any, Callable, TextIO
+from typing import Any, Callable
 
-from hypothesis import given, settings, strategies as hst
+from hypothesis import given, settings
+from hypothesis import strategies as hst
 from hypothesis.database import DirectoryBasedExampleDatabase, InMemoryExampleDatabase
 
 from omnix.scan.filesystem_hygiene import (

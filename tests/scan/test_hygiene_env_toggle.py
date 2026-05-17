@@ -25,7 +25,6 @@ import pytest
 
 from omnix.find_bugs import runner as fb_runner
 
-
 _HYGIENE_KEYS = (
     "OMNIX_FS_HYGIENE_ENABLED",
     "OMNIX_FS_HYGIENE_REPO_ROOT",

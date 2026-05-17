@@ -4,7 +4,8 @@
 
 from __future__ import annotations
 
-from . import encoding, hashing, ntt, poly, params as P, sampling
+from . import encoding, hashing, ntt, poly, sampling
+from . import params as P
 
 
 def _hash_mu(tr: bytes, mprime_bits: list[int]) -> bytes:

@@ -15,7 +15,6 @@ from omnix.omnix_version import __version__ as OMNIX_VERSION
 
 from .finding_receipt import compute_project_id, now_iso8601_utc
 
-
 VAULT_README = """# OMNIX Compliance Vault — Audit Handoff
 
 This archive contains cryptographically-signed evidence of code analysis

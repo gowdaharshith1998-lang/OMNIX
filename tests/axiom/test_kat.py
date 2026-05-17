@@ -6,9 +6,9 @@ import json
 from pathlib import Path
 
 import omnix.receipts.keygen as kg
+import omnix.receipts.params as P
 import omnix.receipts.sign as sgn
 import omnix.receipts.verify as vfy
-import omnix.receipts.params as P
 
 _KAT = Path(__file__).resolve().parent / "kat_mldsa65.json"
 

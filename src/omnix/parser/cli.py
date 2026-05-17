@@ -8,7 +8,6 @@ import sqlite3
 import sys
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 import click

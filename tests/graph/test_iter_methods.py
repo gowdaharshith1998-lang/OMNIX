@@ -6,7 +6,7 @@ import sys
 import tempfile
 from collections.abc import Generator
 
-from omnix.graph.store import GraphStore, EdgeRow, NodeRow
+from omnix.graph.store import EdgeRow, GraphStore, NodeRow
 from omnix.parser.memory_graph import MemoryGraphStore
 
 
