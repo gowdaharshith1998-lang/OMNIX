@@ -44,6 +44,19 @@ MAX_RSS_PER_VERIFY = int(
     os.environ.get("OMNIX_FIND_BUGS_RSS_CAP_BYTES", str(DEFAULT_MAX_RSS_PER_VERIFY))
 )
 
+# Hygiene env vars that can leak across calls when a forkserver-cached worker
+# holds an env snapshot from a prior hygiene-enabled scan. Symmetric set:
+# the parent process clears these on toggle-off (run_find_bugs_with_hygiene,
+# lines ~1118-1126); the verify subprocess paths must mirror that.
+_HYGIENE_ENV_KEYS: tuple[str, ...] = (
+    "OMNIX_FS_HYGIENE_ENABLED",
+    "OMNIX_FS_HYGIENE_REPO_ROOT",
+    "OMNIX_FS_HYGIENE_HYPOTHESIS_DIR",
+    "OMNIX_FS_HYGIENE_VERIFY_WS",
+    "OMNIX_FS_HYGIENE_STRICT",
+    "OMNIX_FS_HYGIENE_REPRO_CMD",
+)
+
 
 def _max_rss_per_verify() -> int:
     raw = os.environ.get("OMNIX_FIND_BUGS_RSS_CAP_BYTES")
@@ -379,6 +392,17 @@ def _child_verify(
         os.environ["HYPOTHESIS_STORAGE_DIRECTORY"] = hpr
     if run_args.get("fs_hygiene_delegated"):
         os.environ["OMNIX_FS_HYGIENE_DELEGATED"] = "1"
+    # Mirror _run_verify_limited's subprocess_env_overrides handling so the
+    # Hypothesis-import fallback path doesn't drop the override and
+    # reintroduce the forkserver-stale-env bug (codex adversarial finding).
+    sub_overrides = run_args.get("subprocess_env_overrides") or {}
+    if isinstance(sub_overrides, dict):
+        if "OMNIX_FS_HYGIENE_ENABLED" not in sub_overrides:
+            for _hk in _HYGIENE_ENV_KEYS:
+                os.environ.pop(_hk, None)
+        for _k, _v in sub_overrides.items():
+            if isinstance(_k, str) and _v is not None:
+                os.environ[_k] = str(_v)
     shrink_s = str(int(run_args.get("max_shrink_seconds") or 5))
     os.environ["OMNIX_PBT_MAX_SHRINK_SEC"] = shrink_s
     try:
@@ -451,6 +475,14 @@ def _run_verify_limited(
         env["OMNIX_FS_HYGIENE_DELEGATED"] = "1"
     sub_overrides = run_args.get("subprocess_env_overrides") or {}
     if isinstance(sub_overrides, dict):
+        # Symmetric cleanup: subprocess_env_overrides is set-only by design,
+        # but the forkserver-stale-env bug it defeats applies equally to the
+        # toggle-off case (hygiene-enabled scan, then hygiene-disabled scan
+        # in the same process). When this scan does NOT enable hygiene,
+        # explicitly pop any stale hygiene keys before applying overrides.
+        if "OMNIX_FS_HYGIENE_ENABLED" not in sub_overrides:
+            for _hk in _HYGIENE_ENV_KEYS:
+                env.pop(_hk, None)
         for _k, _v in sub_overrides.items():
             if isinstance(_k, str) and _v is not None:
                 env[_k] = str(_v)
