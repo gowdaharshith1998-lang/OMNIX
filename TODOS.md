@@ -4,6 +4,48 @@ Cross-slice P1 follow-ups. Entries are added/removed by named slices.
 
 ---
 
+## P0 — GitHub Actions billing blocked (logged 2026-05-17 post-M1-finisher)
+
+GitHub Actions cannot start any job on the repo — every CI run aborts in
+~3 seconds with the annotation:
+
+> "The job was not started because recent account payments have failed or
+> your spending limit needs to be increased. Please check the 'Billing &
+> plans' section in your settings"
+
+Affected: all four checks (`python-tests`, `vault-tests`, `frontend-tests`,
+`python-lint`) on every PR. M1 finisher PRs #15-#20 were merged with local
+pytest as the verification signal (user-approved override) because the
+CI gate was non-functional, not because of code issues. **Until billing
+is resolved, no PR can hit a true CLEAN+MERGEABLE state via gh.**
+
+Resolve in: repo or org GitHub settings → Billing & plans. Re-trigger CI
+on `main` with an empty commit (or push a no-op branch) to confirm jobs
+start. Then re-enable any branch-protection rule requiring green CI.
+
+---
+
+## P2 — `test_concurrent_writes_serialized` flake (logged 2026-05-17)
+
+`tests/graph/test_store_locking.py::test_concurrent_writes_serialized` is
+`@pytest.mark.xfail(strict=False)` with the inline note "passes in
+isolation, fails under full suite". During the M1 finisher merge
+sequence (2026-05-17) the test flipped between `xfailed` and `xpassed`
+roughly every other full-suite run on `main`, with no code change
+intervening. It does NOT cause failures (strict=False suppresses XPASS
+errors) but it muddies the post-merge counts: a verification gate that
+expects `26 xfailed` sometimes sees `25 xfailed, 1 xpassed`.
+
+**Action:** move this test out of the M1 finisher signal path. Either
+(a) re-home it to a dedicated `tests/graph/test_store_locking_flaky.py`
+that the default `pytest tests/` invocation skips via a marker, or
+(b) bundle it into the slice-15.3.7 GraphStore locking work that's
+already specced to replace the underlying behavior. Either way: the
+flake should not be the noise floor that future M-series merge gates
+have to disambiguate. **NOT M1 finisher scope** — open a separate slice.
+
+---
+
 ## P1 — slice 15.3.7 follow-ups (logged by slice 21.8 / M0.5)
 
 Slice 21.8 (M0.5) landed the slice 15.3.7 LLM tool-dispatch source into the
