@@ -37,11 +37,9 @@ Retry semantics
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
-from omnix.gates.errors import GateCrashError
 from omnix.gates.result import GateResult
 from omnix.orchestrator.attempt import RebuildAttempt, sha256_hex
 from omnix.orchestrator.human_review import HumanReviewRecord, RetryRunReport

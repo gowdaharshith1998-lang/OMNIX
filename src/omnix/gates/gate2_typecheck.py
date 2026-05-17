@@ -44,12 +44,13 @@ def check(source_code: str, classpath: list[Path] | None = None) -> GateError | 
 
     if jar_present:
         try:
-            from omnix.semantic.java import parser as java_parser  # noqa: PLC0415
+            import tempfile  # noqa: PLC0415
+
             from omnix.semantic.errors import (  # noqa: PLC0415
                 JavaSemanticError,
                 UnresolvedSymbolError,
             )
-            import tempfile  # noqa: PLC0415
+            from omnix.semantic.java import parser as java_parser  # noqa: PLC0415
 
             with tempfile.NamedTemporaryFile(suffix=".java", mode="w", delete=False) as fh:
                 fh.write(source_code)

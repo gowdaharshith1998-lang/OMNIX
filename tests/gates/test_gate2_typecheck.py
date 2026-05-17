@@ -6,7 +6,6 @@ import pytest
 
 from omnix.gates import gate2_typecheck
 
-
 # ----- Heuristic path -------------------------------------------------------
 
 

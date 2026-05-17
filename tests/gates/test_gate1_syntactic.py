@@ -10,7 +10,6 @@ import pytest
 
 from omnix.gates import gate1_syntactic
 
-
 # ----- Heuristic (pure-Python) path ----------------------------------------
 
 

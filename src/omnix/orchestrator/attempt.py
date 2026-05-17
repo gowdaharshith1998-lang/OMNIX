@@ -7,7 +7,7 @@ that produced a given response without retaining the full text.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any
 

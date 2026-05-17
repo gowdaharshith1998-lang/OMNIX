@@ -44,8 +44,8 @@ def check(source_code: str) -> GateError | None:
     # (the explicit "today" path). When the JAR is present but the JVM blows up,
     # that IS a crash and we raise GateCrashError so the runner records it.
     try:
-        from omnix.semantic.java import parser as java_parser  # noqa: PLC0415
         from omnix.semantic.errors import JavaSemanticError  # noqa: PLC0415
+        from omnix.semantic.java import parser as java_parser  # noqa: PLC0415
 
         jar = getattr(java_parser, "JAR_PATH", None)
         jar_present = jar is not None and Path(jar).exists()
@@ -54,9 +54,10 @@ def check(source_code: str) -> GateError | None:
 
     if jar_present:
         try:
-            from omnix.semantic.java import parser as java_parser  # noqa: PLC0415
-            from omnix.semantic.errors import JavaSemanticError  # noqa: PLC0415
             import tempfile  # noqa: PLC0415
+
+            from omnix.semantic.errors import JavaSemanticError  # noqa: PLC0415
+            from omnix.semantic.java import parser as java_parser  # noqa: PLC0415
 
             with tempfile.NamedTemporaryFile(suffix=".java", mode="w", delete=False) as fh:
                 fh.write(source_code)

@@ -10,7 +10,7 @@ without requiring a versioned migration when M2 passes start populating them.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any
 
 

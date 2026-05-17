@@ -60,7 +60,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["E", "F401", "F821"]      # tests can be sloppier; F821 covers annotation-only Path under future-annotations
+"tests/*" = ["E", "F401"]              # tests can be sloppier
 "tests/verify/fixtures/*" = ["ALL"]    # intentional broken-syntax fixtures
 "scripts/*" = ["E", "F401", "F541"]
 "omnix.py" = ["E402"]                  # entry-point: path-manipulation precedes imports

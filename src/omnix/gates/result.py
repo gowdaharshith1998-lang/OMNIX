@@ -6,7 +6,7 @@ Crashes (gate impl bugs, JVM died, etc.) raise GateCrashError via errors.py.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Any
 
 
