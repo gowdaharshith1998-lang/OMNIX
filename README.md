@@ -1,143 +1,163 @@
 # OMNIX
 
-**OMNIX is, to our current knowledge, the only open-core code intelligence product that bundles universal Tree-Sitter parsing + self-evolving query patterns with ML-DSA-65 signed audit trail + hybrid universal PBT + sandbox-isolated auto-fix in one shipping repo.**
+**OMNIX is the graph-native platform for migrating legacy systems to modern stacks with verified behavioral equivalence and full data fidelity, running in parallel with the legacy system until the organization is ready to cut over.**
 
-Point OMNIX at a codebase. Get an interactive 3D graph of every file, function, class, and connection.
+If you run an engineering org with a 30-year-old Java estate, a regulator on your back, and a talent shortage on the COBOL/Spring-2.x side, OMNIX is the tooling layer that lets your team migrate one structurally-bounded node at a time, verify each rebuilt node against the legacy one with a six-gate evidence pipeline, and ship the result with a signed audit trail your compliance team can hand to an examiner.
 
-## Quick Start
+---
+
+## Why this exists
+
+The companies we built OMNIX for share a profile:
+
+- 5-30 year old codebase in Java 6/7/8, .NET Framework, COBOL, or similar
+- Mandate to modernize (regulatory deadline, mainframe end-of-life, cloud migration, M&A integration, or compounding talent shortage)
+- $20M-$200M consulting alternative (Accenture / IBM / Deloitte / Capgemini) with the industry's ~60% project failure rate
+- Internal team that tried once and bounced
+
+OMNIX is built to be deployed by your engineering leadership — the VP Eng or platform lead who owns a bounded modernization workstream and needs to ship one production module without breaking anything, then point at the receipts when the regulator asks how they know.
+
+---
+
+## How it works
+
+OMNIX is a graph-driven pipeline. It is not an autonomous agent. It is closer to a compiler with an LLM as one of its passes, and hard verification gates between every step.
+
+```
+[Legacy Codebase]
+       ↓
+[1. Parse → semantic graph]              ← shipped
+       ↓
+[2. Topological sort]                    ← shipped (graph traversal)
+       ↓
+[3. Generate per-node rebuild spec]      ← in progress (M1)
+       ↓
+[4. LLM dispatch with spec + deps]       ← orchestrator in progress (M1)
+       ↓
+[5. Verification gate (6 checks)]        ← gates 1-4 shipped, 5-6 in progress
+       ↓ (fail → retry with error context)
+       ↓ (still fail → flag for human)
+[6. Sign receipt (ML-DSA)]               ← shipped (receipts subsystem)
+       ↓
+[7. Repeat up the graph]
+       ↓
+[Rebuilt codebase + signed audit trail]
+```
+
+The six verification gates are syntactic parse, type check, signature check, dependency check, property-based test, and behavioral equivalence test (legacy node vs rebuilt node, diff outputs). Each accepted node emits a signed receipt covering the legacy source hash, rebuilt source hash, spec version, all six gate results, the LLM model and prompt template versions, and the cryptographic signature. The receipts subsystem (ML-DSA-65 signatures) handles the signing and exposes a verifier so auditors can confirm receipt authenticity offline.
+
+The shadow bridge (in progress, M4) routes a configurable percentage of production traffic to the rebuilt code without serving the response, diffs the outputs against the legacy path, and emits a signed receipt per request. This is how you build a year-long evidence record before any cutover.
+
+We say "verified equivalence with auditable evidence." We do not say "provable" or "100% accurate." The gates produce strong evidence; receipts produce a tamper-evident record; the bridge surfaces divergence in production. None of that is a mathematical proof, and we will not market it as one.
+
+---
+
+## Competitive context
+
+Java modernization is a contested category. Be honest about the incumbents:
+
+- **Amazon Q Code Transformation** ships Java 8/11/17 → 17/21 upgrade workflows with build/test loops and transformation plans, bundled into AWS migration budgets and developer tooling.
+- **OpenRewrite** (open source) and **Moderne** (commercial) own deterministic recipe-driven Java modernization — `javax → jakarta`, Spring Boot 2 → 3, dependency upgrades — with enterprise-scale rollout dashboards.
+- **Accenture / IBM / Deloitte / Capgemini** run the multi-million-dollar program-management layer.
+
+OMNIX does not compete with these on the LLM transformation step. The LLM step uses standard frontier models (Anthropic, OpenAI) or local/on-prem (Llama 3.1 70B + vLLM) for regulated buyers. OMNIX's defensibility lives in the layer the incumbents do not ship: a verification gate that combines deterministic checks with property-based testing and side-by-side behavioral diffing, a receipt-linked shadow bridge that produces an auditable production-traffic record over time, and a graph-driven blast-radius model that quantifies which changes are safe to merge.
+
+If you are already running Amazon Q or OpenRewrite, the right shape is to let them generate the transformation and let OMNIX produce the gate results, the signed receipt per accepted node, and the shadow-bridge evidence your compliance team needs. We are the layer that makes someone else's migration reviewable with an evidence trail.
+
+---
+
+## What works today
+
+The current release is foundational scaffolding for the full pipeline. CLI surface:
+
+```bash
+# Parse a codebase into the OMNIX graph
+omnix analyze /path/to/project
+
+# Property-based tests with optional signed finding receipts
+omnix find-bugs /path/to/project --emit-receipts
+
+# Behavioral verification gates against the graph
+omnix verify /path/to/project
+
+# Parser grammar visibility
+omnix grammar status
+omnix grammar list
+
+# Signed-receipt verification + audit export
+omnix axiom keygen --project /path/to/project
+omnix axiom verify-scan /path/to/receipts/dir \
+  --ed25519-pubkey <pubkey> --mldsa-pubkey <pubkey>
+omnix axiom export-vault /path/to/project --out audit.zip
+```
+
+What ships today:
+
+- Universal Tree-sitter-based parser producing the semantic graph (Python, TypeScript, Rust, Java grammars active; ~10 more enumerable via `omnix grammar list`)
+- Property-based testing with signed finding receipts (Ed25519 per-finding + ML-DSA-65 over a Merkle root per scan)
+- Behavioral verification primitives (subprocess-isolated)
+- Read-only localhost API + a React studio for inspection
+- Audit export bundle ready for offline third-party verification
+
+Built but not yet exposed as polished CLI verbs (M1-M2): the spec generator, the LLM orchestrator, the dual-runtime equivalence runner. Coming in subsequent milestones (M3-M5): the engineer-review workspace, the shadow bridge, the regulator-facing audit explorer, and the standalone verifier binary that auditors can run without installing the full Python stack.
+
+---
+
+## Roadmap milestones
+
+The milestones below come from the OMNIX build map. Dates are intentionally not promised — the team is small and the work is honest.
+
+| Milestone | Scope |
+|---|---|
+| **M0.5** | Land slice 15.3.7 LLM tool-dispatch into the `omnix.fabric` / `omnix.providers` namespace |
+| **M1** | End-to-end single-node migration: spec generator v1, LLM orchestrator, gates 1-4, signed receipt — one Java 6 function → Java 21 |
+| **M2** | Whole-module migration on a real OSS Java codebase, with gate 5 (property) and gate 6 (behavioral) producing diffs |
+| **M3** | Engineer-review workspace: triage queue for nodes that fail verification, side-by-side diff with annotated gates, keyboard-driven approve/re-run/edit |
+| **M4** | Shadow bridge: runs rebuilt code on production traffic without serving the response, signed receipt per request, divergence alerting |
+| **M5** | Executive dashboard (RAG verdict + top risk) and regulator-facing audit explorer with PDF export |
+
+Standalone `omnix-verify` binary (Go or Rust, ~5MB, no Python required) ships alongside M1 so auditors can verify a receipt offline on day one.
+
+---
+
+## Quick start
 
 ```bash
 pip install -r requirements.txt
 python omnix.py analyze /path/to/your/project
 ```
 
-Browser opens. Explore your codebase in 3D.
+The analyze command parses the codebase, builds the graph, and starts the React studio on localhost. Studio ingests into `<path>/.omnix/omnix.db`.
 
-Use `python omnix.py analyze /path --no-open` to start the React Studio server without launching a browser. Studio ingests into `<path>/.omnix/omnix.db`; the legacy `src/web/graph_data.json` export path is retired.
+Use `python omnix.py analyze /path --no-open` to start the studio server without launching a browser.
 
-## Grammar Visibility (v0.4)
+---
 
-OMNIX exposes what the universal parser has learned: per-language profiles, pattern counts, recent grammar mutations, unknown file extensions, optional LLM call budget, and ML-DSA-signed evolution receipts (compliance-**aligned** design — not a certification).
+## Signed receipts and audit export
 
-### CLI
+OMNIX can emit cryptographically signed evidence for findings from `find-bugs`: each finding gets an Ed25519 signature; each scan gets a ML-DSA-65 signature over a Merkle root of finding hashes. Any changed byte, removed finding, or altered manifest fails `omnix axiom verify-scan` quickly.
 
-```bash
-omnix grammar status
-omnix grammar status --json
-# Optional: --db /path/to/omnix.db  --grammar python
-```
+This is the foundation for the receipt-linked audit trail the rest of the pipeline plugs into. The current release ships:
 
-Sample table (from this repo after analyze):
+- **Localhost-only API** — `GET /api/findings/scans`, `POST /api/findings/verify-scan` (non-localhost → 403)
+- **Studio Receipts drawer** with a Finding Scans tab; Verify calls `/api/findings/verify-scan` and shows pass/fail inline
+- **`omnix axiom export-vault`** — produces an offline-verifiable zip with keys, scans, index, and instructions for a third party
 
-```
-Grammar     Files parsed  Avg quality  …  Active patterns  Recent mutations  Last evolution receipt
-python      2844          0.755        …  10               7                 …/evolution_…_python.json
-rust        14            0.750        …  1                0                 —
-typescript  1597          0.610        …  18               4                 …/evolution_…_typescript.json
-```
+The audit trail is *compliance-aligned infrastructure that produces evidence suitable for review*. OMNIX is not a certified compliance product. The design is intended to align with EU AI Act Article 12 (logging and traceability) and DORA Article 17 (ICT incident reporting) expectations, but the certification path is the buyer's, not ours.
 
-JSON mirrors API field names: `grammar_name`, `files_parsed`, `avg_quality`, `parse_modes`, `active_patterns`, `recent_mutations_30d`, `last_evolution_receipt`, plus `unknown_extensions`, `llm_fallback`.
+---
 
-### API (read-only, localhost-only)
+## Adjacent and overlapping tools
 
-| Route | Returns (abbrev.) |
-|-------|-------------------|
-| `GET /api/grammar/status` | `db_path`, `generated_at`, `grammars[]`, `unknown_extensions[]`, `llm_fallback` |
-| `GET /api/grammar/mutations?limit=N` | `mutations[]` with `grammar_name`, `node_type`, `action`, `observed_at`, `receipt_path`, `sig_path`, `receipt_exists`, `sig_exists` |
-| `GET /api/grammar/unknown-extensions` | `total`, `extensions[]` (`ext`, `first_seen_at`, optional `raw_bytes_hex`) |
-| `GET /api/fabric/llm-budget` | `budget_*`, `calls_today`, `available` (often null when unset) |
-| `POST /api/grammar/verify-receipt` | `verified`, `verifier_output`, `receipt_path`, `sig_path`, `verified_at` |
+- **Amazon Q Code Transformation** — Java upgrade workflow; OMNIX produces the audit layer over its output
+- **OpenRewrite / Moderne** — recipe-driven deterministic refactor; OMNIX produces the receipt and shadow evidence over their output
+- **AWS DMS / Azure DMS / GCP DTS** — bulk database migration and CDC; OMNIX uses these for the data-side of a parallel-run rather than rebuilding them
+- **Envoy / Apache Camel / Argo Rollouts** — traffic routing, protocol mediation, progressive delivery; OMNIX's shadow bridge runs alongside these rather than replacing them
+- **Sigstore / cosign** — software artifact signing; OMNIX signs code-intelligence events and per-node receipts with ML-DSA-65, a different surface
+- **Tree-sitter language packs** — grammar bundles; OMNIX consumes these and adds the symbol-resolution, signed-event, and verification layers on top
+- **JQF, PropTest-AI** — property-based testing tooling; OMNIX integrates property tests as gate 5 of the verification pipeline
 
-Non-localhost requests get **403**. Verify rejects paths outside canonical receipt dirs (**400** / **404**).
-
-### Studio
-
-Open **Grammar Health** in the left rail (chart icon between Receipts and Settings). Four GETs poll every 10s; **Verify** POSTs `{ "receipt_path": "<abs path>" }`.
-
-![Grammar Health drawer](docs/images/grammar-health-drawer.png)
-
-### Roadmap
-
-**Slice 18d (shipped as v0.5)** — Compliance Vault foundation: signed finding receipts + ML-DSA scan manifests. See [SLICE_18d.md](slices/SLICE_18d.md).
-
-## Compliance Vault (since v0.5)
-
-OMNIX can emit **cryptographically signed evidence** for findings from `find-bugs`: each finding has an **Ed25519** signature; each scan has a **ML-DSA-65** signature over a **Merkle root** of finding hashes. Any changed byte, removed finding, or altered manifest should fail **`omnix axiom verify-scan`** quickly.
-
-This is the foundation for the **Compliance Vault** tier (**in beta with design partners**) — **designed to align with** EU AI Act Article 12 (logging and traceability) and DORA Article 17 (ICT incident reporting) expectations. OMNIX is **not** a certified compliance product; it is **compliance-aligned** infrastructure that produces audit-ready evidence.
-
-### Demo
-
-```bash
-# 1) Project Ed25519 keypair (one-time; idempotent)
-omnix axiom keygen --project ~/my-codebase
-
-# 2) Scan with signed receipts (opt-in)
-omnix find-bugs ~/my-codebase --emit-receipts
-# Output includes receipt path under ~/.omnix/receipts/findings/<project_id>/<scan_id>/
-
-# 3) Verify the latest scan directory (use paths from your machine)
-omnix axiom verify-scan ~/.omnix/receipts/findings/<project_id>/<scan_id>/ \
-  --ed25519-pubkey ~/my-codebase/.omnix/pubkey.pem \
-  --mldsa-pubkey ~/.omnix/keys/public.pem
-# Example: verified  finding_count=3
-
-# 4) Export auditor zip (keys + scans + index + README)
-omnix axiom export-vault ~/my-codebase --out audit.zip
-# Example: wrote audit.zip  (2 scans included, 0 excluded as tampered)
-```
-
-The zip is intended for **offline verification** by a third party using the bundled instructions and public keys.
-
-![Compliance Vault demo](docs/videos/compliance-vault-demo.mp4)
-
-*(Placeholder until `docs/videos/compliance-vault-demo.mp4` is recorded — see slice 18d step 4 screencast brief.)*
-
-### API (read-only, localhost-only)
-
-| Route | Returns |
-|-------|---------|
-| `GET /api/findings/scans` | `{ scans: [...] }` with `scan_id`, timestamps, `finding_count`, `dir_path_relative`, `manifest_kind` |
-| `POST /api/findings/verify-scan` | Body `{ "scan_id": "..." }` → `verified`, `reason`, `finding_count`, `manifest_summary` |
-
-Non-localhost → **403**. Malformed or traversal `scan_id` → **400**.
-
-### Studio
-
-**Receipts** drawer → **Finding Scans** tab: lists scans; **Verify** calls `/api/findings/verify-scan` and shows pass/fail inline.
-
-### Tampering
-
-One **`verify-scan`** checks: modified receipt (Merkle / sig mismatch), missing receipt vs manifest roster, invalid ML-DSA on manifest.
-
-### Deferred public docs
-
-Standalone verifier without a full OMNIX install is planned for **v0.6** (not in this README). Detailed regulatory mappings stay in design-partner conversations.
-
-## What It Does
-
-- 🔍 Parses Python + TypeScript with Tree-sitter
-- 🧬 Builds a knowledge graph of every symbol and relationship
-- 🌐 Renders an interactive 3D force graph in your browser
-- ⚡ Click any node to see what it connects to
-- 🔎 Search for any function, class, or file
-- 📊 Stats: files, functions, classes, imports, edges
-
-## Coming Soon
-
-- AI agents that understand your product and test it like a human
-- Full-stack failure tracing (UI → API → DB → root cause)
-- Self-healing: OMNIX finds bugs and proposes sandbox-only fixes
-- MCP server for Cursor / Claude Code integration
-
-## Adjacent prior art (each does part of the stack)
-
-- **tree-sitter-language-pack** — large grammar bundle (300+); no built-in signed audit trail
-- **Codebase-Memory (e.g. arXiv:2603.27277, multi-language, MCP tools)** — memory/retrieval layer; not the same as ML-DSA graph-event signing in-tree
-- **pqrascv-core** — ML-DSA-65 attestation patterns for embedded Rust; different product surface
-- **Sigstore / cosign** — software artifact signing and provenance; OMNIX signs code-intelligence *events* with ML-DSA-65, not OCI images
-- **JQF, PropTest-AI** — property-based testing and LLM assistance; OMNIX’s Layer 5–7 ties PBT to graph + optional Fabric
-- **Tian AI and similar (AST + LLM)** — self-modification experiments; OMNIX keeps evolution metadata signed and does not `eval` LLM output in-process for universal PBT
+---
 
 ## License
 
