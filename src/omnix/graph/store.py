@@ -90,6 +90,21 @@ class GraphStore:
                 node_count INTEGER NOT NULL,
                 edge_count INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS rebuild_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                node_fqn TEXT NOT NULL,
+                spec_hash TEXT NOT NULL,
+                prompt_template_version TEXT NOT NULL,
+                prompt_text_hash TEXT NOT NULL,
+                response_text TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                model TEXT NOT NULL,
+                attempt_number INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE INDEX IF NOT EXISTS idx_rebuild_attempts_node_fqn
+                ON rebuild_attempts(node_fqn);
+            CREATE INDEX IF NOT EXISTS idx_rebuild_attempts_node_attempt
+                ON rebuild_attempts(node_fqn, attempt_number);
             """
         )
         self._conn.commit()
@@ -181,6 +196,75 @@ class GraphStore:
 
     def close(self) -> None:
         self._conn.close()
+
+    # ----- M1 rebuild_attempts table ----------------------------------------
+    #
+    # Additive schema for the M1 finisher Phase 5 / Phase 6 rebuild pipeline.
+    # One row per LLM dispatch attempt. attempt_number > 1 only set by the
+    # Phase 7 retry wrapper. Receipts (Phase 6) read these rows back to
+    # anchor the signed rebuild record.
+
+    def store_rebuild_attempt(
+        self,
+        *,
+        node_fqn: str,
+        spec_hash: str,
+        prompt_template_version: str,
+        prompt_text_hash: str,
+        response_text: str,
+        timestamp: str,
+        model: str,
+        attempt_number: int = 1,
+    ) -> int:
+        """Persist one RebuildAttempt row. Returns the inserted rowid.
+
+        `timestamp` is ISO-8601 text — the caller (orchestrator) is the
+        canonical clock source; we store as text for cross-platform
+        portability + greppability. Schema migration is additive and
+        idempotent (`CREATE TABLE IF NOT EXISTS` in `_ensure_schema`).
+        """
+        cur = self._conn.execute(
+            """
+            INSERT INTO rebuild_attempts (
+                node_fqn, spec_hash, prompt_template_version, prompt_text_hash,
+                response_text, timestamp, model, attempt_number
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                node_fqn,
+                spec_hash,
+                prompt_template_version,
+                prompt_text_hash,
+                response_text,
+                timestamp,
+                model,
+                attempt_number,
+            ),
+        )
+        self._conn.commit()
+        return int(cur.lastrowid or 0)
+
+    def get_rebuild_attempts(
+        self, node_fqn: str
+    ) -> list[dict[str, Any]]:
+        """Return all RebuildAttempt rows for `node_fqn` in attempt-order.
+
+        Returned dicts use the same field names as
+        `omnix.orchestrator.attempt.RebuildAttempt.to_dict()` so callers
+        can hydrate the dataclass via `RebuildAttempt.from_dict` after
+        parsing `timestamp` back to a datetime.
+        """
+        rows = self._conn.execute(
+            """
+            SELECT node_fqn, spec_hash, prompt_template_version, prompt_text_hash,
+                   response_text, timestamp, model, attempt_number
+            FROM rebuild_attempts
+            WHERE node_fqn = ?
+            ORDER BY attempt_number ASC, id ASC
+            """,
+            (node_fqn,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def add_node(
         self,
