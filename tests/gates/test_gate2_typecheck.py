@@ -67,10 +67,11 @@ def test_returns_gate_error_dataclass_with_required_keys() -> None:
 
 @pytest.mark.xfail(
     strict=True,
-    reason="JAR is vendored, but the emitter only resolves return + parameter "
-    "types strictly (per R-3.3). Method-body variable declarations + reference "
-    "types fall through resolveOrFallback silently. Strict body-type resolution "
-    "is a follow-up emitter slice.",
+    reason="M1 Phase 5 (emitter follow-up): JAR vendored + bridge real, but "
+    "the emitter only resolves return + parameter types strictly (per R-3.3). "
+    "Method-body variable declarations + reference types fall through "
+    "resolveOrFallback silently. Flipped when the M1-finisher Phase 5 emitter "
+    "slice tightens body-type resolution to match return/param strictness.",
 )
 def test_real_parser_reports_unresolvable_type_in_method_body() -> None:
     src = """
@@ -87,10 +88,11 @@ def test_real_parser_reports_unresolvable_type_in_method_body() -> None:
 
 @pytest.mark.xfail(
     strict=True,
-    reason="JAR is vendored, but the emitter only resolves return + parameter "
-    "types strictly (per R-3.3). Method-body variable declarations + reference "
-    "types fall through resolveOrFallback silently. Strict body-type resolution "
-    "is a follow-up emitter slice.",
+    reason="M1 Phase 5 (emitter follow-up): JAR vendored + bridge real, but "
+    "the emitter only resolves return + parameter types strictly (per R-3.3). "
+    "Method-body variable declarations + reference types fall through "
+    "resolveOrFallback silently. Flipped when the M1-finisher Phase 5 emitter "
+    "slice tightens body-type resolution to match return/param strictness.",
 )
 def test_real_parser_resolves_classpath_imports() -> None:
     # Heuristic only checks import FQN syntax; it cannot verify the referenced

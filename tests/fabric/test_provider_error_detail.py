@@ -15,7 +15,8 @@ pytestmark = pytest.mark.xfail(
         "slice 15.3.7 provider error detail not yet implemented: "
         "openai_compatible response dict lacks 'body_text' and 'body_json' fields on HTTP error. "
         "Test is the spec; lands when slice 15.3.7 backend wires the new error shape. "
-        "Tracked in TODOS.md P1 (slice-15.3.7-provider-error-detail)."
+        "Tracked in TODOS.md P1 (slice-15.3.7-provider-error-detail). "
+        "[Outside M1 finisher Phase 4-7 scope — separate slice-15.3.7 work stream.]"
     ),
 )
 

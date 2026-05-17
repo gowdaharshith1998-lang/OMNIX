@@ -35,7 +35,8 @@ def test_summarize_tool_args_truncates() -> None:
     reason=(
         "slice 15.3.7 LLM tool-dispatch: omnix.fabric.providers.openai_compatible.call() "
         "does not yet accept a `tools` parameter. Test is the spec for the slice 15.3.7 "
-        "tools-param API surface. Tracked in TODOS.md P1."
+        "tools-param API surface. Tracked in TODOS.md P1. "
+        "[Outside M1 finisher Phase 4-7 scope — separate slice-15.3.7 work stream.]"
     ),
 )
 def test_openai_compatible_accepts_tools_parameter() -> None:
@@ -52,7 +53,8 @@ def test_openai_compatible_accepts_tools_parameter() -> None:
     reason=(
         "slice 15.3.7 LLM tool-dispatch: omnix.fabric.dispatcher has no "
         "_tool_use_message_list helper yet. Test is the spec for the orchestrator's "
-        "tool-use message construction. Tracked in TODOS.md P1."
+        "tool-use message construction. Tracked in TODOS.md P1. "
+        "[Outside M1 finisher Phase 4-7 scope — separate slice-15.3.7 work stream.]"
     ),
 )
 def test_dispatcher_has_tool_definitions_option_path() -> None:
