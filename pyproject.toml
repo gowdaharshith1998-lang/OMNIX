@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "omnix"
-version = "0.6.0"
+version = "0.6.1"
 description = "Code intelligence platform with AXIOM ML-DSA-65 provenance"
 readme = "README.md"
 requires-python = ">=3.10"

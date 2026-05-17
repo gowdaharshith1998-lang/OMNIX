@@ -5,6 +5,26 @@ All notable changes to OMNIX are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-05-17
+
+### Changed
+- **Slice 15.3.7 LLM tool-dispatch source landed in `omnix.*` namespace (slice 21.8 / M0.5):** the WIP from stash `wip-slice-15.3.7-and-misc-post-PR` was applied onto a new branch off main, file-moved into the namespaced tree (`src/fabric/dispatch_tools.py` → `src/omnix/fabric/dispatch_tools.py`; `src/providers/tools/` → `src/omnix/providers/tools/`; 18 React/TS files under `src/studio/frontend/src/` merged into the existing `src/omnix/studio/frontend/src/` tree), and every `from src.X` / bare `from fabric|providers` import (plus the inline `monkeypatch.setattr("src.X...")` / `@mock.patch("fabric...")` string paths) retargeted to `from omnix.X`. Collision survey at `/tmp/slice-15.3.7-collision-manifest.md` confirmed 0 IDENTICAL, 0 COLLISION, 30 NEW — clean merge with no manual escalation.
+- **`omnix.axiom` Python module renamed to `omnix.receipts` (M0 leftover folded into M0.5):** the module that emits and verifies signed receipts is now named for what it does, not for the marketing surface. 17 tracked files renamed via `git mv` (history preserved); 38 source files updated to import from `omnix.receipts` (every `omnix.axiom` dot-path reference + the two hardcoded internal-tree filesystem paths in `walker.py`'s pathological-skip list and `test_loader.py`'s ENCODING constant). **The user-facing CLI verb tree is unchanged** — `omnix axiom keygen`, `omnix axiom verify-scan`, and `omnix axiom export-vault` all still work; only the internal Python module path moved. The audit-export.zip shipped to early users continues to reference the `omnix axiom` verbs verbatim. Sibling-repo `apps/backend/src/omnix/axiom` references in `src/web/graph_data_axiom_v2.json` and the frontend AXIOM-V2 fixtures were deliberately NOT swept (they describe AXIOM-V2 paths, not our OMNIX module).
+
+### Added
+- **8 slice 15.3.7 Python test files classified per a verdict manifest** (`/tmp/slice-15.3.7-test-verdicts.md`):
+  - 1 file PASSING (`tests/fabric/test_dispatch_tools_integration.py`, 3/3 green).
+  - 3 files MIXED with per-test `@pytest.mark.xfail(strict=True, reason=...)` markers naming the exact missing slice 15.3.7 symbol: `tests/fabric/test_dispatcher_provider_override.py` (1 pass + 4 xfail on `dispatcher.dispatch(provider_override=…)`), `tests/fabric/test_real_tool_use.py` (3 pass + 2 xfail on `openai_compatible.call(tools=…)` and `dispatcher._tool_use_message_list`), `tests/graph/test_store_locking.py` (1 pass + 4 xfail on `GraphStore._lock` / `.locked_connection()` / serialized writes; the concurrent-writes test uses `strict=False` because it passes in isolation but fails under full-suite load).
+  - 2 files module-level `pytestmark = pytest.mark.xfail(strict=True)` because every test in the file depends on the same unbuilt slice 15.3.7 surface: `tests/fabric/test_provider_error_detail.py` (2 tests, `body_text`/`body_json` response fields not yet emitted) and `tests/studio/test_action_dispatch_route.py` (10 tests, `/action/dispatch` route + `omnix.studio.server.get_provider_client` symbol not yet built).
+  - 2 files BLOCKED-OUT-OF-SCOPE — moved to `tests/_blocked/studio/` with sibling `.WHY.md` files, because they cannot be xfailed: `test_ingest_resilience.py` hangs past 60s on an async deadlock in the studio server lifespan when `_ingest_block` raises, and `test_workspace_dedupe.py` segfaults Python 3.14 / sqlite3 during teardown (GraphStore.close races with the ingest cache thread). Both have P1 entries in `TODOS.md`.
+- **`TODOS.md` (new):** seven P1 entries naming the exact symbol each xfailed/blocked test needs in order to unblock (e.g. `slice-15.3.7-provider-override-kwarg`, `slice-15.3.7-graph-store-locking`, `slice-15.3.7-action-dispatch-backend`).
+- **`tests/_blocked/` directory convention:** opt-out collection via `pyproject.toml` `[tool.pytest.ini_options]` `norecursedirs = ["_blocked", ...]` (pytest defaults preserved explicitly because `norecursedirs` replaces rather than extends). Each blocked test has a sibling `<name>.WHY.md` documenting root cause + restore checklist.
+
+### Internal
+- Test suite: 481 → 488 backend passing (+7 from PASSING-bucket stashed tests landing) + 22 xfailed (the slice 15.3.7 spec markers) + 5 skipped (unchanged). 1 pre-existing positioning test (`test_readme_company_brain_opening`) still fails on main HEAD due to README rewrite drift — NOT caused by this PR; deferred to its own one-line dispatch. No new failures introduced by this PR.
+- Six commits on the slice-21-8-tool-dispatch-namespace branch: backend moves + frontend moves + import retargets + test classification + cleanup + receipts rename + this version bump.
+- The `wip-slice-15.3.7-and-misc-post-PR` stash is intentionally NOT dropped — kept as recovery insurance until this PR lands.
+
 ## [0.6.0] - 2026-05-16
 
 ### Changed
