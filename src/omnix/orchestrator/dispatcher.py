@@ -55,28 +55,93 @@ class _GraphLike(Protocol):
     def get_node(self, fqn: str) -> SemanticNode: ...
 
 
+def _provider_for_model(model: str) -> str:
+    """Route a model id to its provider name. Best-effort prefix match.
+
+    Anthropic, OpenAI, Google, and Ollama are all valid `provider_key.provider`
+    values per `omnix.providers.registry.PROVIDERS`. Anything unrecognized
+    defaults to anthropic (the M1 default-model family).
+    """
+    m = model.lower().strip()
+    if m.startswith(("claude", "anthropic/")):
+        return "anthropic"
+    if m.startswith(("gpt", "o1", "o3", "openai/")):
+        return "openai"
+    if m.startswith(("gemini", "google/")):
+        return "google"
+    if m.startswith("ollama/"):
+        return "ollama"
+    return "anthropic"
+
+
 # Default LLM dispatch — lazy import so tests never trigger fabric setup.
 def _default_dispatch_fn(prompt_text: str, *, model: str) -> str:
-    """Production dispatch_fn: forwards to omnix.fabric.dispatcher.dispatch.
+    """Production dispatch_fn: pulls credentials from vault, calls fabric.
 
-    Kept thin on purpose. The orchestrator only cares about a (text in, text
-    out) function; fabric handles all routing, budget, dedup, telemetry.
+    The orchestrator only cares about (prompt text in, response text out).
+    This adapter handles the full credentialed path:
+
+      1. Route `model` to a provider name (anthropic / openai / google / ollama).
+      2. Look up the encrypted key via `omnix.providers.client.get_provider_client`.
+      3. If no key is registered, fail loud with `OrchestratorError` pointing
+         the user at the Provider Fabric BYOK flow. We never silently fall
+         back to a different provider — that's how cost surprises happen.
+      4. Call the client's `.chat()` which feeds the validated payload to
+         `omnix.fabric.dispatcher.dispatch` (routing, budget, dedup, receipts).
+      5. Surface fabric failures (`ok=False`) as `OrchestratorError` with the
+         underlying `error_message`. Phase 7's retry wrapper introspects these.
+
+    Heavy fabric imports stay lazy so test stubs avoid the cold start.
     """
-    from omnix.fabric.dispatcher import dispatch  # local import — heavy
+    from omnix.providers.client import (  # noqa: WPS433 — runtime import is intentional
+        ProviderNotRegistered,
+        get_provider_client,
+    )
 
-    payload: dict[str, Any] = {
-        "agent_id": "omnix-orchestrator",
-        "task_kind": "rebuild",
-        "messages": [{"role": "user", "content": prompt_text}],
-        "options": {"model": model},
-    }
-    result = dispatch(payload)
-    # Fabric returns a dict — pull the assistant text out.
-    if isinstance(result, dict):
-        text = result.get("text") or result.get("content")
-        if isinstance(text, str):
-            return text
-    raise OrchestratorError(f"dispatch_fn returned non-text result: {type(result).__name__}")
+    provider = _provider_for_model(model)
+    try:
+        client = get_provider_client(provider)
+    except ProviderNotRegistered as e:  # pragma: no cover — registry mismatch
+        raise OrchestratorError(
+            f"provider {provider!r} (inferred from model {model!r}) "
+            "not present in omnix.providers.registry.PROVIDERS"
+        ) from e
+
+    if client is None:
+        raise OrchestratorError(
+            f"no API key registered for provider {provider!r} "
+            f"(inferred from model {model!r}). Register one via the "
+            "Provider Fabric BYOK UI or `omnix axiom keygen` for project-scoped keys."
+        )
+
+    result: Any = client.chat(
+        messages=[{"role": "user", "content": prompt_text}],
+        model=model,
+        task_kind="rebuild",
+        agent_id="omnix-orchestrator",
+    )
+
+    if not isinstance(result, dict):
+        raise OrchestratorError(
+            f"fabric dispatch returned non-dict result: {type(result).__name__}"
+        )
+    if not result.get("ok"):
+        err = (
+            result.get("error_message")
+            or result.get("error")
+            or "unknown fabric failure"
+        )
+        raise OrchestratorError(
+            f"fabric dispatch failed (provider={result.get('provider')}, "
+            f"http_status={result.get('http_status')}): {err}"
+        )
+
+    text = result.get("content")
+    if not isinstance(text, str):
+        raise OrchestratorError(
+            f"fabric returned non-string content: {type(text).__name__}"
+        )
+    return text
 
 
 def _load_graph(project_path: Path) -> _GraphLike:
