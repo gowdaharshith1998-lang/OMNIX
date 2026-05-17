@@ -39,7 +39,22 @@ def check(source_code: str) -> GateError | None:
             details={"reason": "empty_source"},
         )
 
-    # 2. Real JVM parse path — only invoked when the vendored JAR is actually
+    # 2. Cheap deterministic heuristic — unbalanced braces. Runs BEFORE the JVM
+    # path because (a) it's faster, (b) it gives a structured "reason" detail
+    # that callers rely on (`details["reason"] == "unbalanced_braces"`), (c) the
+    # JVM path subsumes this case but with different details — running heuristic
+    # first preserves the contract.
+    n_open = source_code.count("{")
+    n_close = source_code.count("}")
+    if n_open != n_close:
+        return GateError(
+            gate_number=_GATE_NUMBER,
+            gate_name=_GATE_NAME,
+            message=f"unbalanced braces ({n_open} open, {n_close} close)",
+            details={"reason": "unbalanced_braces", "open": n_open, "close": n_close},
+        )
+
+    # 3. Real JVM parse path — only invoked when the vendored JAR is actually
     # present. When the JAR is missing we silently fall through to the heuristic
     # (the explicit "today" path). When the JAR is present but the JVM blows up,
     # that IS a crash and we raise GateCrashError so the runner records it.
@@ -83,16 +98,5 @@ def check(source_code: str) -> GateError | None:
             raise
         except Exception as exc:  # noqa: BLE001
             raise GateCrashError(_GATE_NUMBER, f"JVM parser unavailable: {exc}", original=exc) from exc
-
-    # 3. Pure-Python heuristic: unbalanced braces.
-    n_open = source_code.count("{")
-    n_close = source_code.count("}")
-    if n_open != n_close:
-        return GateError(
-            gate_number=_GATE_NUMBER,
-            gate_name=_GATE_NAME,
-            message=f"unbalanced braces ({n_open} open, {n_close} close)",
-            details={"reason": "unbalanced_braces", "open": n_open, "close": n_close},
-        )
 
     return None

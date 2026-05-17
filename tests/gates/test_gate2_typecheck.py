@@ -65,7 +65,13 @@ def test_returns_gate_error_dataclass_with_required_keys() -> None:
 # ----- Real-parser xfail cases ---------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="JVM JAR not vendored")
+@pytest.mark.xfail(
+    strict=True,
+    reason="JAR is vendored, but the emitter only resolves return + parameter "
+    "types strictly (per R-3.3). Method-body variable declarations + reference "
+    "types fall through resolveOrFallback silently. Strict body-type resolution "
+    "is a follow-up emitter slice.",
+)
 def test_real_parser_reports_unresolvable_type_in_method_body() -> None:
     src = """
     class Foo {
@@ -79,7 +85,13 @@ def test_real_parser_reports_unresolvable_type_in_method_body() -> None:
     assert err.details["unresolvable_type"] == "UnknownType"
 
 
-@pytest.mark.xfail(strict=True, reason="JVM JAR not vendored")
+@pytest.mark.xfail(
+    strict=True,
+    reason="JAR is vendored, but the emitter only resolves return + parameter "
+    "types strictly (per R-3.3). Method-body variable declarations + reference "
+    "types fall through resolveOrFallback silently. Strict body-type resolution "
+    "is a follow-up emitter slice.",
+)
 def test_real_parser_resolves_classpath_imports() -> None:
     # Heuristic only checks import FQN syntax; it cannot verify the referenced
     # body uses ArrayList correctly. This test asserts the FULL resolution
