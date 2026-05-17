@@ -10,8 +10,8 @@ import pytest
 
 from omnix.find_bugs.walker import iter_dispatch_paths
 from omnix.graph.store import GraphStore
-from omnix.parser.skip_tracking import SkipAggregate
 from omnix.parser import ingest_dispatch as ind
+from omnix.parser.skip_tracking import SkipAggregate
 
 
 def test_streaming_preserves_walk_order(

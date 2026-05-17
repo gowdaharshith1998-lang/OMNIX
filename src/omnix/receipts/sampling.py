@@ -5,7 +5,8 @@ FIPS 204 §7.3: SampleInBall, RejNTTPoly, RejBoundedPoly, ExpandA, ExpandS, Expa
 
 from __future__ import annotations
 
-from . import encoding, hashing, ntt, params as P
+from . import encoding, hashing
+from . import params as P
 
 
 def rej_ntt_poly(seed34: bytes) -> list[int]:

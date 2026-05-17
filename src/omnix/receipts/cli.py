@@ -10,7 +10,8 @@ from pathlib import Path
 
 import click
 
-from . import keystore, sign, verify as vfy
+from . import keystore, sign
+from . import verify as vfy
 
 _DEFAULT_KEY_DIR = Path.home() / ".omnix" / "keys"
 _DEFAULT_MLDSA_PUB = Path.home() / ".omnix" / "keys" / "public.pem"

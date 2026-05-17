@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff", "mypy"]
 
 [project.scripts]
 omnix = "omnix.cli:main"
@@ -43,3 +43,50 @@ norecursedirs = [
     "venv",
     "{arch}",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [
+    "tests/verify/fixtures/syntaxerr_target.py",  # intentional broken-syntax fixture (parser-level error, not lint-suppressible)
+]
+
+[tool.ruff.lint]
+# Permissive baseline — ratchet up later
+select = ["E", "F", "I", "W"]
+ignore = [
+    "E501",  # line-length is style, not error
+    "F841",  # unused local variables — minor, not a runtime bug
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E", "F401", "F821"]      # tests can be sloppier; F821 covers annotation-only Path under future-annotations
+"tests/verify/fixtures/*" = ["ALL"]    # intentional broken-syntax fixtures
+"scripts/*" = ["E", "F401", "F541"]
+"omnix.py" = ["E402"]                  # entry-point: path-manipulation precedes imports
+"src/omnix/cli.py" = ["E402"]          # entry-point: path-manipulation precedes imports
+"src/omnix/studio/delta.py" = ["E402"] # legitimate post-conditional-import pattern
+"src/omnix/receipts/ntt.py" = ["E741"] # `l` is intrinsic in NTT math (RFC 8391 / Dilithium)
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+strict = false
+warn_redundant_casts = true
+warn_unused_ignores = false
+
+# Permissive baseline: existing modules with type debt are ignored.
+# New modules (e.g., omnix.semantic, omnix.spec, omnix.orchestrator, omnix.gates)
+# are NOT in this list and WILL be type-checked. Ratchet existing modules off
+# this list as type debt is paid down in follow-up slices.
+[[tool.mypy.overrides]]
+module = [
+    "omnix.agents.*",
+    "omnix.fabric.*",
+    "omnix.find_bugs.*",
+    "omnix.graph.exporter",
+    "omnix.parser.*",
+    "omnix.scan.turboscan.*",
+    "omnix.studio.*",
+]
+ignore_errors = true

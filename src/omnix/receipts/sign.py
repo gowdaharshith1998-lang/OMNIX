@@ -8,7 +8,8 @@ timing side-channels in pure-Python NTT/loops are a known risk (FIPS, Appendix C
 
 from __future__ import annotations
 
-from . import encoding, hashing, ntt, poly, params as P, sampling
+from . import encoding, hashing, ntt, poly, sampling
+from . import params as P
 
 
 def _modpm_q(r: int) -> int:

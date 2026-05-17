@@ -39,8 +39,8 @@ def findings_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (root / "pkg" / "a.py").write_text("def foo():\n pass\n", encoding="utf-8")
     ensure_project_key(root.resolve())
 
-    from omnix.receipts.finding_receipt import now_iso8601_utc
     from omnix.find_bugs.receipt_emitter import emit_scan_receipts
+    from omnix.receipts.finding_receipt import now_iso8601_utc
 
     emit_scan_receipts(
         [_minimal_finding()],

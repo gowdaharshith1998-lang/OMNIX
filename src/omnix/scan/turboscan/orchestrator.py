@@ -98,7 +98,11 @@ def dispatch_turboscan_python_phase(
     Returns ``(fcount_delta, ex_total_delta, budget_plan, relative_paths_touched)``.
     """
     from omnix.find_bugs.entry_points import detect_framework_decorated, graph_id_for
-    from omnix.find_bugs.runner import _apply_one_verify_outcome, _relpos, _skip_for_main_transparency
+    from omnix.find_bugs.runner import (
+        _apply_one_verify_outcome,
+        _relpos,
+        _skip_for_main_transparency,
+    )
     from omnix.scan.turboscan.calibration import ensure_turboscan_calibration
     from omnix.verify.signature import extract_signatures
 

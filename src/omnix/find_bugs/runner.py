@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
+import getpass
 import json
 import logging
 import os
-import shlex
 import pwd
-from dataclasses import asdict
-import getpass
 import resource
+import shlex
 import shutil
 import signal
 import sqlite3
@@ -19,6 +18,7 @@ import time
 import traceback
 from collections import Counter
 from collections.abc import Iterable
+from dataclasses import asdict
 from multiprocessing import get_context
 from pathlib import Path
 from typing import Any, cast

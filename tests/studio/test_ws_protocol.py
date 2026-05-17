@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytest
 
+from omnix.studio import ws_protocol as wsp
 from omnix.studio.ws_protocol import (
     WsError,
     msg_bootstrap_start,
@@ -13,7 +14,6 @@ from omnix.studio.ws_protocol import (
     msg_node_added,
     validate_serialized,
 )
-from omnix.studio import ws_protocol as wsp
 
 
 def test_bootstrap_start_serializes() -> None:  # noqa: D103

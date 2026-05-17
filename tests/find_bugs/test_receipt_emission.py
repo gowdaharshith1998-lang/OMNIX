@@ -7,16 +7,16 @@ from pathlib import Path
 
 import pytest
 
-from omnix.receipts import keystore as mldsa_keystore
-from omnix.receipts.finding_keys import ensure_project_key, project_pubkey_path
-from omnix.receipts.finding_receipt import now_iso8601_utc
-from omnix.receipts.merkle import compute_merkle_root, compute_leaf_hash
 from omnix.find_bugs.receipt_emitter import (
     MissingEd25519ProjectKeyError,
     MissingMldsaKeystoreError,
     emit_scan_receipts,
     verify_scan_directory,
 )
+from omnix.receipts import keystore as mldsa_keystore
+from omnix.receipts.finding_keys import ensure_project_key, project_pubkey_path
+from omnix.receipts.finding_receipt import now_iso8601_utc
+from omnix.receipts.merkle import compute_leaf_hash, compute_merkle_root
 
 
 def _setup_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:

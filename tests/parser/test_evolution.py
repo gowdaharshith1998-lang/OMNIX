@@ -8,10 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from omnix.receipts import keystore, verify as vfy
-from omnix.receipts.keygen import keygen
 from omnix.graph.store import GraphStore
 from omnix.parser import evolution as evo
+from omnix.receipts import keystore
+from omnix.receipts import verify as vfy
+from omnix.receipts.keygen import keygen
 
 
 def _kpair(tmp: Path) -> None:

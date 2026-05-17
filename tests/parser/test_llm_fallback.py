@@ -61,7 +61,7 @@ def test_llm_fallback_triggered_below_threshold(gstore: GraphStore) -> None:
     assert r.called_llm is True
     assert r.parse_mode == "llm"
     fn = {n.id for n in gstore.get_all_nodes() if n.name == "f" and n.type == "function"}
-    assert f"x.txt::f" in fn
+    assert "x.txt::f" in fn
     fnode = next(
         n for n in gstore.get_all_nodes() if n.id == "x.txt::f" and n.type == "function"
     )

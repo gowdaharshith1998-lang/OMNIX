@@ -7,7 +7,8 @@ from unittest import mock
 
 import pytest
 
-from omnix.fabric import budget, config as fc, dedup, dispatcher, health, receipts, telemetry
+from omnix.fabric import budget, dedup, dispatcher, health, receipts, telemetry
+from omnix.fabric import config as fc
 from tests.fabric import mocks
 
 _PROVIDER_OVERRIDE_XFAIL = pytest.mark.xfail(

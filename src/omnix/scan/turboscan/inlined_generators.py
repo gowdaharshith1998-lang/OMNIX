@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 import hypothesis.strategies as st
-
 from hypothesis.strategies._internal.lazy import unwrap_strategies
 
 

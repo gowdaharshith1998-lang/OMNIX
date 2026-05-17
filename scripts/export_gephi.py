@@ -65,8 +65,8 @@ def main():
 
     size_mb = OUT.stat().st_size / (1024 * 1024)
     print(f"✓ Wrote {len(nodes)} nodes, {len(edges)} edges → {OUT} ({size_mb:.2f} MB)")
-    print(f"")
-    print(f"Open in Gephi:")
+    print("")
+    print("Open in Gephi:")
     print(f"  flatpak run org.gephi.Gephi {OUT}")
 
 if __name__ == "__main__":

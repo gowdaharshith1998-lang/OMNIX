@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Any
 from unittest import mock
 
-from omnix.fabric import config as fc, dispatcher
+from omnix.fabric import config as fc
+from omnix.fabric import dispatcher
 from omnix.providers.registry import PROVIDERS
 from tests.fabric import mocks
 

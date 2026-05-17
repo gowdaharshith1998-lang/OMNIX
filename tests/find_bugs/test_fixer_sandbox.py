@@ -9,7 +9,7 @@ from unittest import mock
 
 import pytest
 
-from omnix.find_bugs import fixer, fix_fabric, runner, sandbox
+from omnix.find_bugs import fix_fabric, fixer, runner, sandbox
 from omnix.find_bugs.fixer import orchestrate_code_fix
 
 

@@ -159,9 +159,9 @@ def qux():
 
 
 def test_generic_python_via_universal_parser_matches_dedicated_output() -> None:
-    from omnix.parser.python_parser import parse_python_files
-
     import tempfile
+
+    from omnix.parser.python_parser import parse_python_files
 
     st_u = _tmp_store()
     st_d = _tmp_store()

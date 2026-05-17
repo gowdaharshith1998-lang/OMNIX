@@ -8,9 +8,10 @@ from pathlib import Path
 import pytest
 
 from omnix.graph.store import GraphStore
-from omnix.parser import evolution, ingest_dispatch as ind
-from omnix.parser.ingest_dispatch import quality_profile_fingerprint
 from omnix.omnix_version import __version__ as OMNIX_V
+from omnix.parser import evolution
+from omnix.parser import ingest_dispatch as ind
+from omnix.parser.ingest_dispatch import quality_profile_fingerprint
 
 
 def _n(db: Path) -> tuple[int, int]:

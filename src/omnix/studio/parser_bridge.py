@@ -7,15 +7,15 @@ import contextlib
 import hashlib
 import json
 import logging
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
 import sqlite3
+from typing import TYPE_CHECKING, Any
 
 from omnix.graph.store import EdgeRow, GraphStore, NodeRow
 from omnix.parser import evolution
 from omnix.parser.ingest_dispatch import default_parse_mode, ingest_one_path
 from omnix.studio.delta import compute_file_delta
+from omnix.studio.watcher import is_studio_ignored
+from omnix.studio.workspace import Workspace, node_row_to_dict
 from omnix.studio.ws_protocol import (
     msg_edge_added,
     msg_edge_removed,
@@ -26,8 +26,6 @@ from omnix.studio.ws_protocol import (
     msg_node_removed,
     msg_stats,
 )
-from omnix.studio.watcher import is_studio_ignored
-from omnix.studio.workspace import node_row_to_dict, Workspace
 
 if TYPE_CHECKING:
     from starlette.websockets import WebSocket

@@ -6,7 +6,6 @@ Cleanup is always attempted in ``finally`` (P30).
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 import tempfile
 from pathlib import Path

@@ -7,8 +7,13 @@ import logging
 import os
 import sys
 from collections.abc import Iterator
-from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    as_completed,
+    wait,
+)
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,15 +21,15 @@ from typing import Any
 
 from tree_sitter import Language
 
-from omnix.graph.store import GraphStore
-from omnix.parser import evolution
 from omnix.find_bugs.walker import iter_dispatch_paths
+from omnix.graph.store import GraphStore
+from omnix.omnix_version import __version__ as OMNIX_APP_VERSION
+from omnix.parser import evolution
 from omnix.parser.grammar_detect import detect_for_path
 from omnix.parser.hint_loader import MergedHints, load_merged_hints
 from omnix.parser.memory_graph import MemoryGraphStore
 from omnix.parser.quality import compute_score_v2, quality_inputs_from_parsed_stats
 from omnix.parser.skip_tracking import SkipAggregate
-from omnix.omnix_version import __version__ as OMNIX_APP_VERSION
 from omnix.parser.tree_parse_cache import get_shared_parser, parse_tree_cached
 from omnix.parser.universal import ingest_universal_to_store, parse_stats_for_universal_ingest
 

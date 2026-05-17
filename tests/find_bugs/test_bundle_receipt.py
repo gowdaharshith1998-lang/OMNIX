@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from omnix.receipts import keystore
 from omnix.find_bugs import bundle as bmod
+from omnix.receipts import keystore
 from omnix.verify import receipt
 
 

@@ -13,11 +13,11 @@ from typing import Any
 from unittest import mock
 
 import pytest
-
 from click.testing import CliRunner
 
 from omnix.cli import main
-from omnix.fabric import budget, config as fc, dispatcher, health, receipts, telemetry
+from omnix.fabric import budget, dispatcher, health, receipts, telemetry
+from omnix.fabric import config as fc
 from omnix.fabric import dedup as dedup_mod
 from omnix.fabric.handler import (
     handle_fabric_dispatch_post,

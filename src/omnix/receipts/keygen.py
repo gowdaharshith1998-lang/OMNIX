@@ -6,7 +6,8 @@ FIPS 204, Algorithm 1 (KeyGen) and Algorithm 6 (KeyGen_internal).
 
 from __future__ import annotations
 
-from . import encoding, hashing, ntt, poly, params as P, sampling
+from . import encoding, hashing, ntt, poly, sampling
+from . import params as P
 
 
 def keygen_internal(xi: bytes) -> tuple[bytes, bytes]:

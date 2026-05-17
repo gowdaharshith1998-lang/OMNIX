@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from omnix.receipts import provider_vault
 from omnix.providers.client import get_provider_client
+from omnix.receipts import provider_vault
 
 
 def test_get_provider_client_returns_none_without_key(tmp_path: Path, monkeypatch: Any) -> None:

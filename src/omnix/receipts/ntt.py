@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from . import params as P
 
+
 def _bitrev8(m: int) -> int:
     """FIPS 204, Algorithm 43 (8-bit)."""
     b = f"{(m & 0xFF):08b}"

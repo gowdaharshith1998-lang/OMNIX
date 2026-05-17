@@ -5,8 +5,8 @@ from __future__ import annotations  # must stay first: forward refs in helpers
 import os
 from collections import defaultdict
 
-from tree_sitter import Language, Node, Parser
 import tree_sitter_typescript as tst
+from tree_sitter import Language, Node, Parser
 
 from omnix.graph.store import GraphStore
 from omnix.parser import should_skip_dir
