@@ -1,3 +1,4 @@
+# CLASSIFICATION: PASSING — all 3 tests run green against current omnix.* namespace (M0.5 slice 21.8)
 from __future__ import annotations
 
 from pathlib import Path
@@ -159,7 +160,7 @@ def test_dispatch_max_iterations_caps(tmp_path: Path, monkeypatch: Any) -> None:
             }
 
     monkeypatch.setattr(
-        "src.fabric.dispatch_tools.MAX_ITERATIONS",
+        "omnix.fabric.dispatch_tools.MAX_ITERATIONS",
         2,
         raising=False,
     )

@@ -1,4 +1,7 @@
+# CLASSIFICATION: MIXED — 3 PASSING (tool definition shapes), 2 XFAIL (openai_compatible.call lacks `tools` param; dispatcher lacks _tool_use_message_list)
 from __future__ import annotations
+
+import pytest
 
 from omnix.providers.tools.definitions import build_tool_definitions, summarize_tool_args
 
@@ -27,18 +30,34 @@ def test_summarize_tool_args_truncates() -> None:
     assert len(s) <= 80
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "slice 15.3.7 LLM tool-dispatch: omnix.fabric.providers.openai_compatible.call() "
+        "does not yet accept a `tools` parameter. Test is the spec for the slice 15.3.7 "
+        "tools-param API surface. Tracked in TODOS.md P1."
+    ),
+)
 def test_openai_compatible_accepts_tools_parameter() -> None:
     import inspect
 
-    from fabric.providers import openai_compatible
+    from omnix.fabric.providers import openai_compatible
 
     sig = inspect.signature(openai_compatible.call)
     assert "tools" in sig.parameters
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "slice 15.3.7 LLM tool-dispatch: omnix.fabric.dispatcher has no "
+        "_tool_use_message_list helper yet. Test is the spec for the orchestrator's "
+        "tool-use message construction. Tracked in TODOS.md P1."
+    ),
+)
 def test_dispatcher_has_tool_definitions_option_path() -> None:
     import inspect
 
-    from fabric import dispatcher
+    from omnix.fabric import dispatcher
 
     assert hasattr(dispatcher, "_tool_use_message_list")

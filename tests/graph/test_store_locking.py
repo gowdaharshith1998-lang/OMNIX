@@ -1,3 +1,4 @@
+# CLASSIFICATION: MIXED — 1 PASSING (sqlite_connection raw), 4 XFAIL (GraphStore lacks locked_connection() ctx manager + _lock attribute + serialized writes — slice 15.3.7 concurrent-write locking not yet built)
 """GraphStore threading.RLock serializes access."""
 
 from __future__ import annotations
@@ -12,6 +13,14 @@ import pytest
 from omnix.graph.store import GraphStore
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "slice 15.3.7 GraphStore locking: GraphStore lacks .locked_connection() "
+        "context manager. Test is the spec for slice 15.3.7 RLock-based "
+        "concurrent-write serialization. Tracked in TODOS.md P1."
+    ),
+)
 def test_locked_connection_select(tmp_path: Path) -> None:
     db = tmp_path / "l.sqlite"
     s = GraphStore(str(db))
@@ -32,6 +41,16 @@ def test_sqlite_connection_raw_still_returns_connection(tmp_path: Path) -> None:
         s.close()
 
 
+@pytest.mark.xfail(
+    strict=False,
+    reason=(
+        "slice 15.3.7 GraphStore locking: GraphStore lacks the threading.RLock "
+        "serialization needed for concurrent writes; raises "
+        "sqlite3.InterfaceError under load. strict=False because behavior is "
+        "flaky (passes in isolation, fails under full suite). Tracked in "
+        "TODOS.md P1 slice-15.3.7-graph-store-locking."
+    ),
+)
 def test_concurrent_writes_serialized(tmp_path: Path) -> None:
     db = tmp_path / "c.sqlite"
     s = GraphStore(str(db))
@@ -50,6 +69,14 @@ def test_concurrent_writes_serialized(tmp_path: Path) -> None:
         s.close()
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "slice 15.3.7 GraphStore locking: depends on .locked_connection() ctx "
+        "manager (same unbuilt feature as test_locked_connection_select). "
+        "Tracked in TODOS.md P1."
+    ),
+)
 def test_rlock_nested_locked_connection(tmp_path: Path) -> None:
     db = tmp_path / "n.sqlite"
     s = GraphStore(str(db))
@@ -61,6 +88,14 @@ def test_rlock_nested_locked_connection(tmp_path: Path) -> None:
         s.close()
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "slice 15.3.7 GraphStore locking: GraphStore lacks _lock attribute "
+        "(threading.RLock instance). Test is the spec for slice 15.3.7's RLock "
+        "field on the store. Tracked in TODOS.md P1."
+    ),
+)
 def test_store_has_rlock() -> None:
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         path = f.name

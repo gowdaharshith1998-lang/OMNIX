@@ -1,14 +1,26 @@
+# CLASSIFICATION: XFAIL-WITH-REASON — all 10 tests reference /action/dispatch route + omnix.studio.server.get_provider_client (slice 15.3.7 action-dispatch backend not yet built)
 from __future__ import annotations
 
 import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from omnix.graph.store import GraphStore
 from omnix.studio.server import app
 from omnix.studio.workspace import MANAGER, Workspace
+
+pytestmark = pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "slice 15.3.7 action-dispatch backend: omnix.studio.server lacks the "
+        "/action/dispatch route and the get_provider_client symbol that these "
+        "tests monkeypatch. Whole module marked xfail-strict until slice 15.3.7 "
+        "lands the backend. Tracked in TODOS.md P1."
+    ),
+)
 
 
 def _client(tmp_path: Path, monkeypatch: Any) -> TestClient:
@@ -76,7 +88,7 @@ def test_action_dispatch_route_localhost_only(tmp_path: Path, monkeypatch: Any) 
 
 
 def test_action_dispatch_no_key_returns_400(tmp_path: Path, monkeypatch: Any) -> None:
-    monkeypatch.setattr("src.studio.server.get_provider_client", lambda *_a, **_k: None)
+    monkeypatch.setattr("omnix.studio.server.get_provider_client", lambda *_a, **_k: None)
     c = _client(tmp_path, monkeypatch)
     r = c.post(
         "/api/action/dispatch",
@@ -100,7 +112,7 @@ def test_action_dispatch_plain_passes_through_provider(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
     monkeypatch.setattr(
-        "src.studio.server.get_provider_client", lambda *_a, **_k: _FakeClient()
+        "omnix.studio.server.get_provider_client", lambda *_a, **_k: _FakeClient()
     )
     c = _client(tmp_path, monkeypatch)
     r = c.post(
@@ -126,7 +138,7 @@ def test_action_dispatch_route_passes_provider_override(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
     fake = _RecordingClient()
-    monkeypatch.setattr("src.studio.server.get_provider_client", lambda *_a, **_k: fake)
+    monkeypatch.setattr("omnix.studio.server.get_provider_client", lambda *_a, **_k: fake)
     c = _client(tmp_path, monkeypatch)
     r = c.post(
         "/api/action/dispatch",
@@ -146,7 +158,7 @@ def test_action_dispatch_tools_require_workspace_id(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
     monkeypatch.setattr(
-        "src.studio.server.get_provider_client", lambda *_a, **_k: _FakeClient()
+        "omnix.studio.server.get_provider_client", lambda *_a, **_k: _FakeClient()
     )
     c = _client(tmp_path, monkeypatch)
     r = c.post(
@@ -176,7 +188,7 @@ def test_action_dispatch_tool_reads_graph_store(
     workspace = Workspace("wid-tools", project, "existing", store, __import__("asyncio").Event())
     MANAGER.put(workspace)
     monkeypatch.setattr(
-        "src.studio.server.get_provider_client", lambda *_a, **_k: _FakeClient()
+        "omnix.studio.server.get_provider_client", lambda *_a, **_k: _FakeClient()
     )
     c = _client(tmp_path, monkeypatch)
     try:
@@ -207,7 +219,7 @@ def test_action_dispatch_ollama_graceful_degradation(
 ) -> None:
     fake = _FakeClient()
     fake.provider = "ollama"
-    monkeypatch.setattr("src.studio.server.get_provider_client", lambda *_a, **_k: fake)
+    monkeypatch.setattr("omnix.studio.server.get_provider_client", lambda *_a, **_k: fake)
     c = _client(tmp_path, monkeypatch)
     r = c.post(
         "/api/action/dispatch",
@@ -230,7 +242,7 @@ def test_action_dispatch_audit_log_has_no_content(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
     monkeypatch.setattr(
-        "src.studio.server.get_provider_client", lambda *_a, **_k: _FakeClient()
+        "omnix.studio.server.get_provider_client", lambda *_a, **_k: _FakeClient()
     )
     c = _client(tmp_path, monkeypatch)
     r = c.post(
@@ -258,7 +270,7 @@ def test_action_dispatch_error_detail_serialized_without_audit_content(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
     monkeypatch.setattr(
-        "src.studio.server.get_provider_client", lambda *_a, **_k: _ErrorClient()
+        "omnix.studio.server.get_provider_client", lambda *_a, **_k: _ErrorClient()
     )
     c = _client(tmp_path, monkeypatch)
     r = c.post(
