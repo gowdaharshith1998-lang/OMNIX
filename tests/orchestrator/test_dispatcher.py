@@ -274,15 +274,31 @@ def test_run_raises_on_missing_source_file(tmp_path: Path) -> None:
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="real GraphStore + .omnix/omnix.db not provisioned in this test run",
-)
 def test_e2e_with_real_graph_store(tmp_path: Path) -> None:
-    """Tripwire — flips XPASS once the M1 graph-analyze pipeline lands and
-    the orchestrator can be driven from a real .omnix/omnix.db.
+    """End-to-end with a real GraphStore, JavaParser-backed parse_file, and a
+    stub dispatch_fn. Validates that `run()` reads from `.omnix/omnix.db` via
+    `GraphStoreAdapter`, generates specs, dispatches, and records RebuildAttempts.
     """
+    import shutil
+
+    from omnix.graph.store import GraphStore
     from omnix.orchestrator.dispatcher import run
+    from omnix.orchestrator.graph_adapter import populate_from_semantic_nodes
+    from omnix.semantic.java.parser import parse_file
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    fixture = Path(__file__).parents[1] / "semantic" / "java" / "fixtures" / "StringUtils.java"
+    fixture_copy = src_dir / "StringUtils.java"
+    shutil.copy(fixture, fixture_copy)
+
+    nodes = parse_file(fixture_copy)
+    (tmp_path / ".omnix").mkdir()
+    store = GraphStore(str(tmp_path / ".omnix" / "omnix.db"))
+    populate_from_semantic_nodes(store, nodes)
+    store.close()
 
     attempts = run(tmp_path, target_language="java21", dispatch_fn=lambda p: "// stub")
-    assert attempts  # placeholder — will be filled in when phase 6 wires it.
+    assert attempts, "expected at least one RebuildAttempt"
+    assert all(a.response_text == "// stub" for a in attempts)
+    assert all(a.prompt_template_version for a in attempts)

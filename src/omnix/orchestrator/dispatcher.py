@@ -29,6 +29,11 @@ from omnix.semantic import SemanticNode
 from omnix.spec import Spec
 from omnix.spec.generator import generate as _generate_spec
 
+# Re-exported so callers can do `from omnix.orchestrator.dispatcher import run, GraphStoreAdapter`.
+# Local import in _load_graph keeps the cold path lazy; this top-level export
+# documents the public surface.
+__all__ = ["OrchestratorError", "run"]
+
 
 class OrchestratorError(Exception):
     """Raised by the orchestrator for setup / loading failures.
@@ -75,10 +80,12 @@ def _default_dispatch_fn(prompt_text: str, *, model: str) -> str:
 
 
 def _load_graph(project_path: Path) -> _GraphLike:
-    """Open the GraphStore for `project_path` and return it.
+    """Open the GraphStore for `project_path` and return a `_GraphLike` adapter.
 
-    Raises OrchestratorError if the module or DB is missing. This is the
-    single seam the dispatcher uses to talk to persisted graph state.
+    The real `GraphStore` exposes `NodeRow` / `EdgeRow`; this seam wraps it in
+    `GraphStoreAdapter` so the dispatcher's protocol contract is satisfied.
+
+    Raises OrchestratorError if the module or DB is missing.
     """
     db_path = project_path / ".omnix" / "omnix.db"
     if not db_path.exists():
@@ -87,11 +94,12 @@ def _load_graph(project_path: Path) -> _GraphLike:
         )
     try:
         from omnix.graph.store import GraphStore  # noqa: WPS433 — runtime import is intentional
+        from omnix.orchestrator.graph_adapter import GraphStoreAdapter  # noqa: WPS433
     except ImportError as e:  # pragma: no cover — defensive
         raise OrchestratorError(
             "omnix.graph.store unavailable — run `omnix analyze` first"
         ) from e
-    return GraphStore(str(db_path))  # type: ignore[return-value]
+    return GraphStoreAdapter(GraphStore(str(db_path)))
 
 
 def _load_source(node: SemanticNode, project_path: Path) -> str:
