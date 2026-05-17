@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from omnix.axiom import keystore
+from omnix.receipts import keystore
 from omnix.verify import receipt
 
 

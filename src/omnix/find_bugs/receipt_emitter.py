@@ -13,17 +13,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from omnix.axiom import keystore as mldsa_keystore
-from omnix.axiom import sign as mldsa_sign
-from omnix.axiom import verify as mldsa_verify
-from omnix.axiom.finding_keys import project_privkey_path, sign_finding, verify_finding
-from omnix.axiom.finding_receipt import (
+from omnix.receipts import keystore as mldsa_keystore
+from omnix.receipts import sign as mldsa_sign
+from omnix.receipts import verify as mldsa_verify
+from omnix.receipts.finding_keys import project_privkey_path, sign_finding, verify_finding
+from omnix.receipts.finding_receipt import (
     FindingReceipt,
     compute_finding_id,
     compute_project_id,
     now_iso8601_utc,
 )
-from omnix.axiom.merkle import compute_leaf_hash, compute_merkle_root
+from omnix.receipts.merkle import compute_leaf_hash, compute_merkle_root
 
 _LOG = logging.getLogger("omnix.find_bugs.receipt_emitter")
 

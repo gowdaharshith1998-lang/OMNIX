@@ -50,7 +50,7 @@ def test_gitignore_prefix(tmp_path: Path) -> None:
 
 
 def test_skips_known_pathological_relative_paths(tmp_path: Path) -> None:
-    skipped = tmp_path / "src" / "omnix" / "axiom" / "ntt.py"
+    skipped = tmp_path / "src" / "omnix" / "receipts" / "ntt.py"
     skipped.parent.mkdir(parents=True)
     skipped.write_text("def add_ntt(a, b):\n    return a + b\n", encoding="utf-8")
     same_basename = tmp_path / "other" / "ntt.py"

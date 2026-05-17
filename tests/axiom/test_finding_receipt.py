@@ -8,14 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from omnix.axiom.finding_keys import (
+from omnix.receipts.finding_keys import (
     InvalidFindingPublicKeyError,
     ensure_project_key,
     project_pubkey_path,
     sign_finding,
     verify_finding,
 )
-from omnix.axiom.finding_receipt import (
+from omnix.receipts.finding_receipt import (
     FindingReceipt,
     compute_finding_id,
     compute_project_id,

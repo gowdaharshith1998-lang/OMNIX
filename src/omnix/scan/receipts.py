@@ -48,7 +48,7 @@ def _write_json_and_sig(
         jpath.write_bytes(raw)
         return str(jpath)
 
-    from omnix.axiom import keystore, sign
+    from omnix.receipts import keystore, sign
 
     sk_pem = _SK_PATH.read_text(encoding="ascii")
     sk = keystore.secret_from_pem(sk_pem)

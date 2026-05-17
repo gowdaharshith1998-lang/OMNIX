@@ -97,7 +97,7 @@ def cmd_verify(
             file=sys.stderr,
         )
         return 1
-    from omnix.axiom import keystore, verify as vfy
+    from omnix.receipts import keystore, verify as vfy
 
     try:
         pk = keystore.public_from_pem(pdir.read_text(encoding="ascii"))

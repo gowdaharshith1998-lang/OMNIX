@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from omnix.axiom.provider_vault import get_key
+from omnix.receipts.provider_vault import get_key
 from omnix.fabric.dispatcher import dispatch
 from omnix.providers.registry import PROVIDERS
 

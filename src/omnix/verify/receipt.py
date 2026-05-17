@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from omnix.axiom import keystore, sign, verify as vfy
+from omnix.receipts import keystore, sign, verify as vfy
 
 _DEFAULT_KEY = Path.home() / ".omnix" / "keys" / "secret.pem"
 _DEFAULT_PUB = Path.home() / ".omnix" / "keys" / "public.pem"

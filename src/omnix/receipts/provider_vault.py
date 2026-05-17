@@ -15,8 +15,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-from omnix.axiom.finding_keys import ensure_project_key, project_privkey_path
-from omnix.axiom.finding_receipt import compute_project_id
+from omnix.receipts.finding_keys import ensure_project_key, project_privkey_path
+from omnix.receipts.finding_receipt import compute_project_id
 
 Scope = Literal["global", "project"]
 

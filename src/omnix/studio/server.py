@@ -56,7 +56,7 @@ from omnix.parser.grammar_status_query import (
     utc_now_iso,
 )
 from omnix.parser.ingest_dispatch import ingest_unified_codebase
-from omnix.axiom.finding_receipt import compute_project_id
+from omnix.receipts.finding_receipt import compute_project_id
 from omnix.find_bugs.receipt_emitter import verify_scan_directory
 from omnix.omnix_version import __version__
 from omnix.studio.bugs_scan import run_scan_for_workspace
@@ -79,7 +79,7 @@ from omnix.studio.ws_protocol import (
     msg_pong,
     msg_stats,
 )
-from omnix.axiom import provider_vault
+from omnix.receipts import provider_vault
 from omnix.providers.detect import identify_provider
 from omnix.providers.registry import PROVIDERS
 
@@ -753,7 +753,7 @@ _RECEIPT_VERIFY_CACHE: dict[str, tuple[float, float, bool]] = {}
 def _load_axiom_public_key() -> bytes | None:
     """Load ~/.omnix/keys/public.pem (ML-DSA-65)."""
     try:
-        from omnix.axiom import keystore  # type: ignore[import-not-found]
+        from omnix.receipts import keystore  # type: ignore[import-not-found]
     except Exception:
         return None
     pub = (Path.home() / ".omnix" / "keys" / "public.pem").expanduser()
@@ -772,7 +772,7 @@ def _verify_receipt_detached_sig(
     if pk is None:
         return False
     try:
-        from omnix.axiom import keystore, verify as vfy  # type: ignore[import-not-found]
+        from omnix.receipts import keystore, verify as vfy  # type: ignore[import-not-found]
     except Exception:
         return False
     try:

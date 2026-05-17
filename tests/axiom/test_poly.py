@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import omnix.axiom.params as P
-import omnix.axiom.poly as poly
+import omnix.receipts.params as P
+import omnix.receipts.poly as poly
 
 
 def test_modpm_upper_half_maps_negative() -> None:
