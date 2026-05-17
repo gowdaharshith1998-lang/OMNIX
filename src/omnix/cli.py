@@ -69,9 +69,68 @@ def analyze(path: str, port: int, no_open: bool) -> None:
         print("\n✨ OMNIX stopped")
 
 
+@click.command("rebuild", context_settings={"help_option_names": ["-h", "--help"]})
+@click.argument(
+    "project_path",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+)
+@click.option(
+    "--target",
+    "target_language",
+    default="java21",
+    help="Target language for the rebuild (M1 supports only java21).",
+)
+@click.option(
+    "--node-filter",
+    default=None,
+    help="fnmatch pattern applied to node FQN (e.g. '*StringUtils.reverse').",
+)
+@click.option(
+    "--model",
+    default="claude-opus-4.7",
+    show_default=True,
+    help="LLM model identifier; routed to provider by name prefix.",
+)
+def rebuild_cmd(
+    project_path: Path,
+    target_language: str,
+    node_filter: str | None,
+    model: str,
+) -> None:
+    """Rebuild Java methods → target_language; emit signed RebuildReceipts.
+
+    Walks <project>/.omnix/omnix.db, dispatches one LLM call per matched
+    node, runs gates 1-4 mechanically, signs the result with the project
+    Ed25519 key, and writes:
+
+        <project>/.omnix/receipts/rebuilds/<timestamp>/<node_fqn>.json
+        <project>/.omnix/receipts/rebuilds/<timestamp>/<node_fqn>.sig
+        <project>/.omnix/receipts/rebuilds/<timestamp>/<node_fqn>.java
+
+    Gates 5 (property-based) and 6 (behavioral equivalence) are M2 scope;
+    receipts mark them as `deferred_m2`, never `passed`.
+
+    Requires: `omnix analyze` has been run (graph DB exists), `omnix axiom
+    keygen` has been run (project key exists), and an Anthropic API key
+    has been registered in the Provider Fabric vault.
+    """
+    from omnix.rebuild import run as rebuild_run
+
+    outputs = rebuild_run(
+        project_path=project_path.resolve(),
+        target_language=target_language,
+        node_filter=node_filter,
+        model=model,
+    )
+    for o in outputs:
+        click.echo(f"✓ {o.node_fqn} → {o.receipt_path}")
+    click.echo(f"\n{len(outputs)} receipt(s) written.")
+
+
 main.add_command(axiom_group, name="axiom")
 main.add_command(grammar_group, name="grammar")
 main.add_command(analyze)
+main.add_command(rebuild_cmd)
 
 
 @main.command(

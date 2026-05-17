@@ -178,6 +178,110 @@ def cmd_verify(file: Path, sigfile: Path, pub_path: Path) -> None:
     raise SystemExit(1)
 
 
+@axiom_group.command("verify-rebuild")
+@click.argument(
+    "receipt_path",
+    type=click.Path(path_type=Path, exists=True, dir_okay=False),
+)
+@click.option(
+    "--pubkey",
+    "pubkey_path",
+    type=click.Path(path_type=Path, exists=True, dir_okay=False),
+    default=None,
+    help="Ed25519 public key PEM. If omitted, searches parents for .omnix/pubkey.pem.",
+)
+@click.option("--json", "as_json", is_flag=True, default=False)
+def verify_rebuild_cmd(
+    receipt_path: Path,
+    pubkey_path: Path | None,
+    as_json: bool,
+) -> None:
+    """Verify a signed M1 rebuild receipt offline (Ed25519).
+
+    Reports verified=true/false plus a summary of gate statuses. Gates
+    5+6 marked `deferred_m2` are surfaced explicitly — never silently
+    counted as passes.
+    """
+    from omnix.receipts.rebuild_receipt import RebuildReceipt, verify_rebuild
+
+    receipt_p = receipt_path.expanduser().resolve(strict=True)
+    sig_p = receipt_p.with_suffix(".sig")
+    if not sig_p.is_file():
+        payload = {
+            "verified": False,
+            "reason": "missing_sig",
+            "receipt_path": str(receipt_p),
+        }
+        if as_json:
+            click.echo(json.dumps(payload))
+        else:
+            click.echo(f"FAIL: missing signature at {sig_p}", err=True)
+        raise SystemExit(2)
+
+    pub = pubkey_path
+    if pub is None:
+        pub = _discover_ed25519_pubkey(receipt_p)
+        if pub is None:
+            payload = {
+                "verified": False,
+                "reason": "pubkey_discovery_failed",
+                "receipt_path": str(receipt_p),
+            }
+            if as_json:
+                click.echo(json.dumps(payload))
+            else:
+                click.echo(
+                    "FAIL: no Ed25519 pubkey found in parent .omnix/ dirs; "
+                    "pass --pubkey explicitly.",
+                    err=True,
+                )
+            raise SystemExit(2)
+
+    try:
+        receipt_dict = json.loads(receipt_p.read_text(encoding="utf-8"))
+        receipt = RebuildReceipt.from_dict(receipt_dict)
+    except (ValueError, json.JSONDecodeError) as exc:
+        payload = {
+            "verified": False,
+            "reason": "malformed_receipt",
+            "error": str(exc),
+            "receipt_path": str(receipt_p),
+        }
+        if as_json:
+            click.echo(json.dumps(payload))
+        else:
+            click.echo(f"FAIL: malformed receipt: {exc}", err=True)
+        raise SystemExit(2)
+
+    sig_b64 = sig_p.read_text(encoding="utf-8").strip()
+    verified = verify_rebuild(receipt, sig_b64, pub)
+
+    statuses: dict[str, int] = {}
+    for g in receipt.gate_results:
+        statuses[g.status] = statuses.get(g.status, 0) + 1
+    gates_summary = "/".join(
+        f"{statuses.get(s, 0)}-{s}"
+        for s in ("passed", "failed", "skipped", "deferred_m2")
+    )
+
+    payload = {
+        "verified": verified,
+        "reason": None if verified else "signature_mismatch",
+        "receipt_path": str(receipt_p),
+        "node_fqn": receipt.node_fqn,
+        "model": receipt.model,
+        "target_language": receipt.target_language,
+        "gates_summary": gates_summary,
+    }
+    if as_json:
+        click.echo(json.dumps(payload))
+    else:
+        line = "verified" if verified else "FAILED"
+        click.echo(f"{line}: {receipt.node_fqn} ({receipt.model})")
+        click.echo(f"  gates_summary: {gates_summary}")
+    raise SystemExit(0 if verified else 1)
+
+
 @axiom_group.command("verify-finding")
 @click.argument(
     "receipt_path",
