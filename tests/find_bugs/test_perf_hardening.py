@@ -189,4 +189,9 @@ def test_omnix_version_reports_module_version() -> None:
         env=env,
     )
     assert proc.returncode == 0
-    assert "0.5.0" in proc.stdout
+    # Read the source of truth so the assertion tracks the bump automatically.
+    from omnix.omnix_version import __version__ as expected_version
+
+    assert expected_version in proc.stdout, (
+        f"expected {expected_version!r} in {proc.stdout!r}"
+    )
