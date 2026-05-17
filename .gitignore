@@ -69,3 +69,4 @@ GRAPH_REPORT.md
 .cursor/mcp.json
 src/axiom/omnix.db-shm
 src/axiom/omnix.db-wal
+.claude-flow/
