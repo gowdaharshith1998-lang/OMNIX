@@ -16,7 +16,8 @@ _PROVIDER_OVERRIDE_XFAIL = pytest.mark.xfail(
     reason=(
         "slice 15.3.7 LLM tool-dispatch: omnix.fabric.dispatcher.dispatch() does "
         "not yet accept a `provider_override` keyword argument. Test is the spec "
-        "for slice 15.3.7's per-call provider pinning. Tracked in TODOS.md P1."
+        "for slice 15.3.7's per-call provider pinning. Tracked in TODOS.md P1. "
+        "[Outside M1 finisher Phase 4-7 scope — separate slice-15.3.7 work stream.]"
     ),
 )
 

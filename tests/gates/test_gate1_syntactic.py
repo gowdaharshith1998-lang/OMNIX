@@ -1,7 +1,9 @@
 """Tests for gate1_syntactic — pure-Python heuristic + xfail real-parser cases.
 
 Heuristic gap: only catches empty source and unbalanced braces. Real parser
-tests are xfail(strict=True) until the vendored JAR ships.
+tests stay xfail(strict=True) pending the M1 Phase 5 emitter follow-up,
+which teaches the bridge to surface structured ParseProblem fields
+(line/column) rather than the raw javac stderr string.
 """
 
 from __future__ import annotations
@@ -102,10 +104,11 @@ def test_real_parser_catches_syntax_error_in_method_body() -> None:
 
 @pytest.mark.xfail(
     strict=True,
-    reason="JAR is vendored, but parser.py emits the raw javac stderr without "
-    "extracting ParseProblem line/col into structured fields. Gate1 receives "
-    "the message but details['line']/details['column'] stay None. Wiring "
-    "structured ParseProblem extraction is a follow-up slice.",
+    reason="M1 Phase 5 (emitter follow-up): JAR vendored + bridge real, but "
+    "parser.py emits the raw javac stderr without extracting ParseProblem "
+    "line/col into structured fields. Gate1 receives the message but "
+    "details['line']/details['column'] stay None. Flipped when the M1-finisher "
+    "Phase 5 emitter slice surfaces structured ParseProblem fields.",
 )
 def test_real_parser_reports_line_column_for_error() -> None:
     src = "class Foo { void x() { int y = ; } }"
@@ -117,10 +120,11 @@ def test_real_parser_reports_line_column_for_error() -> None:
 
 @pytest.mark.xfail(
     strict=True,
-    reason="Test source is itself unbalanced (3 opens / 1 close) — both the "
-    "heuristic AND the real parser reject it. Test premise was wrong; rewriting "
-    "with valid sealed/record Java 21 source is a follow-up slice. Marker kept "
-    "as a tripwire so the rewrite isn't forgotten.",
+    reason="M1 Phase 5 (test-rewrite housekeeping): Test source is itself "
+    "unbalanced (3 opens / 1 close) — both the heuristic AND the real parser "
+    "reject it. Test premise was wrong; rewriting with valid sealed/record "
+    "Java 21 source ships alongside the M1 Phase 5 emitter follow-up. "
+    "Marker kept as a tripwire so the rewrite isn't forgotten.",
 )
 def test_real_parser_succeeds_on_valid_java21_source_with_invalid_brace_count() -> None:
     # Source is intentionally minimal — see xfail reason. Real parser also

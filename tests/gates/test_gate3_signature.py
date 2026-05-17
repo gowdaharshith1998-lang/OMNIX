@@ -143,9 +143,11 @@ def test_whitespace_normalization_passes() -> None:
 
 @pytest.mark.xfail(
     strict=True,
-    reason="JAR is vendored, but gate3 still uses the regex param-splitter for "
-    "signature extraction — wiring it to consume parse_file().resolved_param_types "
-    "is a follow-up slice. Until then, nested-generic param commas fool the splitter.",
+    reason="M1 Phase 5 (gate3 wiring follow-up): JAR vendored + bridge real, "
+    "but gate3 still uses the regex param-splitter for signature extraction. "
+    "Wiring gate3 to consume parse_file().resolved_param_types ships in the "
+    "M1-finisher Phase 5 emitter-integration slice. Until then, nested-generic "
+    "param commas fool the splitter.",
 )
 def test_signature_extraction_uses_real_parser_for_generics() -> None:
     # Source has TWO params, both with internal-comma generics. Naive comma-split
