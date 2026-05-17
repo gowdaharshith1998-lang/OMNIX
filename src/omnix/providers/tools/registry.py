@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from src.graph.store import GraphStore, NodeRow
+from omnix.graph.store import GraphStore, NodeRow
 
 ToolName = Literal[
     "get_node_context",

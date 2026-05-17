@@ -10,9 +10,9 @@ from concurrent.futures import TimeoutError as FuturesTimeout
 from dataclasses import replace
 from typing import Any
 
-from providers.registry import PROVIDERS
-from providers.tools import ToolContext, ToolStep, execute_tools, run_tool
-from providers.tools.definitions import (
+from omnix.providers.registry import PROVIDERS
+from omnix.providers.tools import ToolContext, ToolStep, execute_tools, run_tool
+from omnix.providers.tools.definitions import (
     build_tool_definitions,
     summarize_tool_args,
     tool_shape_for_provider,

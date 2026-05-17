@@ -1,6 +1,6 @@
 """Provider tool registry for action dispatch."""
 
-from providers.tools.registry import (
+from omnix.providers.tools.registry import (
     ToolContext,
     ToolName,
     ToolStep,
