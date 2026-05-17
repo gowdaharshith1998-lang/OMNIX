@@ -70,3 +70,6 @@ GRAPH_REPORT.md
 src/axiom/omnix.db-shm
 src/axiom/omnix.db-wal
 .claude-flow/
+
+# Local audit manifests (one-off snapshots, not source of truth)
+AUDIT_*.md
