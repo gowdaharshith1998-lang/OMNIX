@@ -73,3 +73,9 @@ src/axiom/omnix.db-wal
 
 # Local audit manifests (one-off snapshots, not source of truth)
 AUDIT_*.md
+
+# Phase 1 hygiene — defensive patterns for fuzz escapes + orphan venvs
+.venv-*/
+tree_sitter_*/
+*.gexf
+r10_out.txt
