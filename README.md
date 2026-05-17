@@ -37,14 +37,14 @@ OMNIX is a graph-driven pipeline. It is not an autonomous agent. It is closer to
 [5. Verification gate (6 checks)]        ← gates 1-4 shipped, 5-6 in progress
        ↓ (fail → retry with error context)
        ↓ (still fail → flag for human)
-[6. Sign receipt (ML-DSA)]               ← shipped (receipts subsystem)
+[6. Sign receipt (ML-DSA)]               ← shipped (omnix.receipts subsystem)
        ↓
 [7. Repeat up the graph]
        ↓
 [Rebuilt codebase + signed audit trail]
 ```
 
-The six verification gates are syntactic parse, type check, signature check, dependency check, property-based test, and behavioral equivalence test (legacy node vs rebuilt node, diff outputs). Each accepted node emits a signed receipt covering the legacy source hash, rebuilt source hash, spec version, all six gate results, the LLM model and prompt template versions, and the cryptographic signature. The receipts subsystem (ML-DSA-65 signatures) handles the signing and exposes a verifier so auditors can confirm receipt authenticity offline.
+The six verification gates are syntactic parse, type check, signature check, dependency check, property-based test, and behavioral equivalence test (legacy node vs rebuilt node, diff outputs). Each accepted node emits a signed receipt covering the legacy source hash, rebuilt source hash, spec version, all six gate results, the LLM model and prompt template versions, and the cryptographic signature. The `omnix.receipts` subsystem (ML-DSA-65 signatures, formerly named AXIOM internally) handles the signing and exposes a verifier so auditors can confirm receipt authenticity offline.
 
 The shadow bridge (in progress, M4) routes a configurable percentage of production traffic to the rebuilt code without serving the response, diffs the outputs against the legacy path, and emits a signed receipt per request. This is how you build a year-long evidence record before any cutover.
 
@@ -66,7 +66,7 @@ If you are already running Amazon Q or OpenRewrite, the right shape is to let th
 
 ---
 
-## What works today
+## What works today (v0.6)
 
 The current release is foundational scaffolding for the full pipeline. CLI surface:
 
@@ -91,11 +91,11 @@ omnix axiom verify-scan /path/to/receipts/dir \
 omnix axiom export-vault /path/to/project --out audit.zip
 ```
 
-What ships today:
+What ships in v0.6 specifically:
 
 - Universal Tree-sitter-based parser producing the semantic graph (Python, TypeScript, Rust, Java grammars active; ~10 more enumerable via `omnix grammar list`)
 - Property-based testing with signed finding receipts (Ed25519 per-finding + ML-DSA-65 over a Merkle root per scan)
-- Behavioral verification primitives (subprocess-isolated)
+- Behavioral verification primitives (subprocess-isolated, forkserver-safe, hygiene-aware)
 - Read-only localhost API + a React studio for inspection
 - Audit export bundle ready for offline third-party verification
 
