@@ -6,8 +6,8 @@ import sys
 import tempfile
 from collections.abc import Generator
 
-from src.graph.store import GraphStore, EdgeRow, NodeRow
-from src.parser.memory_graph import MemoryGraphStore
+from omnix.graph.store import GraphStore, EdgeRow, NodeRow
+from omnix.parser.memory_graph import MemoryGraphStore
 
 
 def _tmp_store() -> GraphStore:

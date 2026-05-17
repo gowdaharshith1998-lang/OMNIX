@@ -11,7 +11,7 @@ from hypothesis import assume, given, settings
 from hypothesis.errors import NonInteractiveExampleWarning
 from hypothesis.strategies import composite
 
-from verify import caller_shape, strategies
+from omnix.verify import caller_shape, strategies
 
 REPO = Path(__file__).resolve().parents[2]
 FIX = Path(__file__).parent / "fixtures"

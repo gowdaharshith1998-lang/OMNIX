@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from scan.filesystem_hygiene import (
+from omnix.scan.filesystem_hygiene import (
     HygieneFinding,
     SandboxConfig,
     build_sandbox_roots,
@@ -91,7 +91,7 @@ def test_R3_finding_emitted_for_outofsandbox_path(tmp_path: Path) -> None:
         repo_root=repo.resolve(),
         target_function="fixture.mod:leaky",
         fuzz_inputs="('..',)",
-        reproduction="PYTHONPATH=src python -m verify.cli …",
+        reproduction="PYTHONPATH=src python -m omnix.verify.cli …",
     )
     assert finding is not None
     assert isinstance(finding, HygieneFinding)

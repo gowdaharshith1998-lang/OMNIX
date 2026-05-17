@@ -10,8 +10,8 @@ from unittest import mock
 import pytest
 from fastapi.testclient import TestClient
 
-from src.studio import server as studio_server
-from src.studio.server import app
+from omnix.studio import server as studio_server
+from omnix.studio.server import app
 
 
 @pytest.fixture
@@ -22,7 +22,7 @@ def grammar_project(tmp_path: Path) -> Path:
     omnix_dir.mkdir(parents=True)
     db_path = omnix_dir / "omnix.db"
     conn = sqlite3.connect(str(db_path))
-    from src.parser.evolution_schema import apply_evolution_schema
+    from omnix.parser.evolution_schema import apply_evolution_schema
 
     apply_evolution_schema(conn)
     conn.execute(

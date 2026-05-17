@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import axiom.keygen as kg
-import axiom.sign as sgn
-import axiom.verify as vfy
-import axiom.params as P
+import omnix.axiom.keygen as kg
+import omnix.axiom.sign as sgn
+import omnix.axiom.verify as vfy
+import omnix.axiom.params as P
 
 _KAT = Path(__file__).resolve().parent / "kat_mldsa65.json"
 

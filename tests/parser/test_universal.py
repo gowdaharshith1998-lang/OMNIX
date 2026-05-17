@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from src.graph.store import GraphStore
-from src.parser import hint_loader, quality, universal
-from src.parser.grammar_detect import (
+from omnix.graph.store import GraphStore
+from omnix.parser import hint_loader, quality, universal
+from omnix.parser.grammar_detect import (
     detect_for_path,
     try_load_language_for_grammar,
 )
@@ -99,7 +99,7 @@ def test_unknown_extension_recorded() -> None:
 
 
 def test_no_grammar_when_module_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    from src.parser import grammar_detect as gd
+    from omnix.parser import grammar_detect as gd
 
     def _no_load(_: str) -> object | None:
         return None
@@ -159,7 +159,7 @@ def qux():
 
 
 def test_generic_python_via_universal_parser_matches_dedicated_output() -> None:
-    from src.parser.python_parser import parse_python_files
+    from omnix.parser.python_parser import parse_python_files
 
     import tempfile
 

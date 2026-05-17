@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from verify import signature
+from omnix.verify import signature
 
 FIX = Path(__file__).resolve().parent / "fixtures"
 

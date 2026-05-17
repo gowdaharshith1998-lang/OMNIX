@@ -1,9 +1,9 @@
-"""Unit tests for :func:`src.studio.delta.compute_file_delta`."""
+"""Unit tests for :func:`omnix.studio.delta.compute_file_delta`."""
 
 from __future__ import annotations
 
-from src.graph.store import EdgeRow, NodeRow
-from src.studio.delta import compute_file_delta
+from omnix.graph.store import EdgeRow, NodeRow
+from omnix.studio.delta import compute_file_delta
 
 
 def _n(  # noqa: D103

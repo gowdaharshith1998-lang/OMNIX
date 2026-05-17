@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from find_bugs import runner
+from omnix.find_bugs import runner
 
 
 def test_iter_layer6_excludes_python_files(
@@ -50,7 +50,7 @@ def test_python_path_unchanged_when_only_py_in_graph(
             raise RuntimeError("layer6 must not run for python-only graph")
 
     monkeypatch.setattr(
-        "src.verify.runners.subprocess_llm.run_layer6_subprocess_limited",
+        "omnix.verify.runners.subprocess_llm.run_layer6_subprocess_limited",
         _raise,
     )
     monkeypatch.setenv("OMNIX_FUZZ_DRY", "1")
@@ -74,7 +74,7 @@ def test_finding_includes_layer6_metadata_with_stub(
     c.close()
 
     def _zero(*_a, **_k):  # noqa: ANN001, ANN201
-        from src.verify.runners.base import Layer6Result  # noqa: I001, TC002
+        from omnix.verify.runners.base import Layer6Result  # noqa: I001, TC002
 
         return Layer6Result(
             findings=[],
@@ -85,7 +85,7 @@ def test_finding_includes_layer6_metadata_with_stub(
         )
 
     monkeypatch.setattr(
-        "src.verify.runners.subprocess_llm.run_layer6_subprocess_limited", _zero
+        "omnix.verify.runners.subprocess_llm.run_layer6_subprocess_limited", _zero
     )
     monkeypatch.setenv("OMNIX_FUZZ_DRY", "1")
     ex, _o, j = runner.run_find_bugs(

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from find_bugs.entry_points import detect_entry_points
+from omnix.find_bugs.entry_points import detect_entry_points
 
 
 def test_name_main(main_py: Path, sample_root: Path) -> None:

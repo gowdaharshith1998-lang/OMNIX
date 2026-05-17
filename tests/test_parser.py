@@ -6,9 +6,9 @@ import os
 import tempfile
 import unittest
 
-from src.graph.store import GraphStore
-from src.parser.python_parser import parse_python_files
-from src.parser.typescript_parser import parse_typescript_files
+from omnix.graph.store import GraphStore
+from omnix.parser.python_parser import parse_python_files
+from omnix.parser.typescript_parser import parse_typescript_files
 
 SAMPLE_PY = '''
 import os

@@ -1,4 +1,4 @@
-"""Tests for `omnix grammar status` / :mod:`src.parser.cli` (read-only)."""
+"""Tests for `omnix grammar status` / :mod:`omnix.parser.cli` (read-only)."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def synthetic_db(tmp_path: Path) -> Path:
     db_path = omnix_dir / "omnix.db"
 
     conn = sqlite3.connect(str(db_path))
-    from src.parser.evolution_schema import apply_evolution_schema
+    from omnix.parser.evolution_schema import apply_evolution_schema
 
     apply_evolution_schema(conn)
     conn.execute(
@@ -69,7 +69,7 @@ def synthetic_db(tmp_path: Path) -> Path:
 def _run_cli(argv: list[str]) -> subprocess.CompletedProcess[str]:
     env = {**os.environ, "PYTHONPATH": str(REPO_ROOT)}
     return subprocess.run(
-        [sys.executable, "-m", "src.parser.cli", *argv],
+        [sys.executable, "-m", "omnix.parser.cli", *argv],
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
@@ -116,7 +116,7 @@ def test_status_no_db_returns_1(tmp_path: Path) -> None:
 def test_status_empty_db_returns_2(tmp_path: Path) -> None:
     db_path = tmp_path / "empty.db"
     conn = sqlite3.connect(str(db_path))
-    from src.parser.evolution_schema import apply_evolution_schema
+    from omnix.parser.evolution_schema import apply_evolution_schema
 
     apply_evolution_schema(conn)
     conn.commit()
@@ -129,7 +129,7 @@ def test_status_empty_db_returns_2(tmp_path: Path) -> None:
 def test_status_readonly_does_not_mutate(synthetic_db: Path) -> None:
     mtime_before = synthetic_db.stat().st_mtime_ns
     subprocess.run(
-        [sys.executable, "-m", "src.parser.cli", "status", "--db", str(synthetic_db)],
+        [sys.executable, "-m", "omnix.parser.cli", "status", "--db", str(synthetic_db)],
         cwd=str(REPO_ROOT),
         env={**os.environ, "PYTHONPATH": str(REPO_ROOT)},
         capture_output=True,
@@ -146,7 +146,7 @@ def test_status_walks_up_from_cwd(synthetic_db: Path) -> None:
     sub.mkdir(parents=True)
 
     r = subprocess.run(
-        [sys.executable, "-m", "src.parser.cli", "status", "--json"],
+        [sys.executable, "-m", "omnix.parser.cli", "status", "--json"],
         cwd=str(sub),
         env={**os.environ, "PYTHONPATH": str(REPO_ROOT)},
         capture_output=True,

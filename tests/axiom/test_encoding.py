@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import axiom.encoding as enc
-import axiom.params as P
+import omnix.axiom.encoding as enc
+import omnix.axiom.params as P
 
 
 def test_bit_pack_vector_roundtrip() -> None:

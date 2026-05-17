@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from src.graph.store import GraphStore
-from src.parser import grammar_detect as gd
-from src.parser import ingest_dispatch as ind
-from src.parser.skip_tracking import exit_code_for_skips, format_skip_banner
+from omnix.graph.store import GraphStore
+from omnix.parser import grammar_detect as gd
+from omnix.parser import ingest_dispatch as ind
+from omnix.parser.skip_tracking import exit_code_for_skips, format_skip_banner
 
 
 def test_no_grammar_skip_reported_in_banner(

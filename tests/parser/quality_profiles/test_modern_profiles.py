@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from src.parser.quality_profiles import load_profile
+from omnix.parser.quality_profiles import load_profile
 
 
 @pytest.mark.parametrize(
@@ -34,7 +34,7 @@ def test_modern_profile_loads_and_validates(g: str) -> None:
 
 
 def test_expected_range_metadata_in_profile_jsons() -> None:
-    base = Path(__file__).resolve().parents[3] / "src" / "parser" / "quality_profiles"
+    base = Path(__file__).resolve().parents[3] / "src" / "omnix" / "parser" / "quality_profiles"
     for name in (
         "python",
         "typescript",

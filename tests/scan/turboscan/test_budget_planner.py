@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scan.turboscan.budget_planner import (
+from omnix.scan.turboscan.budget_planner import (
     analyze_python_function,
     build_budget_plan,
     examples_for_metrics,

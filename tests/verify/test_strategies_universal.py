@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.verify import strategies_universal as su
+from omnix.verify import strategies_universal as su
 
 
 def test_strategy_synthesis_from_rust_signature() -> None:

@@ -16,10 +16,10 @@ import pytest
 
 from click.testing import CliRunner
 
-from cli import main
-from fabric import budget, config as fc, dispatcher, health, receipts, telemetry
-from fabric import dedup as dedup_mod
-from fabric.handler import (
+from omnix.cli import main
+from omnix.fabric import budget, config as fc, dispatcher, health, receipts, telemetry
+from omnix.fabric import dedup as dedup_mod
+from omnix.fabric.handler import (
     handle_fabric_dispatch_post,
     handle_fabric_spend_get,
     handle_fabric_status_get,
@@ -88,7 +88,7 @@ def _base_payload(**kwargs: Any) -> dict[str, Any]:
 
 def test_dispatch_rejects_non_localhost() -> None:
     h = _fh("127.0.0.1", "evil.com", "http://evil.com")
-    with mock.patch("fabric.handler._send_json") as sj:
+    with mock.patch("omnix.fabric.handler._send_json") as sj:
         handle_fabric_dispatch_post(h, _base_payload())  # type: ignore[arg-type]
     assert sj.call_args[0][1] == 403
     assert "dispatch_localhost_only" in str(sj.call_args[0][2])
@@ -107,7 +107,7 @@ def test_dispatch_rejects_bad_provider_key_shape() -> None:
         )
 
 
-@mock.patch("fabric.providers.common.urllib.request.urlopen")
+@mock.patch("omnix.fabric.providers.common.urllib.request.urlopen")
 def test_dispatch_anthropic_happy_path(m_url: Any) -> None:
     m_url.return_value = mocks.anthropic_ok("yo", 10, 5)
     out = dispatcher.dispatch(_base_payload())
@@ -117,7 +117,7 @@ def test_dispatch_anthropic_happy_path(m_url: Any) -> None:
     m_url.assert_called()
 
 
-@mock.patch("fabric.providers.common.urllib.request.urlopen")
+@mock.patch("omnix.fabric.providers.common.urllib.request.urlopen")
 def test_dispatch_openai_happy_path(m_url: Any) -> None:
     m_url.return_value = mocks.openai_ok("hi", 8, 4)
     p = _base_payload()
@@ -128,7 +128,7 @@ def test_dispatch_openai_happy_path(m_url: Any) -> None:
     assert out["content"] == "hi"
 
 
-@mock.patch("fabric.providers.common.urllib.request.urlopen")
+@mock.patch("omnix.fabric.providers.common.urllib.request.urlopen")
 def test_dispatch_google_happy_path(m_url: Any) -> None:
     m_url.return_value = mocks.google_ok("g", 3, 2)
     p = _base_payload()
@@ -139,7 +139,7 @@ def test_dispatch_google_happy_path(m_url: Any) -> None:
     assert out["content"] == "g"
 
 
-@mock.patch("fabric.providers.common.urllib.request.urlopen")
+@mock.patch("omnix.fabric.providers.common.urllib.request.urlopen")
 def test_dispatch_ollama_happy_path(m_url: Any) -> None:
     m_url.return_value = mocks.ollama_ok("local", 2, 1)
     p = _base_payload()
@@ -149,7 +149,7 @@ def test_dispatch_ollama_happy_path(m_url: Any) -> None:
     assert out["ok"] is True
 
 
-@mock.patch("fabric.providers.common.urllib.request.urlopen")
+@mock.patch("omnix.fabric.providers.common.urllib.request.urlopen")
 def test_dispatch_retry_on_429(m_url: Any) -> None:
     ok = mocks.anthropic_ok("win", 1, 1)
 
@@ -168,7 +168,7 @@ def test_dispatch_retry_on_429(m_url: Any) -> None:
     assert m_url.call_count == 3
 
 
-@mock.patch("fabric.providers.common.urllib.request.urlopen")
+@mock.patch("omnix.fabric.providers.common.urllib.request.urlopen")
 def test_dispatch_retry_on_529(m_url: Any) -> None:
     ok = mocks.anthropic_ok("ok", 1, 1)
     m_url.side_effect = [mocks.http_error(529, "{}"), ok]
@@ -176,7 +176,7 @@ def test_dispatch_retry_on_529(m_url: Any) -> None:
     assert out["ok"] is True
 
 
-@mock.patch("fabric.providers.common.urllib.request.urlopen")
+@mock.patch("omnix.fabric.providers.common.urllib.request.urlopen")
 def test_dispatch_retry_on_5xx(m_url: Any) -> None:
     ok = mocks.anthropic_ok("ok", 1, 1)
     m_url.side_effect = [mocks.http_error(503, "{}"), ok]
@@ -184,7 +184,7 @@ def test_dispatch_retry_on_5xx(m_url: Any) -> None:
     assert out["ok"] is True
 
 
-@mock.patch("fabric.providers.common.urllib.request.urlopen")
+@mock.patch("omnix.fabric.providers.common.urllib.request.urlopen")
 def test_dispatch_failover_chain(m_url: Any) -> None:
     calls = {"n": 0}
 
@@ -204,7 +204,7 @@ def test_dispatch_failover_chain(m_url: Any) -> None:
     assert out["provider"] == "openai"
 
 
-@mock.patch("fabric.providers.common.urllib.request.urlopen")
+@mock.patch("omnix.fabric.providers.common.urllib.request.urlopen")
 def test_dispatch_exhausted_retries(m_url: Any) -> None:
     m_url.side_effect = mocks.http_error(429, "{}")
     p = _base_payload()
@@ -225,7 +225,7 @@ def test_dispatch_deduplicates_on_idempotency_key() -> None:
     p = _base_payload()
     p["options"] = {**p["options"], "idempotency_key": "idem-1"}
 
-    with mock.patch("fabric.providers.common.urllib.request.urlopen", fake_urlopen):
+    with mock.patch("omnix.fabric.providers.common.urllib.request.urlopen", fake_urlopen):
         ex = ThreadPoolExecutor(max_workers=2)
         f1 = ex.submit(dispatcher.dispatch, p)
         assert started.wait(timeout=5)
@@ -271,7 +271,7 @@ def test_budget_resets_at_utc_midnight(
     assert budget.used_today("anthropic") == 0.0
 
 
-@mock.patch("fabric.providers.common.urllib.request.urlopen")
+@mock.patch("omnix.fabric.providers.common.urllib.request.urlopen")
 def test_receipt_written_for_success(m_url: Any, fabric_reset: Any) -> None:
     m_url.return_value = mocks.anthropic_ok("x", 1, 1)
     out = dispatcher.dispatch(_base_payload())
@@ -280,7 +280,7 @@ def test_receipt_written_for_success(m_url: Any, fabric_reset: Any) -> None:
     assert path.suffix == ".json"
 
 
-@mock.patch("fabric.providers.common.urllib.request.urlopen")
+@mock.patch("omnix.fabric.providers.common.urllib.request.urlopen")
 def test_receipt_written_for_failure(m_url: Any) -> None:
     m_url.side_effect = mocks.http_error(400, "{}")
     out = dispatcher.dispatch(_base_payload())
@@ -288,7 +288,7 @@ def test_receipt_written_for_failure(m_url: Any) -> None:
     assert Path(out["receipt_path"]).is_file()
 
 
-@mock.patch("fabric.providers.common.urllib.request.urlopen")
+@mock.patch("omnix.fabric.providers.common.urllib.request.urlopen")
 def test_receipt_contains_no_message_content(m_url: Any) -> None:
     m_url.return_value = mocks.anthropic_ok("secret-body", 1, 1)
     out = dispatcher.dispatch(_base_payload())
@@ -297,7 +297,7 @@ def test_receipt_contains_no_message_content(m_url: Any) -> None:
     assert "secret-body" not in raw
 
 
-@mock.patch("fabric.providers.common.urllib.request.urlopen")
+@mock.patch("omnix.fabric.providers.common.urllib.request.urlopen")
 def test_receipt_contains_no_plaintext_key(m_url: Any) -> None:
     m_url.return_value = mocks.anthropic_ok("x", 1, 1)
     out = dispatcher.dispatch(_base_payload())
@@ -324,7 +324,7 @@ def test_receipt_signed_with_existing_axiom_key(
     dispatcher.reset_runtime_for_tests()
 
     with mock.patch(
-        "fabric.providers.common.urllib.request.urlopen",
+        "omnix.fabric.providers.common.urllib.request.urlopen",
         return_value=mocks.anthropic_ok("z", 1, 1),
     ):
         out = dispatcher.dispatch(_base_payload())
@@ -339,7 +339,7 @@ def test_receipt_signed_with_existing_axiom_key(
     assert "Signature verified successfully" in rv.output
 
 
-@mock.patch("fabric.providers.common.urllib.request.urlopen")
+@mock.patch("omnix.fabric.providers.common.urllib.request.urlopen")
 def test_receipt_unsigned_when_no_axiom_key(
     m_url: Any, capsys: pytest.CaptureFixture[str], fabric_reset: Any
 ) -> None:
@@ -354,7 +354,7 @@ def test_receipt_unsigned_when_no_axiom_key(
 
 def test_status_endpoint_returns_snapshot() -> None:
     h = _fh("127.0.0.1", "127.0.0.1:9", "http://127.0.0.1:9")
-    with mock.patch("fabric.handler._send_json") as sj:
+    with mock.patch("omnix.fabric.handler._send_json") as sj:
         handle_fabric_status_get(h)  # type: ignore[arg-type]
     body = sj.call_args[0][2]
     assert "providers" in body
@@ -365,10 +365,10 @@ def test_status_endpoint_returns_snapshot() -> None:
     assert "today_totals" in body
 
 
-@mock.patch("fabric.providers.common.urllib.request.urlopen")
+@mock.patch("omnix.fabric.providers.common.urllib.request.urlopen")
 def test_google_url_redacted_in_logs(m_url: Any, caplog: pytest.LogCaptureFixture) -> None:
     m_url.return_value = mocks.google_ok()
-    caplog.set_level(logging.INFO, logger="fabric.providers.google")
+    caplog.set_level(logging.INFO, logger="omnix.fabric.providers.google")
     p = _base_payload()
     p["provider_key"] = {"provider": "google", "key": "SECRETKEY"}
     p["options"] = {**p["options"], "provider_override": "google"}
@@ -378,7 +378,7 @@ def test_google_url_redacted_in_logs(m_url: Any, caplog: pytest.LogCaptureFixtur
     assert "?key=***" in joined or "key=***" in joined
 
 
-@mock.patch("fabric.providers.common.urllib.request.urlopen")
+@mock.patch("omnix.fabric.providers.common.urllib.request.urlopen")
 def test_cost_computed_correctly_for_anthropic(m_url: Any) -> None:
     m_url.return_value = mocks.anthropic_ok("x", 1_000_000, 1_000_000)
     dispatcher.dispatch(_base_payload())
@@ -389,7 +389,7 @@ def test_cost_computed_correctly_for_anthropic(m_url: Any) -> None:
 def test_spend_endpoint_aggregates_correctly() -> None:
     import datetime as dt
 
-    from fabric.spend import spend_snapshot
+    from omnix.fabric.spend import spend_snapshot
 
     t = dt.datetime(2026, 4, 24, 12, 0, 0, tzinfo=dt.timezone.utc).timestamp()
     budget.set_time_fn_for_tests(lambda: t)
@@ -473,14 +473,14 @@ def test_spend_endpoint_aggregates_correctly() -> None:
     assert snap["computed_at"].startswith("2026-04-24T")
 
     h = _fh("127.0.0.1", "127.0.0.1:9", "http://127.0.0.1:9")
-    with mock.patch("fabric.handler.load_config", return_value=cfg):
-        with mock.patch("fabric.handler._send_json") as sj:
+    with mock.patch("omnix.fabric.handler.load_config", return_value=cfg):
+        with mock.patch("omnix.fabric.handler._send_json") as sj:
             handle_fabric_spend_get(h)  # type: ignore[arg-type]
     assert sj.call_args[0][1] == 200
     assert sj.call_args[0][2] == snap
 
 
-@mock.patch("fabric.providers.common.urllib.request.urlopen")
+@mock.patch("omnix.fabric.providers.common.urllib.request.urlopen")
 def test_thread_pool_concurrency(m_url: Any) -> None:
     def slow(*a: Any, **kw: Any) -> Any:
         time.sleep(0.06)

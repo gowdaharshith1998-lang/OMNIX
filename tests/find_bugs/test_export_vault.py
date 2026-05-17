@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from axiom.export_vault import build_vault_zip
-from axiom.finding_keys import ensure_project_key, project_pubkey_path
-from find_bugs.receipt_emitter import emit_scan_receipts
+from omnix.axiom.export_vault import build_vault_zip
+from omnix.axiom.finding_keys import ensure_project_key, project_pubkey_path
+from omnix.find_bugs.receipt_emitter import emit_scan_receipts
 
 
 def _minimal_finding(file_rel: str = "pkg/a.py") -> dict:
@@ -27,7 +27,7 @@ def _prep_project_and_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> P
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
-    from axiom import keystore as mldsa_keystore
+    from omnix.axiom import keystore as mldsa_keystore
 
     keys = home / ".omnix" / "keys"
     keys.mkdir(parents=True)

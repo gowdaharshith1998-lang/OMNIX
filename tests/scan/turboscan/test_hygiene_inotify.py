@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from scan.filesystem_hygiene import load_sandbox_config_from_env, validated_sandbox_roots
-from scan.turboscan.hygiene_inotify import start_hygiene_watcher
+from omnix.scan.filesystem_hygiene import load_sandbox_config_from_env, validated_sandbox_roots
+from omnix.scan.turboscan.hygiene_inotify import start_hygiene_watcher
 
 
 class _Reg:

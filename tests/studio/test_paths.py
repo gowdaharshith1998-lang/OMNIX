@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from src.studio.paths import ensure_global_omnix_dir, ensure_project_omnix_dir
+from omnix.studio.paths import ensure_global_omnix_dir, ensure_project_omnix_dir
 
 
 def test_global_omnix_dir_creates_if_missing(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def, misc, no-untyped-def, no-untyped-def, no-any-return]  # noqa: D103, E501

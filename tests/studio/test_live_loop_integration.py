@@ -10,8 +10,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from src.studio.server import app
-from src.studio.workspace import MANAGER
+from omnix.studio.server import app
+from omnix.studio.workspace import MANAGER
 
 
 def _close_all_workspaces() -> None:

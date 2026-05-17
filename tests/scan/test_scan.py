@@ -13,8 +13,8 @@ from unittest import mock
 
 import pytest
 
-from scan import handler as h
-from scan import patterns, receipts, scanner, store
+from omnix.scan import handler as h
+from omnix.scan import patterns, receipts, scanner, store
 
 
 class _Hdr:

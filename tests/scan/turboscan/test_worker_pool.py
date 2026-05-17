@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from multiprocessing import Manager
 
-from scan.turboscan.worker_pool import map_verify_tasks_serial
+from omnix.scan.turboscan.worker_pool import map_verify_tasks_serial
 
 
 def test_R3_serial_runs_with_shared_slot_registry() -> None:

@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from src.parser.quality_profiles import (
+from omnix.parser.quality_profiles import (
     QualityProfileValidationError,
     load_profile,
 )

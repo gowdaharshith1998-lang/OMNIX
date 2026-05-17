@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import axiom.keygen as kg
-import axiom.params as P
-import axiom.sign as sgn
-import axiom.verify as vfy
+import omnix.axiom.keygen as kg
+import omnix.axiom.params as P
+import omnix.axiom.sign as sgn
+import omnix.axiom.verify as vfy
 
 
 def test_sign_verify_roundtrip_deterministic() -> None:

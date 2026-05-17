@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from axiom import keystore, verify as vfy
-from axiom.keygen import keygen
-from src.graph.store import GraphStore
-from src.parser import evolution as evo
+from omnix.axiom import keystore, verify as vfy
+from omnix.axiom.keygen import keygen
+from omnix.graph.store import GraphStore
+from omnix.parser import evolution as evo
 
 
 def _kpair(tmp: Path) -> None:

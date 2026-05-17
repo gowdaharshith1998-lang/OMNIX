@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from src.studio.server import app
-from src.studio.workspace import MANAGER, open_workspace
+from omnix.studio.server import app
+from omnix.studio.workspace import MANAGER, open_workspace
 
 
 def _open_managed_workspace(
@@ -28,7 +28,7 @@ def _cleanup_workspace(workspace_id: str) -> None:
 
 
 def _write_keypair(keys_dir: Path) -> tuple[Path, Path]:
-    from axiom import keygen, keystore  # type: ignore[import-not-found]
+    from omnix.axiom import keygen, keystore  # type: ignore[import-not-found]
 
     pk, sk = keygen.keygen()
     keys_dir.mkdir(parents=True, exist_ok=True)
@@ -40,7 +40,7 @@ def _write_keypair(keys_dir: Path) -> tuple[Path, Path]:
 
 
 def _sign_detached(json_path: Path, sig_path: Path, secret_pem: Path) -> None:
-    from axiom import keystore, sign  # type: ignore[import-not-found]
+    from omnix.axiom import keystore, sign  # type: ignore[import-not-found]
 
     sk = keystore.secret_from_pem(secret_pem.read_text(encoding="ascii"))
     raw = json_path.read_bytes()

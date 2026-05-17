@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from providers.registry import PROVIDERS
+from omnix.providers.registry import PROVIDERS
 
 
 def test_registry_contains_universal_byok_set() -> None:

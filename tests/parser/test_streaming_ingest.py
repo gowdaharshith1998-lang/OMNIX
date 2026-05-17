@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from src.find_bugs.walker import iter_dispatch_paths
-from src.graph.store import GraphStore
-from src.parser.skip_tracking import SkipAggregate
-from src.parser import ingest_dispatch as ind
+from omnix.find_bugs.walker import iter_dispatch_paths
+from omnix.graph.store import GraphStore
+from omnix.parser.skip_tracking import SkipAggregate
+from omnix.parser import ingest_dispatch as ind
 
 
 def test_streaming_preserves_walk_order(

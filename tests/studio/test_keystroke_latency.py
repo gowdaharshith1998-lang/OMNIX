@@ -2,7 +2,7 @@ import pytest  # noqa: I001, E501
 
 
 def test_latency_harness_imports() -> None:  # noqa: D103
-    import src.studio.parser_bridge as pb  # noqa: I001, WPS433, E501
+    import omnix.studio.parser_bridge as pb  # noqa: I001, WPS433, E501
 
     assert hasattr(pb, "ParserBridge")  # noqa: E501
 

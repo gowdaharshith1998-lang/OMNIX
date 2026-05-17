@@ -9,9 +9,9 @@ from unittest import mock
 
 import pytest
 
-from src.graph.store import GraphStore
-from src.parser import evolution, ingest_dispatch as ind
-from src.parser import ingest_dispatch as ingmod
+from omnix.graph.store import GraphStore
+from omnix.parser import evolution, ingest_dispatch as ind
+from omnix.parser import ingest_dispatch as ingmod
 
 FIXTURE = Path(__file__).parent / "fixtures" / "parallel_consistency"
 
@@ -56,7 +56,7 @@ def test_parallel_output_matches_serial_on_fixture(
             _ = _t, _k, parse_mode
             qlog.append((g, float(q)))
 
-        monkeypatch.setattr("src.parser.evolution.observe_parse", track)
+        monkeypatch.setattr("omnix.parser.evolution.observe_parse", track)
         _ = ind.ingest_unified_codebase(str(src), s, parse_mode="generic")
         s.close()
         n, e, _ = _snapshot_graph(dbp)

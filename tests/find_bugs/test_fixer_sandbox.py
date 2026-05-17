@@ -9,8 +9,8 @@ from unittest import mock
 
 import pytest
 
-from src.find_bugs import fixer, fix_fabric, runner, sandbox
-from src.find_bugs.fixer import orchestrate_code_fix
+from omnix.find_bugs import fixer, fix_fabric, runner, sandbox
+from omnix.find_bugs.fixer import orchestrate_code_fix
 
 
 def _write_min_repo(root: Path) -> None:
@@ -83,7 +83,7 @@ def test_baseline_failing_stops_with_status(tmp_path: Path) -> None:
     assert b.get("cleanup_succeeded") is True
 
 
-@mock.patch("src.find_bugs.fixer._pbt_sandbox", return_value=True)
+@mock.patch("omnix.find_bugs.fixer._pbt_sandbox", return_value=True)
 @mock.patch.dict(os.environ, {"OMNIX_CODE_FIX_MOCK": "1"}, clear=False)
 def test_suggested_fix_receipt_body(_mock_pbt: object, tmp_path: Path) -> None:
     _write_min_repo(tmp_path)
@@ -142,7 +142,7 @@ def test_layer7_filter_helper() -> None:
 
 
 def test_run_test_suite_sandbox_respects_cwd() -> None:
-    from src.find_bugs import test_detect
+    from omnix.find_bugs import test_detect
 
     s = test_detect.TestRunnerSpec("none", [], order_chosen=["(none)"])
     r0 = fixer.run_test_suite_sandbox(Path("/nope"), s)
@@ -152,7 +152,7 @@ def test_run_test_suite_sandbox_respects_cwd() -> None:
 
 def test_grep_safety_fixer_sandbox() -> None:
     """Adversarial guardrails: no risky patterns in new Layer 7 modules."""
-    root = Path("src/find_bugs")
+    root = Path("src/omnix/find_bugs")
     for name in ("fixer.py", "sandbox.py"):
         t = (root / name).read_text(encoding="utf-8")
         for bad in (
