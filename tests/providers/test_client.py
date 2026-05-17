@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from omnix.axiom import provider_vault
+from omnix.receipts import provider_vault
 from omnix.providers.client import get_provider_client
 
 

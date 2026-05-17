@@ -64,7 +64,7 @@ def write_call_receipt(event: dict[str, Any]) -> str:
         jpath.write_bytes(raw)
         return str(jpath.resolve())
 
-    from omnix.axiom import keystore, sign, verify as vfy
+    from omnix.receipts import keystore, sign, verify as vfy
 
     sk_pem = _SK_PATH.read_text(encoding="ascii")
     sk = keystore.secret_from_pem(sk_pem)

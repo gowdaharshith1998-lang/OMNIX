@@ -1062,7 +1062,7 @@ def _run_find_bugs_core(
         os.environ["OMNIX_FIND_BUGS_RSS_CAP_BYTES"] = str(
             int(rss_cap_mb) * 1024 * 1024
         )
-    from omnix.axiom.finding_receipt import now_iso8601_utc
+    from omnix.receipts.finding_receipt import now_iso8601_utc
 
     scan_started_at = now_iso8601_utc()
     oroot = str(_omnix_root())

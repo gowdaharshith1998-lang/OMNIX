@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from omnix.axiom.export_vault import build_vault_zip
-from omnix.axiom.finding_keys import ensure_project_key, project_pubkey_path
+from omnix.receipts.export_vault import build_vault_zip
+from omnix.receipts.finding_keys import ensure_project_key, project_pubkey_path
 from omnix.find_bugs.receipt_emitter import emit_scan_receipts
 
 
@@ -27,7 +27,7 @@ def _prep_project_and_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> P
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
-    from omnix.axiom import keystore as mldsa_keystore
+    from omnix.receipts import keystore as mldsa_keystore
 
     keys = home / ".omnix" / "keys"
     keys.mkdir(parents=True)

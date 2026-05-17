@@ -129,8 +129,8 @@ def test_grammar_status_command_returns_per_grammar_summary(
 def test_grammar_verify_command_validates_signature(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from omnix.axiom import keystore, sign
-    from omnix.axiom.keygen import keygen
+    from omnix.receipts import keystore, sign
+    from omnix.receipts.keygen import keygen
 
     pk, sk = keygen()
     kd = tmp_path / "keys"

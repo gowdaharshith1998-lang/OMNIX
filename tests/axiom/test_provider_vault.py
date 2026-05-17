@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from omnix.axiom import provider_vault
+from omnix.receipts import provider_vault
 
 
 def test_vault_file_fallback_roundtrip(tmp_path: Path, monkeypatch: Any) -> None:

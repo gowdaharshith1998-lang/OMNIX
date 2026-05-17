@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from omnix.axiom import keystore, sign
+from omnix.receipts import keystore, sign
 
 from . import fix_fabric, sandbox
 from .test_detect import TestRunnerSpec, detect_test_runner, parse_pytest_summary

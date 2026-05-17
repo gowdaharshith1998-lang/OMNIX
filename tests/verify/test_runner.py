@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from omnix.axiom import keystore
+from omnix.receipts import keystore
 from omnix.verify import runner
 
 REPO = Path(__file__).resolve().parents[2]

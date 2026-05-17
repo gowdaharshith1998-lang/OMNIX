@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from omnix.axiom import keystore, verify as vfy
-from omnix.axiom.keygen import keygen
+from omnix.receipts import keystore, verify as vfy
+from omnix.receipts.keygen import keygen
 from omnix.parser import evolution as evo
 
 

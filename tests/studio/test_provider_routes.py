@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from omnix.axiom import provider_vault
+from omnix.receipts import provider_vault
 from omnix.studio.server import app
 
 

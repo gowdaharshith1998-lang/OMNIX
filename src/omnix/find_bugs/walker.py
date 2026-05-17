@@ -34,7 +34,7 @@ IGNORE_DIRS: frozenset[str] = frozenset(
 SKIP_RELATIVE_PATHS: frozenset[str] = frozenset(
     {
         # debt-18: PBT can generate multi-GB NTT polynomial inputs and SIGBUS.
-        "src/omnix/axiom/ntt.py",
+        "src/omnix/receipts/ntt.py",
     }
 )
 

@@ -20,7 +20,7 @@ import click
 
 from omnix.omnix_version import __version__ as _OMNIX_VERSION
 
-from omnix.axiom.cli import axiom_group
+from omnix.receipts.cli import axiom_group
 from omnix.parser.cli import grammar_group
 
 

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import secrets
 
-import omnix.axiom.ntt as ntt
-import omnix.axiom.params as P
+import omnix.receipts.ntt as ntt
+import omnix.receipts.params as P
 
 
 def _randpoly() -> list[int]:
