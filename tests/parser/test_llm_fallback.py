@@ -6,9 +6,9 @@ from unittest import mock
 
 import pytest
 
-from fabric import dispatcher
-from src.graph.store import GraphStore
-from src.parser import llm_fallback
+from omnix.fabric import dispatcher
+from omnix.graph.store import GraphStore
+from omnix.parser import llm_fallback
 
 _JSON = (
     '{"functions":[{"name":"f","line":2,"params":["a"]}],"classes":[],'

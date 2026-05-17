@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from axiom import keystore
-from verify import receipt
+from omnix.axiom import keystore
+from omnix.verify import receipt
 
 
 def test_canonical_json() -> None:

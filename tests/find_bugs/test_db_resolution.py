@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from src.find_bugs import runner as fr
+from omnix.find_bugs import runner as fr
 
 
 def test_creates_per_codebase_db_when_missing(

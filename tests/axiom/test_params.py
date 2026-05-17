@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import axiom.params as P
+import omnix.axiom.params as P
 
 
 def test_mldsa_65_table1() -> None:

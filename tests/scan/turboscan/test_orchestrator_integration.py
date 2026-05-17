@@ -21,12 +21,12 @@ def test_R12_plan_only_returns_budget_without_verify(
         "def g(a: int, b: int) -> int:\n    return a // b\n",
         encoding="utf-8",
     )
-    from find_bugs.runner import ensure_find_bugs_graph_db
+    from omnix.find_bugs.runner import ensure_find_bugs_graph_db
 
     gdb, err = ensure_find_bugs_graph_db(tmp_path, None)
     assert err is None and gdb is not None
     ex, _txt, detail = __import__(
-        "find_bugs.runner", fromlist=["run_find_bugs"]
+        "omnix.find_bugs.runner", fromlist=["run_find_bugs"]
     ).run_find_bugs(
         str(tmp_path),
         examples=10,

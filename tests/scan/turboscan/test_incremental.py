@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scan.turboscan.incremental import (
+from omnix.scan.turboscan.incremental import (
     filter_incremental_paths,
     write_last_green_scan,
 )
-from scan.turboscan.types import turboscan_last_scan_path
+from omnix.scan.turboscan.types import turboscan_last_scan_path
 
 
 def _relp(pa: Path, root: Path) -> str:

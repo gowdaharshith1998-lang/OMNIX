@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.find_bugs import test_detect
+from omnix.find_bugs import test_detect
 
 
 def test_parse_pytest_failed_no_passed() -> None:

@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from src.graph.store import GraphStore
-from src.parser import evolution
-from src.parser import ingest_dispatch as ind
+from omnix.graph.store import GraphStore
+from omnix.parser import evolution
+from omnix.parser import ingest_dispatch as ind
 
 
 def test_observe_parse_called_from_analyze_path(
@@ -24,7 +24,7 @@ def test_observe_parse_called_from_analyze_path(
         nonlocal n
         n += 1
 
-    monkeypatch.setattr("src.parser.evolution.observe_parse", _track)
+    monkeypatch.setattr("omnix.parser.evolution.observe_parse", _track)
     (tmp_path / "hi.py").write_text("def f():\n    return 1\n", encoding="utf-8")
     evolution.begin_evolution_run()
     store = GraphStore(str(tmp_path / "db1.sqlite"))
@@ -43,7 +43,7 @@ def test_observe_parse_called_from_find_bugs_path(
         nonlocal n
         n += 1
 
-    monkeypatch.setattr("src.parser.evolution.observe_parse", _track)
+    monkeypatch.setattr("omnix.parser.evolution.observe_parse", _track)
     (tmp_path / "x.py").write_text("def f(): pass\n", encoding="utf-8")
     dbp = tmp_path / "omnix.db"
     s = GraphStore(str(dbp))
@@ -129,8 +129,8 @@ def test_grammar_status_command_returns_per_grammar_summary(
 def test_grammar_verify_command_validates_signature(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from axiom import keystore, sign
-    from axiom.keygen import keygen
+    from omnix.axiom import keystore, sign
+    from omnix.axiom.keygen import keygen
 
     pk, sk = keygen()
     kd = tmp_path / "keys"

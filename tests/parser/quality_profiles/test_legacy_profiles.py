@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from src.parser.quality_profiles import load_custom_score, load_profile
+from omnix.parser.quality_profiles import load_custom_score, load_profile
 
 _FIX = Path(__file__).resolve().parent / "fixtures"
 

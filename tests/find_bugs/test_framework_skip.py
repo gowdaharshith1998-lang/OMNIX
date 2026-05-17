@@ -9,7 +9,7 @@ import pytest
 
 pytest.importorskip("hypothesis", reason="hypothesis required")
 
-from find_bugs import runner
+from omnix.find_bugs import runner
 
 
 def _run_find(

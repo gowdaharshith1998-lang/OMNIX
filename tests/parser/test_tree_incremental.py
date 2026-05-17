@@ -7,7 +7,7 @@ import time
 import tree_sitter_python as tsp
 from tree_sitter import Language
 
-from src.parser import tree_parse_cache as tpc
+from omnix.parser import tree_parse_cache as tpc
 
 
 def _fifty_kb_python() -> str:

@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from scan.turboscan.calibration import CalibrationReport, calibrate_hot_generators
-from scan.turboscan.inlined_generators import INLINED_REGISTRY
-from scan.turboscan.worker_pool import build_pool, resolve_mp_start_method
+from omnix.scan.turboscan.calibration import CalibrationReport, calibrate_hot_generators
+from omnix.scan.turboscan.inlined_generators import INLINED_REGISTRY
+from omnix.scan.turboscan.worker_pool import build_pool, resolve_mp_start_method
 
 
 def test_R2_1_1_no_fork_deprecation_warnings(tmp_path: Path) -> None:
@@ -107,7 +107,7 @@ def test_R2_1_5_full_scan_under_30s_R8_passes(omnix_repo_path: Path) -> None:
     """R2.1.5 / R8: full TURBOSCAN completes in <30s (Hg's laptop gate)."""
     import time
 
-    from scan.turboscan.orchestrator import scan
+    from omnix.scan.turboscan.orchestrator import scan
 
     t0 = time.monotonic()
     result = scan(omnix_repo_path, mode="full", workers=8, examples_default=100)

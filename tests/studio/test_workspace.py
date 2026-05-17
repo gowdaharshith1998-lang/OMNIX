@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from src.studio import recent
-from src.studio.paths import project_omnix_dir
-from src.studio.workspace import open_workspace
+from omnix.studio import recent
+from omnix.studio.paths import project_omnix_dir
+from omnix.studio.workspace import open_workspace
 
 
 def test_open_existing_folder_returns_existing_mode(

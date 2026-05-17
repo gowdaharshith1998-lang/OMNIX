@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from axiom import keystore
-from find_bugs import bundle as bmod
-from verify import receipt
+from omnix.axiom import keystore
+from omnix.find_bugs import bundle as bmod
+from omnix.verify import receipt
 
 
 @pytest.fixture

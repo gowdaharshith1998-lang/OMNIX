@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from find_bugs import walker
+from omnix.find_bugs import walker
 
 
 def test_finds_expected_py_in_fixture(tmp_path: Path) -> None:
@@ -50,7 +50,7 @@ def test_gitignore_prefix(tmp_path: Path) -> None:
 
 
 def test_skips_known_pathological_relative_paths(tmp_path: Path) -> None:
-    skipped = tmp_path / "src" / "axiom" / "ntt.py"
+    skipped = tmp_path / "src" / "omnix" / "axiom" / "ntt.py"
     skipped.parent.mkdir(parents=True)
     skipped.write_text("def add_ntt(a, b):\n    return a + b\n", encoding="utf-8")
     same_basename = tmp_path / "other" / "ntt.py"

@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from fabric.providers import common
-from providers.detect import identify_provider
+from omnix.fabric.providers import common
+from omnix.providers.detect import identify_provider
 
 
 def test_anthropic_prefix_is_instant(monkeypatch: Any) -> None:
@@ -32,7 +32,7 @@ def test_ambiguous_sk_probes_openai_then_deepseek(monkeypatch: Any) -> None:
         calls.append(url)
         return (401, {}) if "openai.com" in url else (200, {})
 
-    monkeypatch.setattr("providers.detect.request_json", fake_request)
+    monkeypatch.setattr("omnix.providers.detect.request_json", fake_request)
     r = asyncio.run(identify_provider("sk-ambiguous"))
     assert r.provider == "deepseek"
     assert r.method == "probe"
@@ -46,7 +46,7 @@ def test_custom_base_url_short_circuits() -> None:
 
 
 def test_unknown_when_all_prefixless_probes_fail(monkeypatch: Any) -> None:
-    monkeypatch.setattr("providers.detect.request_json", lambda *a, **k: (401, {}))
+    monkeypatch.setattr("omnix.providers.detect.request_json", lambda *a, **k: (401, {}))
     r = asyncio.run(identify_provider("prefixless-key"))
     assert r.provider == "unknown"
     assert r.confidence == 0.0

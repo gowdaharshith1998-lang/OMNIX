@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ast
 
-from verify import boundary
+from omnix.verify import boundary
 
 
 def test_integer_literals() -> None:

@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from axiom import keystore
-from verify import runner
+from omnix.axiom import keystore
+from omnix.verify import runner
 
 REPO = Path(__file__).resolve().parents[2]
 OMNIX = REPO / "omnix.py"
@@ -78,7 +78,7 @@ def test_receipt_path_when_signing(
     k = tmp_path / "k"
     keystore.write_keypair_dir(k)
     rdir = tmp_path / "receipts"
-    from verify import receipt as R
+    from omnix.verify import receipt as R
 
     R.set_paths_for_tests(
         receipt_dir=rdir, secret_path=k / "secret.pem"  # type: ignore[call-arg]

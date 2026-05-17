@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from axiom import keystore as mldsa_keystore
-from axiom.finding_keys import ensure_project_key, project_pubkey_path
-from axiom.finding_receipt import now_iso8601_utc
-from axiom.merkle import compute_merkle_root, compute_leaf_hash
-from find_bugs.receipt_emitter import (
+from omnix.axiom import keystore as mldsa_keystore
+from omnix.axiom.finding_keys import ensure_project_key, project_pubkey_path
+from omnix.axiom.finding_receipt import now_iso8601_utc
+from omnix.axiom.merkle import compute_merkle_root, compute_leaf_hash
+from omnix.find_bugs.receipt_emitter import (
     MissingEd25519ProjectKeyError,
     MissingMldsaKeystoreError,
     emit_scan_receipts,
@@ -319,7 +319,7 @@ def test_default_find_bugs_run_writes_no_receipt_scan_dirs(
     """Regression: without ``emit_receipts``, no ``receipts/findings`` tree."""
     import sqlite3
 
-    from find_bugs import runner
+    from omnix.find_bugs import runner
 
     home = tmp_path / "h"
     home.mkdir()

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import axiom.keygen as kg
-import axiom.params as P
+import omnix.axiom.keygen as kg
+import omnix.axiom.params as P
 
 
 def test_keygen_internal_sizes() -> None:

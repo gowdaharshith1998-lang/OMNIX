@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from src.studio import server as studio_server
-from src.studio.server import app
+from omnix.studio import server as studio_server
+from omnix.studio.server import app
 
 
 def _minimal_finding(file_rel: str = "pkg/a.py") -> dict:
@@ -26,8 +26,8 @@ def findings_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
-    from axiom import keystore as mldsa_keystore
-    from axiom.finding_keys import ensure_project_key
+    from omnix.axiom import keystore as mldsa_keystore
+    from omnix.axiom.finding_keys import ensure_project_key
 
     keys = home / ".omnix" / "keys"
     keys.mkdir(parents=True)
@@ -39,8 +39,8 @@ def findings_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (root / "pkg" / "a.py").write_text("def foo():\n pass\n", encoding="utf-8")
     ensure_project_key(root.resolve())
 
-    from axiom.finding_receipt import now_iso8601_utc
-    from find_bugs.receipt_emitter import emit_scan_receipts
+    from omnix.axiom.finding_receipt import now_iso8601_utc
+    from omnix.find_bugs.receipt_emitter import emit_scan_receipts
 
     emit_scan_receipts(
         [_minimal_finding()],
@@ -78,8 +78,8 @@ def test_get_scans_returns_empty_when_no_receipts_dir(
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
-    from axiom import keystore as mldsa_keystore
-    from axiom.finding_keys import ensure_project_key
+    from omnix.axiom import keystore as mldsa_keystore
+    from omnix.axiom.finding_keys import ensure_project_key
 
     keys = home / ".omnix" / "keys"
     keys.mkdir(parents=True)
@@ -123,7 +123,7 @@ def test_post_verify_scan_tampered_returns_verified_false(
     listing = c.get("/api/findings/scans").json()["scans"]
     sid = listing[0]["scan_id"]
     root = Path(findings_project)
-    from axiom.finding_receipt import compute_project_id
+    from omnix.axiom.finding_receipt import compute_project_id
 
     pid = compute_project_id(root)
     receipts = Path.home() / ".omnix" / "receipts" / "findings" / pid / sid

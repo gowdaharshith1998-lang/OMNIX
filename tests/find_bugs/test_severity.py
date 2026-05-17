@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from find_bugs import severity
+from omnix.find_bugs import severity
 
 _G = {
     "caller_counts": {"m.py::f": 3, "m.py::g": 0},

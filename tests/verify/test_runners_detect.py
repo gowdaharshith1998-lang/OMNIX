@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from src.verify.runners import detect
+from omnix.verify.runners import detect
 
 
 def test_native_runner_detection_returns_correct_backend(

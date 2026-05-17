@@ -10,7 +10,7 @@ from pathlib import Path
 
 pytest.importorskip("hypothesis", reason="hypothesis required")
 
-from find_bugs import runner
+from omnix.find_bugs import runner
 
 SAMPLE = Path(__file__).parent / "fixtures" / "sample_codebase"
 

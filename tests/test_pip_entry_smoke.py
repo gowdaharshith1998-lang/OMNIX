@@ -1,10 +1,10 @@
 """Smoke tests for pip-entry runtime resolution.
 
-These tests fail if the sys.path bootstrap in src/cli.py is removed or if
+These tests fail if the sys.path bootstrap in omnix.cli is removed or if
 find-bugs is unregistered from the click group.
 
 They use subprocess to simulate the actual pip-entry invocation, since
-pytest itself runs from repo root where src.X always resolves.
+pytest itself runs from repo root where source-tree imports are easier to mask.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ def test_omnix_axiom_verify_scan_help_succeeds():
 
 
 def test_pip_context_imports_resolve():
-    """Simulate pip-entry context, confirm src.X imports resolve after bootstrap."""
+    """Simulate pip-entry context, confirm omnix imports resolve after bootstrap."""
     rr = str(REPO_ROOT)
     sd = str(SRC_DIR)
     code = (
@@ -64,11 +64,10 @@ def test_pip_context_imports_resolve():
         "import sys\n"
         f"repo_root = {rr!r}\n"
         f"src_dir = {sd!r}\n"
-        "sys.path = [p for p in sys.path if p != repo_root]\n"
-        "if src_dir not in sys.path:\n"
-        "    sys.path.insert(0, src_dir)\n"
-        "from cli import main  # noqa: F401 — triggers bootstrap in src/cli.py\n"
-        "importlib.import_module('src.parser.skip_tracking')\n"
+        "sys.path = [p for p in sys.path if p not in (repo_root, src_dir)]\n"
+        "sys.path.insert(0, src_dir)\n"
+        "from omnix.cli import main  # noqa: F401 — triggers bootstrap in omnix.cli\n"
+        "importlib.import_module('omnix.parser.skip_tracking')\n"
         "print('OK')\n"
     )
     proc = subprocess.run(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from verify import invariants
+from omnix.verify import invariants
 
 FIX = Path(__file__).parent / "fixtures" / "sample_roundtrip.py"
 
