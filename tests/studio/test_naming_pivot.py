@@ -93,12 +93,21 @@ def test_cli_docstring_knowledge_intelligence() -> None:
     assert "code intelligence and AXIOM provenance" not in t
 
 
-def test_readme_company_brain_opening() -> None:
+def test_readme_locked_positioning_opening() -> None:
+    """README opens with the locked positioning (graph-native legacy modernization).
+
+    Tracks the positioning lock — the README was rewritten in commit 6ee9053 to drop
+    the prior 'open-core company brain / code intelligence product' marketing and
+    state OMNIX's actual scope. This test guards the new opening + the explicit
+    no-overclaim disclaimer that the positioning lock requires.
+    """
     t = _read("README.md")
-    assert (
-        "open-core company brain — a visual knowledge graph that AI agents navigate to do work, with AXIOM cryptographic governance and Calibra confidence calibration"
-        in t
-    )
+    # Positive: locked positioning is the opening sentence
+    assert "graph-native platform for migrating legacy systems" in t
+    assert "verified behavioral equivalence" in t
+    # Negative: prior marketing positionings must not return
+    assert "open-core company brain" not in t
     assert "open-core code intelligence product" not in t
-    assert "every entity, every relationship, every signed action" in t
-    assert "every file, function, class, and connection" not in t
+    # Positive: the explicit no-overclaim disclaimer ("We do not say 'provable'...")
+    # is part of the positioning lock — README §"How it works" must carry it.
+    assert 'We do not say "provable"' in t

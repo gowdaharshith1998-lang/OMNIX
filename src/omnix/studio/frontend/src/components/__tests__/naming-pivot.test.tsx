@@ -94,13 +94,19 @@ describe('naming pivot (slice-19)', () => {
     expect(t).not.toContain('code intelligence and AXIOM provenance');
   });
 
-  it('README opening', () => {
+  it('README opens with locked positioning (graph-native legacy modernization)', () => {
+    // The README was rewritten in commit 6ee9053 to drop the prior
+    // 'open-core company brain / code intelligence product' marketing and state
+    // OMNIX's actual scope. This test guards the new opening + the explicit
+    // no-overclaim disclaimer the positioning lock requires.
     const t = readRoot('README.md');
-    expect(t).toContain(
-      'open-core company brain — a visual knowledge graph that AI agents navigate to do work, with AXIOM cryptographic governance and Calibra confidence calibration',
-    );
-    expect(t).toContain('every entity, every relationship, every signed action');
+    // Positive: locked positioning is the opening sentence
+    expect(t).toContain('graph-native platform for migrating legacy systems');
+    expect(t).toContain('verified behavioral equivalence');
+    // Negative: prior marketing positionings must not return
+    expect(t).not.toContain('open-core company brain');
     expect(t).not.toContain('open-core code intelligence product');
-    expect(t).not.toContain('every file, function, class, and connection');
+    // Positive: the explicit no-overclaim disclaimer is part of the lock
+    expect(t).toContain('We do not say "provable"');
   });
 });
