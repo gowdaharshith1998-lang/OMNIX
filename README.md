@@ -93,7 +93,7 @@ omnix axiom export-vault /path/to/project --out audit.zip
 
 What ships in v0.6 specifically:
 
-- Universal Tree-sitter-based parser producing the semantic graph (Python, TypeScript, Rust, Java grammars active; ~10 more enumerable via `omnix grammar list`)
+- Universal Tree-sitter-based parser producing the semantic graph — 6 grammars active (Python, TypeScript, Java, Go, Ruby, Rust), enumerable via `omnix grammar list`. Python and TypeScript additionally have language-specialist passes for richer symbol resolution; the rest fall through to the universal tree-sitter pipeline. Files tree-sitter cannot parse are caught by an LLM fallback.
 - Property-based testing with signed finding receipts (Ed25519 per-finding + ML-DSA-65 over a Merkle root per scan)
 - Behavioral verification primitives (subprocess-isolated, forkserver-safe, hygiene-aware)
 - Read-only localhost API + a React studio for inspection
