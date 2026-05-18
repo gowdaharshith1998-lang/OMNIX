@@ -34,6 +34,7 @@ _EXPECTED_JARS: frozenset[str] = frozenset(
         "javaparser-symbol-solver-core-3.26.3.jar",
         "javassist-3.30.2-GA.jar",
         "javaparser-emitter.jar",
+        "java-equivalence-harness.jar",
     }
 )
 
