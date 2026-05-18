@@ -169,17 +169,38 @@ def _default_gate_runner(spec: Spec, response_text: str, target_language: str) -
     """
     from omnix.gates.runner import run as _run  # local import — avoid cycle
 
-    return _run(spec=spec, response_text=response_text, target_language=target_language)
+    attempt = RebuildAttempt(
+        node_fqn=spec.identity.fqn,
+        spec_hash=sha256_hex(spec.to_json()),
+        prompt_template_version=PROMPT_TEMPLATE_VERSION,
+        prompt_text_hash=sha256_hex(response_text),
+        response_text=response_text,
+        timestamp=RebuildAttempt.now_utc(),
+        model=f"retry-default-gate-runner:{target_language}",
+    )
+    return _run(attempt, spec, source_code=response_text)
 
 
 def _default_nodes_for(project_path: Path) -> Sequence[Spec]:
-    """Lazy adapter to `omnix.orchestrator.topological.walk`.
+    """Lazy adapter from the persisted graph to topo-ordered specs.
 
     Tests inject `nodes` directly; production walks the project.
     """
-    from omnix.orchestrator.topological import walk  # local import — avoid cycle
+    from omnix.orchestrator.dispatcher import (  # local import — avoid cycle
+        _collect_graph_inputs,
+        _load_graph,
+    )
+    from omnix.orchestrator.topological import topo_sort
+    from omnix.spec.generator import generate as _generate_spec
 
-    return tuple(walk(project_path))
+    graph = _load_graph(project_path)
+    nodes, edges, fqn_index = _collect_graph_inputs(graph)
+    ordered_specs: list[Spec] = []
+    for entry in topo_sort([n.fqn for n in nodes], edges):
+        entries = entry if isinstance(entry, list) else [entry]
+        for fqn in entries:
+            ordered_specs.append(_generate_spec(fqn_index[fqn], graph, "java21"))
+    return tuple(ordered_specs)
 
 
 # ---------- main entry point -------------------------------------------------

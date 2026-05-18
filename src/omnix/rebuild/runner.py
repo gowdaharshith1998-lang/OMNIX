@@ -1,4 +1,4 @@
-"""M1 rebuild runner — walks the graph, dispatches LLM calls, runs gates
+"""Rebuild runner — walks the graph, dispatches LLM calls, runs gates
 1-4 mechanically, signs + writes one RebuildReceipt per node.
 
 Output layout:
@@ -42,7 +42,7 @@ from omnix.receipts.rebuild_receipt import (
     GATE_NAMES,
     GateResult,
     RebuildReceipt,
-    default_m2_deferred_gate_results,
+    default_skipped_gate_results,
     sha256_hex_text,
     sign_rebuild,
 )
@@ -137,8 +137,7 @@ def _run_gates_1_to_4(
                 "reason": (
                     "Gate 4 (dependency) mechanical check is M1-phase-6 "
                     "follow-up scope. Status 'skipped' — neither passed "
-                    "nor failed. Distinct from gates 5+6 which are "
-                    "M2-deferred."
+                    "nor failed."
                 )
             },
         )
@@ -159,7 +158,7 @@ def _build_receipt(
     model: str,
     gate_results_1_to_4: tuple[GateResult, ...],
 ) -> RebuildReceipt:
-    full_gates = gate_results_1_to_4 + default_m2_deferred_gate_results()
+    full_gates = gate_results_1_to_4 + default_skipped_gate_results()
     return RebuildReceipt(
         project_id=project_id,
         node_fqn=node.fqn,

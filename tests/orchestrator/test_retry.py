@@ -20,9 +20,12 @@ from omnix.orchestrator.human_review import HumanReviewRecord, RetryRunReport
 from omnix.orchestrator.retry import (
     MAX_RETRIES_DEFAULT,
     PROMPT_TEMPLATE_VERSION,
+    _default_gate_runner,
+    _default_nodes_for,
     format_retry_context,
     run_with_retry,
 )
+from omnix.semantic import SemanticNode, SourceLocation
 from omnix.spec import DependencyRef, Identity, Signature, Spec, TypeInfo
 
 # ---------- spec + result factories -----------------------------------------
@@ -176,6 +179,65 @@ def test_node_passes_on_attempt_1() -> None:
     only = report.successful_attempts[0]
     assert only.attempt_number == 1
     assert only.node_fqn == "com.x.Reverse.reverse"
+
+
+def test_default_gate_runner_adapts_retry_contract_to_gate_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = make_spec("com.x.Default.adapter")
+    seen: dict[str, Any] = {}
+
+    def fake_run(rebuild_attempt: RebuildAttempt, received: Spec, source_code: str | None):
+        seen["attempt"] = rebuild_attempt
+        seen["spec"] = received
+        seen["source_code"] = source_code
+        return make_pass_result()
+
+    import omnix.gates.runner as gates_runner
+
+    monkeypatch.setattr(gates_runner, "run", fake_run)
+
+    result = _default_gate_runner(
+        spec=spec,
+        response_text="class X {}",
+        target_language="java21",
+    )
+
+    assert result.passed is True
+    assert seen["spec"] is spec
+    assert seen["source_code"] == "class X {}"
+    assert seen["attempt"].response_text == "class X {}"
+    assert seen["attempt"].node_fqn == "com.x.Default.adapter"
+
+
+def test_default_nodes_for_generates_specs_from_graph_topology(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    node = SemanticNode(
+        fqn="com.x.Default.adapter",
+        kind="method",
+        signature="public String adapter(String)",
+        resolved_param_types=("java.lang.String",),
+        resolved_return_type="java.lang.String",
+        dependency_edges=(),
+        source_location=SourceLocation(file_path="Adapter.java", line=1),
+    )
+    spec = make_spec(node.fqn)
+    graph = object()
+
+    import omnix.orchestrator.dispatcher as dispatcher
+    import omnix.spec.generator as generator
+
+    monkeypatch.setattr(dispatcher, "_load_graph", lambda project_path: graph)
+    monkeypatch.setattr(
+        dispatcher,
+        "_collect_graph_inputs",
+        lambda loaded: ([node], [], {node.fqn: node}),
+    )
+    monkeypatch.setattr(generator, "generate", lambda n, g, target_language: spec)
+
+    assert _default_nodes_for(tmp_path) == (spec,)
 
 
 def test_node_passes_on_attempt_3() -> None:

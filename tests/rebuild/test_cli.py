@@ -20,7 +20,7 @@ from omnix.receipts.rebuild_receipt import (
     GATE_NAMES,
     GateResult,
     RebuildReceipt,
-    default_m2_deferred_gate_results,
+    default_skipped_gate_results,
     sign_rebuild,
 )
 
@@ -34,7 +34,7 @@ def _write_receipt_pair(
         GateResult(2, GATE_NAMES[2], "passed"),
         GateResult(3, GATE_NAMES[3], "passed"),
         GateResult(4, GATE_NAMES[4], "skipped"),
-    ) + default_m2_deferred_gate_results()
+    ) + default_skipped_gate_results()
     r = RebuildReceipt(
         project_id=project_id,
         node_fqn="org.example.Foo.bar",
@@ -89,8 +89,9 @@ def test_verify_rebuild_cli_passes_on_valid_receipt(_signed_receipt) -> None:
     assert payload["verified"] is True
     assert payload["node_fqn"] == "org.example.Foo.bar"
     assert payload["model"] == "claude-opus-4.7"
-    # Honesty gate visible in summary.
-    assert "deferred_m2" in payload["gates_summary"]
+    assert payload["gates_summary"] == (
+        "3-passed/0-failed/3-skipped/0-inconclusive/0-deferred_m3"
+    )
 
 
 def test_verify_rebuild_cli_fails_on_tampered_receipt(_signed_receipt) -> None:

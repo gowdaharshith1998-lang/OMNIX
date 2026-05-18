@@ -1,4 +1,4 @@
-"""OMNIX M1 rebuild pipeline — analyze ↔ spec gen ↔ LLM dispatch ↔
+"""OMNIX rebuild pipeline — analyze ↔ spec gen ↔ LLM dispatch ↔
 gates 1-4 ↔ signed RebuildReceipt emission.
 
 The package's public surface is intentionally small:
@@ -10,10 +10,9 @@ The package's public surface is intentionally small:
     omnix.rebuild.RebuildOutput
         Filesystem layout describing where a receipt + its sidecars live.
 
-Gate 5 (property-based) and gate 6 (behavioral equivalence) are M2 scope.
-Receipts emitted from M1 mark those two gates as `deferred_m2` — never
-`passed`, never `failed`. See `omnix.receipts.rebuild_receipt` for the
-honesty invariant enforcement.
+Gate 5 (property-based) and gate 6 (behavioral equivalence) are emitted as
+`skipped` with reason `gate_not_wired` until their M2 implementations land.
+See `omnix.receipts.rebuild_receipt` for the honesty invariant enforcement.
 """
 
 from omnix.rebuild.runner import RebuildOutput, run
