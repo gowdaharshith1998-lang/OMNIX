@@ -3,7 +3,7 @@
 Stub graph + stub dispatch + tmp project — exercises the full pipeline:
 analyze → spec gen → LLM dispatch → gates 1-4 → signed receipt emission.
 No real LLM call. No real GraphStore. Confirms file layout, honesty gate
-(receipts mark gates 5+6 as deferred_m2), and offline verifiability.
+(receipts mark not-yet-wired gates 5+6 as skipped), and offline verifiability.
 """
 
 from __future__ import annotations
@@ -112,7 +112,7 @@ def test_runner_emits_one_receipt_per_node(project) -> None:
     assert o.receipt_path.parent == o.signature_path.parent == o.rebuilt_source_path.parent
 
 
-def test_receipt_contains_all_six_gates_with_5_and_6_deferred(project) -> None:
+def test_receipt_contains_all_six_gates_with_5_and_6_skipped(project) -> None:
     project_root, graph, _ = project
     outputs = _run_with_graph(
         graph=graph,
@@ -128,9 +128,9 @@ def test_receipt_contains_all_six_gates_with_5_and_6_deferred(project) -> None:
 
     gate_status_by_number = {g.gate_number: g.status for g in receipt.gate_results}
     assert sorted(gate_status_by_number) == [1, 2, 3, 4, 5, 6]
-    # M1 honesty gate — load-bearing assertion.
-    assert gate_status_by_number[5] == "deferred_m2"
-    assert gate_status_by_number[6] == "deferred_m2"
+    # M2 schema-v2 honesty gate — not-yet-wired gates are skipped, not passed.
+    assert gate_status_by_number[5] == "skipped"
+    assert gate_status_by_number[6] == "skipped"
     # Gate 4 not yet wired mechanically — emitted as 'skipped'.
     assert gate_status_by_number[4] == "skipped"
 

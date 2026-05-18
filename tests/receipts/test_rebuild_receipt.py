@@ -1,7 +1,7 @@
 """Schema + signing tests for omnix.receipts.rebuild_receipt.
 
-Honesty-gate coverage: gates 5+6 marked anything other than 'deferred_m2'
-must raise. The whole receipt's epistemic value rides on this distinction.
+Honesty-gate coverage: v2 receipts must never emit legacy 'deferred_m2',
+and a passed gate must never carry exception details.
 """
 
 from __future__ import annotations
@@ -12,29 +12,29 @@ import pytest
 
 from omnix.receipts.rebuild_receipt import (
     GATE_NAMES,
-    GateResult,
     M2_DEFERRED_GATES,
-    RebuildReceipt,
     SCHEMA_VERSION,
-    default_m2_deferred_gate_results,
+    GateResult,
+    HonestyGateError,
+    RebuildReceipt,
+    default_skipped_gate_results,
     sha256_hex_text,
     sign_rebuild,
     verify_rebuild,
 )
-
 
 _VALID_TS = "2026-05-17T10:00:00.000Z"
 _HEX64 = "a" * 64
 
 
 def _valid_gates(*, gate3_passed: bool = True) -> tuple[GateResult, ...]:
-    """Build a full 6-gate tuple with M1-honest defaults."""
+    """Build a full 6-gate tuple with v2 skipped defaults."""
     return (
         GateResult(1, GATE_NAMES[1], "passed"),
         GateResult(2, GATE_NAMES[2], "passed"),
         GateResult(3, GATE_NAMES[3], "passed" if gate3_passed else "failed"),
         GateResult(4, GATE_NAMES[4], "skipped"),
-    ) + default_m2_deferred_gate_results()
+    ) + default_skipped_gate_results()
 
 
 def _valid_receipt(**overrides) -> RebuildReceipt:
@@ -95,7 +95,7 @@ def test_duplicate_gates_raises() -> None:
         GateResult(1, GATE_NAMES[1], "passed"),  # dup gate 1
         GateResult(3, GATE_NAMES[3], "passed"),
         GateResult(4, GATE_NAMES[4], "skipped"),
-    ) + default_m2_deferred_gate_results()
+    ) + default_skipped_gate_results()
     with pytest.raises(ValueError, match="exactly gates 1..6"):
         _valid_receipt(gate_results=dupes)
 
@@ -104,49 +104,39 @@ def test_duplicate_gates_raises() -> None:
 
 
 @pytest.mark.parametrize("gate_num", sorted(M2_DEFERRED_GATES))
-def test_m2_deferred_gate_marked_passed_raises(gate_num: int) -> None:
-    """The honesty invariant: gate 5 or 6 marked 'passed' must fail hard.
-
-    Conflating unverified with verified is exactly what the receipt is
-    designed to prevent.
-    """
-    with pytest.raises(ValueError, match=r"deferred_m2"):
-        GateResult(gate_num, GATE_NAMES[gate_num], "passed")
+def test_gate_5_and_6_accept_real_v2_statuses(gate_num: int) -> None:
+    assert GateResult(gate_num, GATE_NAMES[gate_num], "passed").status == "passed"
+    assert GateResult(gate_num, GATE_NAMES[gate_num], "failed").status == "failed"
 
 
-@pytest.mark.parametrize("gate_num", sorted(M2_DEFERRED_GATES))
-def test_m2_deferred_gate_marked_failed_raises(gate_num: int) -> None:
-    with pytest.raises(ValueError, match=r"deferred_m2"):
-        GateResult(gate_num, GATE_NAMES[gate_num], "failed")
+def test_gate_result_rejects_legacy_deferred_m2_status() -> None:
+    with pytest.raises(HonestyGateError, match=r"deferred_m2"):
+        GateResult(5, GATE_NAMES[5], "deferred_m2")  # type: ignore[arg-type]
 
 
-def test_default_m2_deferred_gate_results_are_canonical() -> None:
-    gates = default_m2_deferred_gate_results()
+def test_default_skipped_gate_results_are_canonical() -> None:
+    gates = default_skipped_gate_results()
     assert {g.gate_number for g in gates} == M2_DEFERRED_GATES
     for g in gates:
-        assert g.status == "deferred_m2"
-        assert "M2 scope" in g.details["reason"]
-        assert "NOT `passed`" in g.details["reason"]
+        assert g.status == "skipped"
+        assert g.details["reason"] == "gate_not_wired"
 
 
 def test_receipt_level_honesty_invariant_enforced() -> None:
     """Even if a caller bypassed GateResult's __post_init__ (e.g. via
     construction-time crafting), the RebuildReceipt's __post_init__ catches
     it. Defense in depth."""
-    # The only legit way to hit this branch is to bypass GateResult's
-    # validation entirely. We do it by mutating .__dict__ on a frozen
-    # dataclass via object.__setattr__.
-    bad = GateResult(5, GATE_NAMES[5], "deferred_m2")
-    object.__setattr__(bad, "status", "passed")
+    bad = GateResult(5, GATE_NAMES[5], "skipped")
+    object.__setattr__(bad, "status", "deferred_m2")
     gates = (
         GateResult(1, GATE_NAMES[1], "passed"),
         GateResult(2, GATE_NAMES[2], "passed"),
         GateResult(3, GATE_NAMES[3], "passed"),
         GateResult(4, GATE_NAMES[4], "skipped"),
         bad,
-        GateResult(6, GATE_NAMES[6], "deferred_m2"),
+        GateResult(6, GATE_NAMES[6], "skipped"),
     )
-    with pytest.raises(ValueError, match="honesty gate"):
+    with pytest.raises(HonestyGateError, match="deferred_m2"):
         _valid_receipt(gate_results=gates)
 
 

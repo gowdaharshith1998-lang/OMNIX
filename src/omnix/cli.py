@@ -107,8 +107,9 @@ def rebuild_cmd(
         <project>/.omnix/receipts/rebuilds/<timestamp>/<node_fqn>.sig
         <project>/.omnix/receipts/rebuilds/<timestamp>/<node_fqn>.java
 
-    Gates 5 (property-based) and 6 (behavioral equivalence) are M2 scope;
-    receipts mark them as `deferred_m2`, never `passed`.
+    Gates 5 (property-based) and 6 (behavioral equivalence) are emitted as
+    `skipped` with reason `gate_not_wired` until their M2 implementations
+    land; they are never silently counted as passes.
 
     Requires: `omnix analyze` has been run (graph DB exists), `omnix axiom
     keygen` has been run (project key exists), and an Anthropic API key

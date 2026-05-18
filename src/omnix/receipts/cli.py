@@ -196,13 +196,17 @@ def verify_rebuild_cmd(
     pubkey_path: Path | None,
     as_json: bool,
 ) -> None:
-    """Verify a signed M1 rebuild receipt offline (Ed25519).
+    """Verify a signed rebuild receipt offline (Ed25519).
 
-    Reports verified=true/false plus a summary of gate statuses. Gates
-    5+6 marked `deferred_m2` are surfaced explicitly — never silently
-    counted as passes.
+    Reports verified=true/false plus a summary of gate statuses. Legacy v1
+    receipts are migrated in memory for display while preserving their
+    original signed bytes for verification.
     """
-    from omnix.receipts.rebuild_receipt import RebuildReceipt, verify_rebuild
+    from omnix.receipts.rebuild_receipt import (
+        RebuildReceipt,
+        gates_summary,
+        verify_rebuild,
+    )
 
     receipt_p = receipt_path.expanduser().resolve(strict=True)
     sig_p = receipt_p.with_suffix(".sig")
@@ -256,13 +260,7 @@ def verify_rebuild_cmd(
     sig_b64 = sig_p.read_text(encoding="utf-8").strip()
     verified = verify_rebuild(receipt, sig_b64, pub)
 
-    statuses: dict[str, int] = {}
-    for g in receipt.gate_results:
-        statuses[g.status] = statuses.get(g.status, 0) + 1
-    gates_summary = "/".join(
-        f"{statuses.get(s, 0)}-{s}"
-        for s in ("passed", "failed", "skipped", "deferred_m2")
-    )
+    summary = gates_summary(receipt.gate_results)
 
     payload = {
         "verified": verified,
@@ -271,14 +269,14 @@ def verify_rebuild_cmd(
         "node_fqn": receipt.node_fqn,
         "model": receipt.model,
         "target_language": receipt.target_language,
-        "gates_summary": gates_summary,
+        "gates_summary": summary,
     }
     if as_json:
         click.echo(json.dumps(payload))
     else:
         line = "verified" if verified else "FAILED"
         click.echo(f"{line}: {receipt.node_fqn} ({receipt.model})")
-        click.echo(f"  gates_summary: {gates_summary}")
+        click.echo(f"  gates_summary: {summary}")
     raise SystemExit(0 if verified else 1)
 
 
