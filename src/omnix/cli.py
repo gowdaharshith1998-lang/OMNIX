@@ -86,6 +86,12 @@ def analyze(path: str, port: int, no_open: bool) -> None:
     help="fnmatch pattern applied to node FQN (e.g. '*StringUtils.reverse').",
 )
 @click.option(
+    "--module",
+    "module_fqn",
+    default=None,
+    help="Module/class FQN prefix to rebuild (e.g. 'org.apache.commons.lang.StringUtils').",
+)
+@click.option(
     "--model",
     default="claude-opus-4.7",
     show_default=True,
@@ -101,22 +107,19 @@ def rebuild_cmd(
     project_path: Path,
     target_language: str,
     node_filter: str | None,
+    module_fqn: str | None,
     model: str,
     skip_gate_5: bool,
 ) -> None:
     """Rebuild Java methods → target_language; emit signed RebuildReceipts.
 
     Walks <project>/.omnix/omnix.db, dispatches one LLM call per matched
-    node, runs gates 1-5 mechanically, signs the result with the project
+    node, runs gates 1-6 mechanically, signs the result with the project
     Ed25519 key, and writes:
 
         <project>/.omnix/receipts/rebuilds/<timestamp>/<node_fqn>.json
         <project>/.omnix/receipts/rebuilds/<timestamp>/<node_fqn>.sig
         <project>/.omnix/receipts/rebuilds/<timestamp>/<node_fqn>.java
-
-    Gate 6 (behavioral equivalence) is emitted as `skipped` with reason
-    `gate_not_wired` until its M2 implementation lands; it is never silently
-    counted as a pass.
 
     Requires: `omnix analyze` has been run (graph DB exists), `omnix axiom
     keygen` has been run (project key exists), and an Anthropic API key
@@ -124,10 +127,14 @@ def rebuild_cmd(
     """
     from omnix.rebuild import run as rebuild_run
 
+    if module_fqn and node_filter:
+        raise click.UsageError("--module cannot be combined with --node-filter")
+    effective_node_filter = f"{module_fqn}.*" if module_fqn else node_filter
+
     outputs = rebuild_run(
         project_path=project_path.resolve(),
         target_language=target_language,
-        node_filter=node_filter,
+        node_filter=effective_node_filter,
         model=model,
         skip_gate_5=skip_gate_5,
     )
