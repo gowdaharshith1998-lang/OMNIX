@@ -82,3 +82,32 @@ AUDIT_*.md
 tree_sitter_*/
 *.gexf
 r10_out.txt
+
+# === Repo hygiene sweep additions ===
+
+# Rust toolchain artifacts inside .omnix/
+.omnix/cargo-home/
+.omnix/codegraph-target/
+.omnix/codegraph-install/
+.omnix/zig/
+.omnix/zig-cache/
+.omnix/tools/
+
+# Fuzz-escape garbage (old find_bugs workspace)
+.omnix/verify_workspace/
+
+# Untracked working DBs at root
+/graph.gexf
+/omnix-axiom-v2.db
+/ruvector.db
+
+# Tool caches that should never be tracked
+.gitnexus/
+.hypothesis/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Frontend installs
+/node_modules/
+src/omnix/studio/frontend/node_modules/
