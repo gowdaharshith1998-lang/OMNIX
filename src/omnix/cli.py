@@ -91,25 +91,32 @@ def analyze(path: str, port: int, no_open: bool) -> None:
     show_default=True,
     help="LLM model identifier; routed to provider by name prefix.",
 )
+@click.option(
+    "--skip-gate-5",
+    is_flag=True,
+    default=False,
+    help="Skip gate 5 with reason skipped_by_user while preserving receipt verification.",
+)
 def rebuild_cmd(
     project_path: Path,
     target_language: str,
     node_filter: str | None,
     model: str,
+    skip_gate_5: bool,
 ) -> None:
     """Rebuild Java methods → target_language; emit signed RebuildReceipts.
 
     Walks <project>/.omnix/omnix.db, dispatches one LLM call per matched
-    node, runs gates 1-4 mechanically, signs the result with the project
+    node, runs gates 1-5 mechanically, signs the result with the project
     Ed25519 key, and writes:
 
         <project>/.omnix/receipts/rebuilds/<timestamp>/<node_fqn>.json
         <project>/.omnix/receipts/rebuilds/<timestamp>/<node_fqn>.sig
         <project>/.omnix/receipts/rebuilds/<timestamp>/<node_fqn>.java
 
-    Gates 5 (property-based) and 6 (behavioral equivalence) are emitted as
-    `skipped` with reason `gate_not_wired` until their M2 implementations
-    land; they are never silently counted as passes.
+    Gate 6 (behavioral equivalence) is emitted as `skipped` with reason
+    `gate_not_wired` until its M2 implementation lands; it is never silently
+    counted as a pass.
 
     Requires: `omnix analyze` has been run (graph DB exists), `omnix axiom
     keygen` has been run (project key exists), and an Anthropic API key
@@ -122,6 +129,7 @@ def rebuild_cmd(
         target_language=target_language,
         node_filter=node_filter,
         model=model,
+        skip_gate_5=skip_gate_5,
     )
     for o in outputs:
         click.echo(f"✓ {o.node_fqn} → {o.receipt_path}")

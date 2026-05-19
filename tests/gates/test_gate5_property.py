@@ -53,6 +53,19 @@ def test_identical_string_reverse_sources_pass_with_many_examples(
     assert err is None
 
 
+def test_evaluate_reports_pass_details_for_receipts(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OMNIX_GATE5_MAX_EXAMPLES", "25")
+    source = _string_utils_reverse_source(
+        "return str == null ? null : new StringBuilder(str).reverse().toString();"
+    )
+
+    result = gate5_property.evaluate(source, source, _node())
+
+    assert result.status == "passed"
+    assert result.error is None
+    assert result.details["examples_used"] >= 25
+
+
 def test_broken_string_reverse_reports_shrunk_diverging_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

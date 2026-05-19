@@ -6,7 +6,7 @@
 # operator's recording protocol.
 #
 # Pre-flight (do these OFF-camera before recording):
-#   - bash src/omnix/semantic/java/jvm/build.sh     # emitter JAR built
+#   - bash src/omnix/semantic/java/jvm/build.sh     # emitter + gate 5 harness JARs built
 #   - omnix axiom keygen --project .                # project Ed25519 key
 #   - register an Anthropic key in the Provider Fabric vault (BYOK UI)
 #
@@ -41,6 +41,7 @@ echo ""
 echo "Workspace: ${SCRATCH_DIR}"
 echo "Corpus:    Apache Commons Lang 2.6 StringUtils.reverse (Apache 2.0)"
 echo "Model:     ${MODEL}"
+echo "Gate 5:    property harness active when supported"
 echo ""
 
 cd "${SCRATCH_DIR}"

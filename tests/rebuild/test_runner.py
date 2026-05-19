@@ -18,7 +18,7 @@ from omnix.receipts.finding_keys import (
     ensure_project_key,
     project_pubkey_path,
 )
-from omnix.receipts.rebuild_receipt import RebuildReceipt, verify_rebuild
+from omnix.receipts.rebuild_receipt import RebuildReceipt, gates_summary, verify_rebuild
 from omnix.semantic import DependencyEdge, SemanticNode, SourceLocation
 
 
@@ -112,8 +112,25 @@ def test_runner_emits_one_receipt_per_node(project) -> None:
     assert o.receipt_path.parent == o.signature_path.parent == o.rebuilt_source_path.parent
 
 
-def test_receipt_contains_all_six_gates_with_5_and_6_skipped(project) -> None:
+def test_receipt_contains_all_six_gates_with_real_gate5_and_gate6_skipped(
+    project,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     project_root, graph, _ = project
+
+    from omnix.gates import gate5_property
+
+    def _passing_gate5(legacy_source: str, rebuilt_source: str, semantic_node: SemanticNode):
+        assert legacy_source == (project_root / "src" / "Foo.java").read_text(encoding="utf-8")
+        assert rebuilt_source == _good_rebuild_source()
+        assert semantic_node.fqn == "com.x.Foo.bar"
+        return gate5_property.Gate5Evaluation(
+            status="passed",
+            details={"status": "passed", "examples_used": 200},
+        )
+
+    monkeypatch.setattr(gate5_property, "evaluate", _passing_gate5)
+
     outputs = _run_with_graph(
         graph=graph,
         project_path=project_root,
@@ -128,11 +145,85 @@ def test_receipt_contains_all_six_gates_with_5_and_6_skipped(project) -> None:
 
     gate_status_by_number = {g.gate_number: g.status for g in receipt.gate_results}
     assert sorted(gate_status_by_number) == [1, 2, 3, 4, 5, 6]
-    # M2 schema-v2 honesty gate — not-yet-wired gates are skipped, not passed.
-    assert gate_status_by_number[5] == "skipped"
+    assert gate_status_by_number[5] == "passed"
     assert gate_status_by_number[6] == "skipped"
     # Gate 4 not yet wired mechanically — emitted as 'skipped'.
     assert gate_status_by_number[4] == "skipped"
+
+
+def test_receipt_records_gate5_inconclusive_in_summary(
+    project,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from omnix.gates import gate5_property
+    from omnix.gates.result import GateError
+
+    project_root, graph, _ = project
+
+    def _inconclusive_gate5(
+        legacy_source: str,
+        rebuilt_source: str,
+        semantic_node: SemanticNode,
+    ) -> gate5_property.Gate5Evaluation:
+        err = GateError(
+            gate_number=5,
+            gate_name="property_based",
+            message="under-tested",
+            details={
+                "status": "inconclusive",
+                "reason": "high_assume_rejection_rate",
+                "examples_tried": 200,
+                "examples_used": 50,
+            },
+        )
+        return gate5_property.Gate5Evaluation(
+            status="inconclusive",
+            details=dict(err.details),
+            error=err,
+        )
+
+    monkeypatch.setattr(gate5_property, "evaluate", _inconclusive_gate5)
+
+    outputs = _run_with_graph(
+        graph=graph,
+        project_path=project_root,
+        target_language="java21",
+        node_filter=None,
+        dispatch_fn=lambda prompt, model="claude-opus-4.7": _good_rebuild_source(),
+        model="claude-opus-4.7",
+        output_root=None,
+    )
+    receipt = RebuildReceipt.from_dict(
+        json.loads(outputs[0].receipt_path.read_text(encoding="utf-8"))
+    )
+    gate5 = next(g for g in receipt.gate_results if g.gate_number == 5)
+    assert gate5.status == "inconclusive"
+    assert gate5.details["examples_used"] == 50
+    assert gates_summary(receipt.gate_results) == (
+        "3-passed/0-failed/2-skipped/1-inconclusive/0-deferred_m3"
+    )
+
+
+def test_skip_gate5_keeps_receipt_verifiable_with_user_skip_reason(project) -> None:
+    project_root, graph, pub_path = project
+    outputs = _run_with_graph(
+        graph=graph,
+        project_path=project_root,
+        target_language="java21",
+        node_filter=None,
+        dispatch_fn=lambda prompt, model="claude-opus-4.7": _good_rebuild_source(),
+        model="claude-opus-4.7",
+        output_root=None,
+        skip_gate_5=True,
+    )
+    receipt = RebuildReceipt.from_dict(
+        json.loads(outputs[0].receipt_path.read_text(encoding="utf-8"))
+    )
+    gate5 = next(g for g in receipt.gate_results if g.gate_number == 5)
+    assert gate5.status == "skipped"
+    assert gate5.details["reason"] == "skipped_by_user"
+    sig_b64 = outputs[0].signature_path.read_text(encoding="utf-8").strip()
+    assert verify_rebuild(receipt, sig_b64, pub_path) is True
 
 
 def test_receipt_verifies_offline(project) -> None:

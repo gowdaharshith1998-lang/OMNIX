@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+import omnix.rebuild
+from omnix.cli import main
 from omnix.receipts.cli import axiom_group
 from omnix.receipts.finding_keys import ensure_project_key, project_pubkey_path
 from omnix.receipts.finding_receipt import compute_project_id
@@ -170,3 +172,28 @@ def test_verify_rebuild_cli_malformed_receipt_reports_clearly(
     payload = json.loads(result.output)
     assert payload["verified"] is False
     assert payload["reason"] == "malformed_receipt"
+
+
+def test_rebuild_cli_passes_skip_gate5_flag_to_runner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    captured: dict[str, object] = {}
+
+    def _fake_rebuild_run(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(omnix.rebuild, "run", _fake_rebuild_run)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        ["rebuild", str(project_root), "--skip-gate-5"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["project_path"] == project_root.resolve()
+    assert captured["skip_gate_5"] is True
