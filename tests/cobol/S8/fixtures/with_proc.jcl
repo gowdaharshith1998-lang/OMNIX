@@ -1,0 +1,2 @@
+//P1 PROC
+//S1 EXEC PGM=A

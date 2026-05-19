@@ -162,3 +162,13 @@ The audit trail is *compliance-aligned infrastructure that produces evidence sui
 ## License
 
 MIT
+
+## COBOL substrate (M0)
+
+OMNIX now includes a COBOL/JCL substrate:
+- COBOL ingest path (`.cob`, `.cbl`, `.cobol`, `.cpy`) with copybook resolution hooks
+- JCL ingest path (`.jcl`, `.prc`) with `EXEC PGM=` invoke edges
+- COBOL runtime helpers (EBCDIC detection, PIC/COMP-3 codec)
+- COBOL capture and spec generation commands:
+  - `omnix cobol capture <program> --fixtures <dir>`
+  - `omnix cobol spec-gen <program>`

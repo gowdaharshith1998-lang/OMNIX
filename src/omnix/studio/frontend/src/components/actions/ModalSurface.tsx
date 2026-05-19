@@ -1,11 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { chunkText } from "@/lib/streamingChunker";
-import { useActionDispatchStore, type DecisionActionModal } from "@/state/actionDispatchStore";
+import {
+  useActionDispatchStore,
+  type ActionDispatchState,
+  type DecisionActionModal,
+} from "@/state/actionDispatchStore";
 import { ResponseBlocks, ToolSteps } from "./ResponseBlocks";
 
 export function ModalSurface({ modal }: { modal: DecisionActionModal }) {
-  const closeModal = useActionDispatchStore((s) => s.closeModal);
-  const retryModal = useActionDispatchStore((s) => s.retryModal);
+  const closeModal = useActionDispatchStore((s: ActionDispatchState) => s.closeModal);
+  const retryModal = useActionDispatchStore((s: ActionDispatchState) => s.retryModal);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [visible, setVisible] = useState("");
   const errorMessage = modal.result?.errorMessage || modal.error || "Action failed.";
@@ -29,7 +33,7 @@ export function ModalSurface({ modal }: { modal: DecisionActionModal }) {
     return () => controller.abort();
   }, [modal.result, modal.status]);
 
-  function trapFocus(event: React.KeyboardEvent<HTMLDivElement>) {
+  function trapFocus(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
       closeModal();

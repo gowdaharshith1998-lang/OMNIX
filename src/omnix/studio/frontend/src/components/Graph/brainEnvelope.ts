@@ -101,12 +101,12 @@ function owningCluster(
   cx: number,
   cy: number,
   clusters: Cluster[],
-): { cl: Cluster; d: number } | null {
-  let best: { cl: Cluster; d: number } | null = null;
+): { cl: Cluster; d2: number } | null {
+  let best: { cl: Cluster; d2: number } | null = null;
   for (const cl of clusters) {
-    const d = Math.sqrt(dist2(cx, cy, cl.cx, cl.cy));
-    if (d <= cl.radius && (!best || d < best.d)) {
-      best = { cl, d };
+    const d2 = dist2(cx, cy, cl.cx, cl.cy);
+    if (d2 <= cl.radius * cl.radius && (!best || d2 < best.d2)) {
+      best = { cl, d2 };
     }
   }
   return best;
@@ -125,7 +125,16 @@ export function generateBrainEnvelope(spec: EnvelopeSpec): Hex[] {
   const originX = spec.envelopeCx - (approxCols * Math.sqrt(3) * size) / 2;
   const originY = spec.envelopeCy - (approxRows * 1.5 * size) / 2;
 
-  type Cell = { col: number; row: number; cx: number; cy: number; key: string };
+  type Cell = {
+    col: number;
+    row: number;
+    cx: number;
+    cy: number;
+    key: string;
+    cluster?: Cluster;
+    clusterId?: string;
+    isData: boolean;
+  };
   const inside: Cell[] = [];
   const colMin = -2;
   const colMax = approxCols + 2;
@@ -136,20 +145,16 @@ export function generateBrainEnvelope(spec: EnvelopeSpec): Hex[] {
     for (let col = colMin; col <= colMax; col++) {
       const { cx, cy } = hexCenter(col, row, size, originX, originY);
       if (!insideEllipse(cx, cy, spec.envelopeCx, spec.envelopeCy, spec.envelopeRx, spec.envelopeRy)) continue;
-      inside.push({ col, row, cx, cy, key: hexKey(col, row) });
+      inside.push({ col, row, cx, cy, key: hexKey(col, row), isData: false });
     }
   }
 
-  const isData = new Map<string, boolean>();
-  const clusterOf = new Map<string, string | undefined>();
-
   for (const c of inside) {
     const own = owningCluster(c.cx, c.cy, spec.clusters);
-    clusterOf.set(c.key, own?.cl.id);
     if (own) {
-      isData.set(c.key, rng() < own.cl.density);
-    } else {
-      isData.set(c.key, false);
+      c.cluster = own.cl;
+      c.clusterId = own.cl.id;
+      c.isData = rng() < own.cl.density;
     }
   }
 
@@ -157,17 +162,15 @@ export function generateBrainEnvelope(spec: EnvelopeSpec): Hex[] {
     let d = 0;
     let f = 0;
     for (const c of inside) {
-      if (isData.get(c.key)) d++;
+      if (c.isData) d++;
       else f++;
     }
     return { d, f };
   };
 
   const farFromCluster = (c: Cell) => {
-    const clId = clusterOf.get(c.key);
-    const cl = spec.clusters.find((k) => k.id === clId);
-    const cx = cl ? cl.cx : spec.envelopeCx;
-    const cy = cl ? cl.cy : spec.envelopeCy;
+    const cx = c.cluster ? c.cluster.cx : spec.envelopeCx;
+    const cy = c.cluster ? c.cluster.cy : spec.envelopeCy;
     return dist2(c.cx, c.cy, cx, cy);
   };
 
@@ -179,20 +182,17 @@ export function generateBrainEnvelope(spec: EnvelopeSpec): Hex[] {
     if (r >= ratioMin && r <= ratioMax) return;
     if (r < ratioMin) {
       const dataSorted = inside
-        .filter((c) => isData.get(c.key))
+        .filter((c) => c.isData)
         .sort((a, b) => farFromCluster(b) - farFromCluster(a));
       const need = Math.min(dataSorted.length, Math.ceil(D * ratioMin - F));
-      for (let i = 0; i < need; i++) isData.set(dataSorted[i].key, false);
+      for (let i = 0; i < need; i++) dataSorted[i].isData = false;
     } else if (r > ratioMax) {
       const fillerNear = inside
-        .filter((c) => !isData.get(c.key) && clusterOf.get(c.key))
-        .map((c) => {
-          const cl = spec.clusters.find((k) => k.id === clusterOf.get(c.key))!;
-          return { c, near: dist2(c.cx, c.cy, cl.cx, cl.cy) };
-        })
+        .filter((c) => !c.isData && c.cluster)
+        .map((c) => ({ c, near: dist2(c.cx, c.cy, c.cluster!.cx, c.cluster!.cy) }))
         .sort((a, b) => a.near - b.near);
       const need = Math.min(fillerNear.length, Math.floor(F - D * ratioMax));
-      for (let i = 0; i < need; i++) isData.set(fillerNear[i].c.key, true);
+      for (let i = 0; i < need; i++) fillerNear[i].c.isData = true;
     }
   };
 
@@ -202,16 +202,18 @@ export function generateBrainEnvelope(spec: EnvelopeSpec): Hex[] {
     id: c.key,
     cx: c.cx,
     cy: c.cy,
-    isData: !!isData.get(c.key),
-    clusterId: clusterOf.get(c.key),
+    isData: c.isData,
+    clusterId: c.clusterId,
     neighbors: [],
   }));
 
-  const hexMap = new Map(hexes.map((h) => [h.id, h]));
-  for (const h of hexes) {
-    const [col, row] = h.id.split('_').map(Number);
+  const hexMap = new Map<string, Hex>();
+  for (const h of hexes) hexMap.set(h.id, h);
+  for (let i = 0; i < hexes.length; i++) {
+    const h = hexes[i];
+    const c = inside[i];
     const nbrs: string[] = [];
-    for (const [dc, dr] of neighborOffsets(col, row)) {
+    for (const [dc, dr] of neighborOffsets(c.col, c.row)) {
       const nk = hexKey(dc, dr);
       if (hexMap.has(nk)) nbrs.push(nk);
     }

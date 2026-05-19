@@ -1,0 +1,8 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TRI.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01 W-VAR PIC 9(4).
+       PROCEDURE DIVISION.
+           MOVE 1 TO W-VAR.
+           STOP RUN.

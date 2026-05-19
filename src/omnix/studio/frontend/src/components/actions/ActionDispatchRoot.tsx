@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useActionDispatchStore } from "@/state/actionDispatchStore";
+import { useActionDispatchStore, type ActionDispatchState } from "@/state/actionDispatchStore";
 import { ModalSurface } from "./ModalSurface";
 
 export function ActionDispatchRoot({
@@ -7,7 +7,7 @@ export function ActionDispatchRoot({
 }: {
   onToast?: (message: string, durationMs?: number) => void;
 }) {
-  const activeModal = useActionDispatchStore((s) => s.activeModal);
+  const activeModal = useActionDispatchStore((s: ActionDispatchState) => s.activeModal);
 
   useEffect(() => {
     const handler = (event: Event) => {

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import time
 from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -38,12 +40,18 @@ class GraphStore:
         self.db_path = db_path
         self._conn = sqlite3.connect(db_path, isolation_level="DEFERRED", check_same_thread=False)  # noqa: E501
         self._conn.row_factory = sqlite3.Row
+        self._lock = threading.RLock()
         self._open_batch: bool = False
         self._ensure_schema()
         jm = self._conn.execute("PRAGMA journal_mode").fetchone()
         if not jm or (jm[0] or "").upper() != "WAL":
             self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
+
+    @contextmanager
+    def locked_connection(self) -> Iterator[sqlite3.Connection]:
+        with self._lock:
+            yield self._conn
 
     def _ensure_schema(self) -> None:
         self._conn.executescript(
@@ -110,21 +118,23 @@ class GraphStore:
         self._conn.commit()
 
     def reset(self) -> None:
-        self._conn.executescript(
-            "DELETE FROM skip_summary WHERE 1;"
-            "DELETE FROM edges; DELETE FROM nodes;"
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.executescript(
+                "DELETE FROM skip_summary WHERE 1;"
+                "DELETE FROM edges; DELETE FROM nodes;"
+            )
+            self._conn.commit()
 
     def get_meta(self, key: str) -> str | None:
         r = self._conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
         return str(r[0]) if r else None
 
     def set_meta(self, key: str, value: str) -> None:
-        self._conn.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
-            (key, value),
-        )
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                (key, value),
+            )
 
     def get_file_hash_row(self, file_path: str) -> tuple[str, float, float, int, int] | None:
         r = self._conn.execute(
@@ -151,44 +161,49 @@ class GraphStore:
         node_count: int,
         edge_count: int,
     ) -> None:
-        t = time.time()
-        self._conn.execute(
-            """
-            INSERT OR REPLACE INTO file_hashes
-            (file_path, sha256, last_modified, last_parsed_at, node_count, edge_count)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (file_path, sha256, last_modified, t, node_count, edge_count),
-        )
+        with self._lock:
+            t = time.time()
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO file_hashes
+                (file_path, sha256, last_modified, last_parsed_at, node_count, edge_count)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (file_path, sha256, last_modified, t, node_count, edge_count),
+            )
 
     def delete_file_hash(self, file_path: str) -> None:
-        self._conn.execute("DELETE FROM file_hashes WHERE file_path = ?", (file_path,))
+        with self._lock:
+            self._conn.execute("DELETE FROM file_hashes WHERE file_path = ?", (file_path,))
 
     def all_file_hash_paths(self) -> list[str]:
         cur = self._conn.execute("SELECT file_path FROM file_hashes")
         return [str(x[0]) for x in cur.fetchall()]
 
     def clear_file_hashes(self) -> None:
-        self._conn.execute("DELETE FROM file_hashes")
+        with self._lock:
+            self._conn.execute("DELETE FROM file_hashes")
 
     def delete_graph_rows_for_file_path(self, file_path: str) -> None:
         """Remove nodes (and their edges) whose ``file_path`` is *file_path*."""
-        c = self._conn
-        c.execute("DELETE FROM edges WHERE source_id IN (SELECT id FROM nodes WHERE file_path = ?) OR target_id IN (SELECT id FROM nodes WHERE file_path = ?)", (file_path, file_path))  # noqa: E501
-        c.execute("DELETE FROM nodes WHERE file_path = ?", (file_path,))
+        with self._lock:
+            c = self._conn
+            c.execute("DELETE FROM edges WHERE source_id IN (SELECT id FROM nodes WHERE file_path = ?) OR target_id IN (SELECT id FROM nodes WHERE file_path = ?)", (file_path, file_path))  # noqa: E501
+            c.execute("DELETE FROM nodes WHERE file_path = ?", (file_path,))
 
     def full_invalidate_ingest_cache(
         self, *, also_clear_evolution_grammar: bool = True
     ) -> None:
         """Wipe graph + per-file cache + skip summary. Optionally reset grammar_profile aggregates."""
-        self._conn.executescript(
-            "DELETE FROM skip_summary WHERE 1;"
-            "DELETE FROM file_hashes WHERE 1;"
-            "DELETE FROM edges; DELETE FROM nodes;"
-        )
-        if also_clear_evolution_grammar:
-            self._conn.execute("DELETE FROM grammar_profile")
-        self._conn.commit()
+        with self._lock:
+            self._conn.executescript(
+                "DELETE FROM skip_summary WHERE 1;"
+                "DELETE FROM file_hashes WHERE 1;"
+                "DELETE FROM edges; DELETE FROM nodes;"
+            )
+            if also_clear_evolution_grammar:
+                self._conn.execute("DELETE FROM grammar_profile")
+            self._conn.commit()
 
     def sqlite_connection(self) -> sqlite3.Connection:
         """Shared connection (graph + evolution tables in one file)."""
@@ -223,25 +238,26 @@ class GraphStore:
         portability + greppability. Schema migration is additive and
         idempotent (`CREATE TABLE IF NOT EXISTS` in `_ensure_schema`).
         """
-        cur = self._conn.execute(
-            """
-            INSERT INTO rebuild_attempts (
-                node_fqn, spec_hash, prompt_template_version, prompt_text_hash,
-                response_text, timestamp, model, attempt_number
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                node_fqn,
-                spec_hash,
-                prompt_template_version,
-                prompt_text_hash,
-                response_text,
-                timestamp,
-                model,
-                attempt_number,
-            ),
-        )
-        self._conn.commit()
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                INSERT INTO rebuild_attempts (
+                    node_fqn, spec_hash, prompt_template_version, prompt_text_hash,
+                    response_text, timestamp, model, attempt_number
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    node_fqn,
+                    spec_hash,
+                    prompt_template_version,
+                    prompt_text_hash,
+                    response_text,
+                    timestamp,
+                    model,
+                    attempt_number,
+                ),
+            )
+            self._conn.commit()
         return int(cur.lastrowid or 0)
 
     def get_rebuild_attempts(
@@ -277,15 +293,25 @@ class GraphStore:
         complexity: int = 0,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        meta_json = json.dumps(metadata) if metadata else None
-        self._conn.execute(
-            """
-            INSERT OR REPLACE INTO nodes
-            (id, name, type, file_path, start_line, end_line, complexity, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (id, name, type, file_path, start_line, end_line, complexity, meta_json),
-        )
+        with self._lock:
+            meta_json = json.dumps(metadata) if metadata else None
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO nodes
+                (id, name, type, file_path, start_line, end_line, complexity, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    id,
+                    name,
+                    type,
+                    file_path,
+                    start_line,
+                    end_line,
+                    complexity,
+                    meta_json,
+                ),
+            )
 
     def add_edge(
         self,
@@ -294,26 +320,27 @@ class GraphStore:
         relationship: str,
         metadata: dict[str, Any] | None = None,
     ) -> bool:
-        meta_json = json.dumps(metadata, sort_keys=True) if metadata else None
-        cur = self._conn.execute(
-            """
-            SELECT 1 FROM edges
-            WHERE source_id = ? AND target_id = ? AND relationship = ?
-              AND IFNULL(metadata, '') = IFNULL(?, '')
-            LIMIT 1
-            """,
-            (source_id, target_id, relationship, meta_json),
-        )
-        if cur.fetchone():
-            return False
-        self._conn.execute(
-            """
-            INSERT INTO edges (source_id, target_id, relationship, metadata)
-            VALUES (?, ?, ?, ?)
-            """,
-            (source_id, target_id, relationship, meta_json),
-        )
-        return True
+        with self._lock:
+            meta_json = json.dumps(metadata, sort_keys=True) if metadata else None
+            cur = self._conn.execute(
+                """
+                SELECT 1 FROM edges
+                WHERE source_id = ? AND target_id = ? AND relationship = ?
+                  AND IFNULL(metadata, '') = IFNULL(?, '')
+                LIMIT 1
+                """,
+                (source_id, target_id, relationship, meta_json),
+            )
+            if cur.fetchone():
+                return False
+            self._conn.execute(
+                """
+                INSERT INTO edges (source_id, target_id, relationship, metadata)
+                VALUES (?, ?, ?, ?)
+                """,
+                (source_id, target_id, relationship, meta_json),
+            )
+            return True
 
     def iter_all_nodes(self) -> Iterator[NodeRow]:
         for r in self._conn.execute("SELECT * FROM nodes"):
@@ -389,33 +416,37 @@ class GraphStore:
         return self.edge_count()
 
     def commit(self) -> None:
-        self._conn.commit()
+        with self._lock:
+            self._conn.commit()
 
     def begin_batch(self) -> None:
         """Start a single DEFERRED transaction (batch of graph writes)."""
-        if not self._open_batch:
-            # End any implicit transaction from standalone operations (e.g. set_file_hash
-            # on an empty/skip path) so BEGIN does not nest.
-            self._conn.commit()
-            self._conn.execute("BEGIN")
-            self._open_batch = True
+        with self._lock:
+            if not self._open_batch:
+                # End any implicit transaction from standalone operations (e.g. set_file_hash
+                # on an empty/skip path) so BEGIN does not nest.
+                self._conn.commit()
+                self._conn.execute("BEGIN")
+                self._open_batch = True
 
     def commit_batch(self) -> None:
         """Commit the current batch transaction (no-op if no batch open)."""
-        if not self._open_batch:
-            return
-        try:
-            self._conn.commit()
-        except (OSError, ValueError):
-            self._conn.rollback()
+        with self._lock:
+            if not self._open_batch:
+                return
+            try:
+                self._conn.commit()
+            except (OSError, ValueError):
+                self._conn.rollback()
+                self._open_batch = False
+                raise
             self._open_batch = False
-            raise
-        self._open_batch = False
 
     def rollback_batch(self) -> None:
-        if self._open_batch:
-            self._conn.rollback()
-            self._open_batch = False
+        with self._lock:
+            if self._open_batch:
+                self._conn.rollback()
+                self._open_batch = False
 
     def import_graph_snapshot(
         self, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]
@@ -424,63 +455,67 @@ class GraphStore:
         Apply nodes and edges from a worker :class:`MemoryGraphStore` dump.
         Caller must hold an open batch (``begin_batch``) for transactional grouping.
         """
-        if not nodes and not edges:
-            return
-        nparams = [
-            (
-                r["id"],
-                r["name"],
-                r["type"],
-                r.get("file_path"),
-                r.get("start_line"),
-                r.get("end_line"),
-                r.get("complexity", 0),
-                json.dumps(r["metadata"]) if r.get("metadata") else None,
-            )
-            for r in nodes
-        ]
-        eparams = [
-            (
-                e["source_id"],
-                e["target_id"],
-                e["relationship"],
-                json.dumps(e["metadata"], sort_keys=True) if e.get("metadata") else None,
-            )
-            for e in edges
-        ]
-        if nparams:
-            self._conn.executemany(
-                """
-                INSERT OR REPLACE INTO nodes
-                (id, name, type, file_path, start_line, end_line, complexity, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                nparams,
-            )
-        if eparams:
-            self._conn.executemany(
-                """
-                INSERT INTO edges (source_id, target_id, relationship, metadata)
-                VALUES (?, ?, ?, ?)
-                """,
-                eparams,
-            )
+        with self._lock:
+            if not nodes and not edges:
+                return
+            nparams = [
+                (
+                    r["id"],
+                    r["name"],
+                    r["type"],
+                    r.get("file_path"),
+                    r.get("start_line"),
+                    r.get("end_line"),
+                    r.get("complexity", 0),
+                    json.dumps(r["metadata"]) if r.get("metadata") else None,
+                )
+                for r in nodes
+            ]
+            eparams = [
+                (
+                    e["source_id"],
+                    e["target_id"],
+                    e["relationship"],
+                    json.dumps(e["metadata"], sort_keys=True)
+                    if e.get("metadata")
+                    else None,
+                )
+                for e in edges
+            ]
+            if nparams:
+                self._conn.executemany(
+                    """
+                    INSERT OR REPLACE INTO nodes
+                    (id, name, type, file_path, start_line, end_line, complexity, metadata)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    nparams,
+                )
+            if eparams:
+                self._conn.executemany(
+                    """
+                    INSERT INTO edges (source_id, target_id, relationship, metadata)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    eparams,
+                )
 
     def replace_skip_summary(
         self, rows: list[tuple[str, int, int, str, str | None]]
     ) -> None:
         """Replace ``skip_summary`` contents (analyze ingest; one run per DB)."""
-        cur = self._conn.cursor()
-        cur.execute("DELETE FROM skip_summary")
-        if rows:
-            cur.executemany(
-                """
-                INSERT INTO skip_summary(extension, files, loc, reason, suggested_install)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                rows,
-            )
-        self._conn.commit()
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute("DELETE FROM skip_summary")
+            if rows:
+                cur.executemany(
+                    """
+                    INSERT INTO skip_summary(extension, files, loc, reason, suggested_install)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    rows,
+                )
+            self._conn.commit()
 
 
 def _row_to_node(r: sqlite3.Row) -> NodeRow:

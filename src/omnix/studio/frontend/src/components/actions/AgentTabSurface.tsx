@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { chunkText } from "@/lib/streamingChunker";
-import { useActionDispatchStore, type AgentActionTab } from "@/state/actionDispatchStore";
+import {
+  useActionDispatchStore,
+  type ActionDispatchState,
+  type AgentActionTab,
+} from "@/state/actionDispatchStore";
 import { ResponseBlocks, ToolSteps } from "./ResponseBlocks";
 
 export function AgentTabSurface({
@@ -10,11 +14,11 @@ export function AgentTabSurface({
   tab?: AgentActionTab;
   tabId?: `agent:${string}`;
 }) {
-  const storeTab = useActionDispatchStore((s) =>
+  const storeTab = useActionDispatchStore((s: ActionDispatchState) =>
     tabId ? s.agentTabs.find((item) => item.id === tabId) : undefined
   );
   const activeTab = tab ?? storeTab;
-  const retry = useActionDispatchStore((s) => s.retryAgentTab);
+  const retry = useActionDispatchStore((s: ActionDispatchState) => s.retryAgentTab);
   const [visible, setVisible] = useState("");
   const errorMessage = activeTab?.result?.errorMessage || activeTab?.error || "Action failed.";
   const errorClass = activeTab?.result?.errorClass || activeTab?.result?.error;

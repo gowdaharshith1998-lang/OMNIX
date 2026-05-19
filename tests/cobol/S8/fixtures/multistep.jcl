@@ -1,0 +1,3 @@
+//JOB2 JOB
+//S1 EXEC PGM=A
+//S2 EXEC PGM=B

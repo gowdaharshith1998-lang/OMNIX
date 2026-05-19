@@ -276,6 +276,7 @@ def ingest_one_path_parse_only(
 
     ext_key = full.suffix.lower() or "(no extension)"
     d = detect_for_path(full)
+    custom_no_grammar = d.skip_reason == "no_grammar" and d.grammar_name in {"cobol", "jcl"}
     if d.skip_reason == "unknown_extension":
         return {
             "order_idx": order_idx,
@@ -287,7 +288,7 @@ def ingest_one_path_parse_only(
             "st_size": st.st_size,
             "evolution_queue": full.suffix or "?",
         }
-    if d.skip_reason == "no_grammar":
+    if d.skip_reason == "no_grammar" and not custom_no_grammar:
         return {
             "order_idx": order_idx,
             "status": "skip",
@@ -298,7 +299,7 @@ def ingest_one_path_parse_only(
             "st_size": st.st_size,
             "grammar_suggest": d.grammar_name,
         }
-    if not d.language or not d.inferred_lang:
+    if not d.inferred_lang:
         return {
             "order_idx": order_idx,
             "status": "skip",
@@ -333,7 +334,13 @@ def ingest_one_path_parse_only(
         }
 
     try:
-        text = full.read_text(encoding="utf-8", errors="replace")
+        raw = full.read_bytes()
+        if d.inferred_lang == "cobol":
+            from omnix.runtime.cobol.ebcdic import normalize_ebcdic
+
+            text = normalize_ebcdic(raw)
+        else:
+            text = raw.decode("utf-8", errors="replace")
     except OSError as e:
         return {
             "order_idx": order_idx,
@@ -513,7 +520,8 @@ def _apply_result_row(
         text = r["text"]
         full = root / rel
         d = detect_for_path(full)
-        if not d.language:
+        custom_no_language = d.grammar_name in {"cobol", "jcl"}
+        if not d.language and not custom_no_language:
             if tot is not None:
                 tot.errors += 1
             return

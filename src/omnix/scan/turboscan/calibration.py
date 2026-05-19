@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import cProfile
+import inspect
 import json
 import logging
 import os
@@ -15,6 +16,16 @@ from typing import Any
 from hypothesis.internal.conjecture.data import ConjectureData
 
 _LOG = logging.getLogger("omnix.scan.turboscan.calibration")
+
+if "max_length" in inspect.signature(ConjectureData).parameters:
+    _conjecture_data_init = ConjectureData.__init__
+
+    def _compat_conjecture_data_init(self: ConjectureData, *args: Any, **kwargs: Any) -> None:
+        if not args and "random" in kwargs and "max_length" not in kwargs:
+            kwargs = {"max_length": 8192, "prefix": b"", **kwargs}
+        _conjecture_data_init(self, *args, **kwargs)
+
+    ConjectureData.__init__ = _compat_conjecture_data_init  # type: ignore[method-assign]
 
 
 def _strategy_file(repo_root: Path) -> Path:
@@ -47,7 +58,14 @@ def _bench_draws(name: str, strategy: Any, iterations: int, rng_seed: int = 0) -
     rnd = Random(rng_seed)
     for i in range(iterations):
         rnd.seed(rng_seed + i)
-        strategy.do_draw(ConjectureData(random=rnd))
+        strategy.do_draw(_conjecture_data(rnd))
+
+
+def _conjecture_data(rnd: Any) -> ConjectureData:
+    try:
+        return ConjectureData(random=rnd)
+    except TypeError:
+        return ConjectureData(max_length=8192, prefix=b"", random=rnd)
 
 
 def _run_benchmark_profile(

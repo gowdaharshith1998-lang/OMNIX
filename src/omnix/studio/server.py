@@ -43,6 +43,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from omnix.fabric.dispatch_tools import dispatch_with_tools
 from omnix.find_bugs.receipt_emitter import verify_scan_directory
 from omnix.graph.store import GraphStore, NodeRow
 from omnix.omnix_version import __version__
@@ -58,8 +59,10 @@ from omnix.parser.grammar_status_query import (
     utc_now_iso,
 )
 from omnix.parser.ingest_dispatch import ingest_unified_codebase
+from omnix.providers.client import get_provider_client
 from omnix.providers.detect import identify_provider
 from omnix.providers.registry import PROVIDERS
+from omnix.providers.tools import ToolContext
 from omnix.receipts import provider_vault
 from omnix.receipts.finding_receipt import compute_project_id
 from omnix.studio.bugs_scan import run_scan_for_workspace
@@ -130,6 +133,55 @@ class FilePutBody(BaseModel):
 
 class VerifyReceiptBody(BaseModel):
     receipt_path: str = Field(min_length=1)
+
+
+class ActionDispatchBody(BaseModel):
+    descriptor_id: str = Field(min_length=1)
+    prompt: str = Field(min_length=1)
+    provider: str = Field(min_length=1)
+    model: str | None = None
+    system_prompt: str | None = None
+    project_id: str | None = None
+    workspace_id: str | None = None
+    tools: list[str] | None = None
+    tool_args: dict[str, Any] | None = None
+
+
+def _log_action_dispatch_audit(row: dict[str, Any]) -> None:
+    home = Path.home() / ".omnix" / "audit"
+    home.mkdir(parents=True, exist_ok=True)
+    log_path = home / "action_dispatches.log"
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row, sort_keys=True) + "\n")
+
+
+def _build_action_response(
+    body: ActionDispatchBody,
+    fallback_provider: str,
+    raw: dict[str, Any],
+    tool_steps: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
+    return {
+        "ok": bool(raw.get("ok")),
+        "text": str(raw.get("content", "")),
+        "provider": str(raw.get("provider", fallback_provider)),
+        "model": str(raw.get("model", body.model or "")),
+        "tokens_in": int(usage.get("tokens_in", 0)),
+        "tokens_out": int(usage.get("tokens_out", 0)),
+        "latency_ms": int(raw.get("latency_ms", 0) or 0),
+        "receipt_id": raw.get("receipt_path"),
+        "error": raw.get("error"),
+        "error_class": raw.get("error_class") or raw.get("error"),
+        "error_message": raw.get("error_message"),
+        "http_status": raw.get("http_status"),
+        "retryable": raw.get("retryable"),
+        "tool_steps": tool_steps if tool_steps is not None else raw.get("tool_steps", []),
+        "cost_cap_triggered": raw.get("cost_cap_triggered", False),
+        "iterations": raw.get("iterations", 0),
+        "capped": raw.get("capped", False),
+        "cap_reason": raw.get("cap_reason"),
+    }
 
 
 _FINDINGS_SCAN_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{20,80}$")
@@ -561,6 +613,92 @@ def api_grammar_verify_receipt(
         "verifier_output": verifier_output,
         "verified_at": utc_now_iso(),
     }
+
+
+@app.post("/api/action/dispatch", response_model=None)
+def api_action_dispatch(
+    request: Request,
+    body: ActionDispatchBody,
+) -> dict[str, Any]:
+    _require_localhost_starlette(request)
+    if len(body.prompt) > 50_000:
+        return JSONResponse(status_code=413, content={"error": "prompt_too_large"})
+    client = get_provider_client(body.provider, body.project_id)
+    if client is None:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "no_key_registered", "provider": body.provider},
+        )
+
+    tools = body.tools or []
+    workspace: Workspace | None = None
+    tool_context = None
+    if tools:
+        if body.provider != "ollama":
+            if not body.workspace_id:
+                return JSONResponse(
+                    status_code=422,
+                    content={"detail": "workspace_id is required when tools are enabled"},
+                )
+            workspace = MANAGER.get(body.workspace_id)
+            if workspace is None:
+                return JSONResponse(
+                    status_code=404, content={"detail": "workspace not found"}
+                )
+            tool_context = ToolContext(
+                workspace_id=workspace.id,
+                project_id=body.project_id or workspace.id,
+                project_root=workspace.root,
+                store=workspace.store,
+            )
+
+    messages = [
+        {
+            "role": "user",
+            "content": body.prompt,
+        }
+    ]
+    if body.system_prompt:
+        messages.insert(0, {"role": "system", "content": body.system_prompt})
+
+    raw: dict[str, Any]
+    if tools:
+        dispatch_result = dispatch_with_tools(
+            client,
+            messages=messages,
+            model=body.model,
+            tools=tools,
+            tool_context=tool_context,
+            tool_args=body.tool_args or {},
+            provider_override=body.provider,
+        )
+        raw = dict(dispatch_result)
+    else:
+        raw = dict(
+            client.chat(
+                messages=messages,
+                model=body.model,
+                task_kind="action-dispatch",
+                provider_override=body.provider,
+            )
+        )
+
+    # Keep action audit records short and scrubbed of prompt/response details.
+    out = _build_action_response(body, body.provider, raw)
+    audit_row = {
+        "ts": utc_now_iso(),
+        "descriptor_id": body.descriptor_id,
+        "provider": out["provider"],
+        "model": out["model"],
+        "ok": out["ok"],
+    }
+    if out.get("error_class"):
+        audit_row["error_class"] = out["error_class"]
+    if out.get("http_status") is not None:
+        audit_row["http_status"] = out["http_status"]
+    _log_action_dispatch_audit(audit_row)
+
+    return out
 
 
 @app.get("/api/findings/scans")

@@ -39,7 +39,7 @@ function providerMatches(key: ProviderKeyMetadata, provider: string) {
 export async function resolveProviderForDescriptor(
   descriptor: ActionDescriptor
 ): Promise<string> {
-  const keys = await listProviderKeys(descriptor.projectId);
+  const keys = await listProviderKeys();
   const projectKeys = keys.filter((k) =>
     descriptor.projectId ? k.scope === "project" && k.project_id === descriptor.projectId : false
   );

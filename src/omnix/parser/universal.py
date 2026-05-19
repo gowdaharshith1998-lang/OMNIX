@@ -10,7 +10,9 @@ from typing import Any
 from tree_sitter import Language, Node
 
 from omnix.graph.store import GraphStore
+from omnix.parser.cobol.parser import ingest_cobol_to_store
 from omnix.parser.hint_loader import MergedHints, load_merged_hints
+from omnix.parser.jcl.parser import parse_jcl_text
 from omnix.parser.memory_graph import MemoryGraphStore
 from omnix.parser.tree_parse_cache import get_shared_parser, parse_tree_cached
 
@@ -30,7 +32,7 @@ def ingest_universal_to_store(
     rel: str,
     text: str,
     logical_lang: str,
-    language: Language,
+    language: Language | None,
     *,
     parse_mode: str = "generic",
     merged_hints: MergedHints | None = None,
@@ -41,6 +43,14 @@ def ingest_universal_to_store(
     Tree-sitter passes (P11: call-site only, no file edits) so outputs match
     ``parse_*_files`` for those languages.
     """
+    if logical_lang == "cobol":
+        ingest_cobol_to_store(store, rel, text)
+        return
+
+    if logical_lang == "jcl":
+        parse_jcl_text(rel, text, store=store)
+        return
+
     if not language or not text:
         return
     m = merged_hints
@@ -458,7 +468,7 @@ def parse_stats_for_universal_ingest(
     n_cl = max(n_cl, int(ctree.get("class_declaration", 0)))
     n_im = max(n_im, n_imp_decl, n_use_decl)
 
-    return {
+    out = {
         "n_functions": n_fn,
         "n_classes": n_cl,
         "n_imports": n_im,
@@ -481,3 +491,16 @@ def parse_stats_for_universal_ingest(
         "n_use_declaration": n_use_decl,
         "type_decl_names": tuple(type_decl_name_list),
     }
+    if grammar == "cobol":
+        up = text.upper()
+        out.update(
+            {
+                "has_identification_division": "IDENTIFICATION DIVISION" in up,
+                "has_data_division": "DATA DIVISION" in up,
+                "has_procedure_division": "PROCEDURE DIVISION" in up,
+                "n_paragraphs_in_procedure": up.count(".\n"),
+                "n_perform_or_call": up.count("PERFORM ") + up.count("CALL "),
+                "has_linkage_or_copybook": ("LINKAGE SECTION" in up) or ("COPY " in up),
+            }
+        )
+    return out

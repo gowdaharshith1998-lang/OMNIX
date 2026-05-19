@@ -10,6 +10,7 @@ from omnix.graph.store import GraphStore
 from omnix.parser import hint_loader, quality, universal
 from omnix.parser.grammar_detect import (
     detect_for_path,
+    grammar_for_extension,
     try_load_language_for_grammar,
 )
 
@@ -92,6 +93,24 @@ def test_detect_typescript_js_extensions() -> None:
         assert r.language is not None
 
 
+def test_detect_cobol_long_extension_is_mapped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from omnix.parser import grammar_detect as gd
+
+    def _no_load(grammar: str) -> object | None:
+        assert grammar == "cobol"
+        return None
+
+    monkeypatch.setattr(gd, "try_load_language_for_grammar", _no_load)
+
+    assert grammar_for_extension(".cobol") == "cobol"
+    r = detect_for_path(Path("PAYROLL.COBOL"))
+    assert r.grammar_name == "cobol"
+    assert r.inferred_lang == "cobol"
+    assert r.skip_reason == "no_grammar"
+
+
 def test_unknown_extension_recorded() -> None:
     r = detect_for_path(Path("foo.unknownext987"))
     assert r.grammar_name == ""
@@ -123,6 +142,11 @@ def test_load_missing_hint_is_empty_extra_sets() -> None:
     # generic-only: no file
     assert m.parse_mode == "generic"
     assert not m.hint
+
+
+def test_cobol_hint_declares_long_extension() -> None:
+    m = hint_loader.load_merged_hints("cobol", parse_mode="hinted")
+    assert ".cobol" in m.hint["extensions"]
 
 
 # --- universal parse ---

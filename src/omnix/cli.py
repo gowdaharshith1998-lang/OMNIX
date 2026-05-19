@@ -18,6 +18,7 @@ if str(_src_root) not in sys.path:
 
 import click
 
+from omnix.cli_cobol import cobol_group
 from omnix.omnix_version import __version__ as _OMNIX_VERSION
 from omnix.parser.cli import grammar_group
 from omnix.receipts.cli import axiom_group
@@ -129,6 +130,7 @@ def rebuild_cmd(
 
 main.add_command(axiom_group, name="axiom")
 main.add_command(grammar_group, name="grammar")
+main.add_command(cobol_group, name="cobol")
 main.add_command(analyze)
 main.add_command(rebuild_cmd)
 

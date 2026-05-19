@@ -1,0 +1,3 @@
+       01 CUSTOMER-REC.
+          05 CUSTOMER-ID PIC 9(5).
+          05 CUSTOMER-NAME PIC X(20).

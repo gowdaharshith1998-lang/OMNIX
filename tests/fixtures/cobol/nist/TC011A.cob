@@ -1,0 +1,5 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TC011A.
+       PROCEDURE DIVISION.
+           DISPLAY 'TC011A'.
+           STOP RUN.

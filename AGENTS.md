@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **OMNIX** (7697 symbols, 13444 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **OMNIX** (11520 symbols, 21373 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -41,3 +41,8 @@ This project is indexed by GitNexus as **OMNIX** (7697 symbols, 13444 relationsh
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+## COBOL Substrate (M0)
+- COBOL extensions: `.cob`, `.cbl`, `.cobol`, `.cpy`
+- JCL extensions: `.jcl`, `.prc`
+- CLI: `omnix cobol capture`, `omnix cobol spec-gen`

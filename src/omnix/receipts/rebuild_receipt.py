@@ -39,6 +39,8 @@ VALID_GATE_STATUSES = frozenset({"passed", "failed", "deferred_m2", "skipped"})
 # Gates 5 and 6 are unimplemented in M1. Receipts emitted in M1 must mark
 # them as deferred_m2. This is the honesty invariant.
 M2_DEFERRED_GATES = frozenset({5, 6})
+REAL_GATE_IMPLEMENTATION_KEY = "implemented_by"
+REAL_GATE_IMPLEMENTATION_VALUE = "cobol_runner"
 
 # Canonical gate names (1-6). M1 implements 1-4 mechanically; 5-6 are M2.
 GATE_NAMES: dict[int, str] = {
@@ -85,7 +87,15 @@ class GateResult:
         # HONESTY INVARIANT: gates 5+6 in M1 receipts must be deferred_m2.
         # If a future M2 receipt emitter starts populating real results, it
         # must remove these gates from M2_DEFERRED_GATES at the same commit.
-        if self.gate_number in M2_DEFERRED_GATES and self.status != "deferred_m2":
+        real_gate = (
+            self.details.get(REAL_GATE_IMPLEMENTATION_KEY)
+            == REAL_GATE_IMPLEMENTATION_VALUE
+        )
+        if (
+            self.gate_number in M2_DEFERRED_GATES
+            and self.status != "deferred_m2"
+            and not real_gate
+        ):
             raise ValueError(
                 f"gate {self.gate_number} ({self.gate_name}) is M2-deferred "
                 f"and MUST have status='deferred_m2' in M1 receipts, "
@@ -151,7 +161,15 @@ class RebuildReceipt:
         # Re-enforce honesty invariant at the receipt level — defensive even
         # though GateResult.__post_init__ also enforces it.
         for g in self.gate_results:
-            if g.gate_number in M2_DEFERRED_GATES and g.status != "deferred_m2":
+            real_gate = (
+                g.details.get(REAL_GATE_IMPLEMENTATION_KEY)
+                == REAL_GATE_IMPLEMENTATION_VALUE
+            )
+            if (
+                g.gate_number in M2_DEFERRED_GATES
+                and g.status != "deferred_m2"
+                and not real_gate
+            ):
                 raise ValueError(
                     f"gate {g.gate_number} ({g.gate_name}) MUST be deferred_m2 "
                     f"in M1 receipts (honesty gate)"

@@ -29,6 +29,7 @@ SUGGESTED_INSTALL: dict[str, str] = {
     "sql": "pip install tree-sitter-sql",
     "zig": "pip install tree-sitter-zig",
     "cobol": "pip install tree-sitter-cobol",
+    "jcl": "built-in line parser (no tree-sitter wheel needed)",
 }
 
 
@@ -64,6 +65,11 @@ _GRAMMAR_BY_EXT: dict[str, tuple[str, bool]] = {
     ".sql": ("sql", False),
     ".cob": ("cobol", False),
     ".cbl": ("cobol", False),
+    ".cobol": ("cobol", False),
+    ".ebcdic": ("cobol", False),
+    ".cpy": ("cobol", False),
+    ".jcl": ("jcl", False),
+    ".prc": ("jcl", False),
     ".zig": ("zig", False),
 }
 

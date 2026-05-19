@@ -70,6 +70,7 @@ import {
 import { installGlobalErrorTrap } from "@/lib/globalErrorTrap";
 import { pushWireEvent } from "@/lib/wireEventBuffer";
 import type { WireEventType } from "@/components/inspector/AgentTab";
+import type { ActionDispatchState } from "@/state/actionDispatchStore";
 
 type Props = {
   workspaceId: string;
@@ -84,6 +85,47 @@ type Props = {
 };
 
 type WsState = "idle" | "connecting" | "open" | "closed";
+
+export type AgentTabSummary = {
+  id: ActionDispatchState["agentTabs"][number]["id"];
+  title: string;
+  status: ActionDispatchState["agentTabs"][number]["status"];
+  descriptorId: string;
+};
+
+const AGENT_TAB_SUMMARY_CACHE = new Map<
+  ActionDispatchState["agentTabs"][number]["id"],
+  {
+    key: string;
+    summary: AgentTabSummary;
+  }
+>();
+
+export function selectAgentTabSummaries(state: { agentTabs: ActionDispatchState["agentTabs"] }) {
+  const summaries: AgentTabSummary[] = [];
+  const seen = new Set<string>();
+  for (const tab of state.agentTabs) {
+    const key = `${tab.descriptor.title}|${tab.status}|${tab.descriptor.id}`;
+    seen.add(tab.id);
+    const cached = AGENT_TAB_SUMMARY_CACHE.get(tab.id);
+    if (cached?.key === key) {
+      summaries.push(cached.summary);
+      continue;
+    }
+    const summary: AgentTabSummary = {
+      id: tab.id,
+      title: tab.descriptor.title,
+      status: tab.status,
+      descriptorId: tab.descriptor.id,
+    };
+    AGENT_TAB_SUMMARY_CACHE.set(tab.id, { key, summary });
+    summaries.push(summary);
+  }
+  for (const id of AGENT_TAB_SUMMARY_CACHE.keys()) {
+    if (!seen.has(id)) AGENT_TAB_SUMMARY_CACHE.delete(id);
+  }
+  return summaries;
+}
 
 function isDebugOn() {
   if (import.meta.env.DEV) return true;

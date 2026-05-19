@@ -1,0 +1,5 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TC101M.
+       PROCEDURE DIVISION.
+           DISPLAY 'TC101M'.
+           STOP RUN.

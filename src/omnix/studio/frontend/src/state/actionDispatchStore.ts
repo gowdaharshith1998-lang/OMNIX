@@ -28,7 +28,7 @@ export type DecisionActionModal = {
   origin?: HTMLElement | null;
 };
 
-type ActionDispatchState = {
+export type ActionDispatchState = {
   agentTabs: AgentActionTab[];
   activeModal: DecisionActionModal | null;
   modalQueue: DecisionActionModal[];
@@ -52,7 +52,7 @@ function inFlightCount(tabs: AgentActionTab[]) {
 
 function startAgentDispatch(tab: AgentActionTab, set: StoreSet) {
   const controller = new AbortController();
-  set((state) => ({
+  set((state: ActionDispatchState) => ({
     agentTabs: state.agentTabs.map((item) =>
       item.id === tab.id
         ? { ...item, status: "loading", error: undefined, result: undefined, controller }
@@ -61,7 +61,7 @@ function startAgentDispatch(tab: AgentActionTab, set: StoreSet) {
   }));
   void dispatchAction(tab.descriptor, controller.signal)
     .then((result) => {
-      set((state) => ({
+      set((state: ActionDispatchState) => ({
         agentTabs: state.agentTabs.map((item) =>
           item.id === tab.id ? { ...item, status: "done", result, controller: undefined } : item
         ),
@@ -70,7 +70,7 @@ function startAgentDispatch(tab: AgentActionTab, set: StoreSet) {
     })
     .catch((error) => {
       if (controller.signal.aborted) return;
-      set((state) => ({
+      set((state: ActionDispatchState) => ({
         agentTabs: state.agentTabs.map((item) =>
           item.id === tab.id
             ? {
@@ -88,7 +88,7 @@ function startAgentDispatch(tab: AgentActionTab, set: StoreSet) {
 }
 
 function promoteQueued(set: StoreSet) {
-  set((state) => {
+  set((state: ActionDispatchState) => {
     if (inFlightCount(state.agentTabs) >= MAX_IN_FLIGHT) return state;
     const queued = state.agentTabs.find((tab) => tab.status === "queued");
     if (!queued) return state;
@@ -99,31 +99,31 @@ function promoteQueued(set: StoreSet) {
 
 function startModalDispatch(modal: DecisionActionModal, set: StoreSet) {
   const controller = new AbortController();
-  set((state) => ({
+  set((state: ActionDispatchState) => ({
     activeModal:
-          state.activeModal?.id === modal.id
+          state.activeModal && state.activeModal.id === modal.id
         ? { ...state.activeModal, status: "loading", error: undefined, result: undefined, controller }
         : state.activeModal,
   }));
   void dispatchAction(modal.descriptor, controller.signal)
     .then((result) => {
-      set((state) => ({
+      set((state: ActionDispatchState) => ({
         activeModal:
-          state.activeModal?.id === modal.id
+          state.activeModal && state.activeModal.id === modal.id
             ? { ...state.activeModal, status: "done", result, controller: undefined }
             : state.activeModal,
       }));
     })
     .catch((error) => {
       if (controller.signal.aborted) return;
-      set((state) => ({
+      set((state: ActionDispatchState) => ({
         activeModal:
-          state.activeModal?.id === modal.id
+          state.activeModal && state.activeModal.id === modal.id
             ? {
                 ...state.activeModal,
                 status: "error",
                 error: error instanceof Error ? error.message : String(error),
-                result: error instanceof DispatchError ? error.result : state.activeModal.result,
+                result: error instanceof DispatchError ? error.result : state.activeModal?.result,
                 controller: undefined,
               }
             : state.activeModal,
@@ -137,13 +137,14 @@ type StoreSet = (
     | Partial<ActionDispatchState>
     | ((state: ActionDispatchState) => ActionDispatchState | Partial<ActionDispatchState>)
 ) => void;
+type RouteActionResult = `agent:${string}` | void;
 
 export const useActionDispatchStore = create<ActionDispatchState>((set, get) => ({
   agentTabs: [],
   activeModal: null,
   modalQueue: [],
 
-  openAgentTab: (descriptor) => {
+  openAgentTab: (descriptor: AgentActionDescriptor) => {
     const id = `agent:${nextId(descriptor.id)}` as `agent:${string}`;
     const shouldQueue = inFlightCount(get().agentTabs) >= MAX_IN_FLIGHT;
     const tab: AgentActionTab = {
@@ -151,23 +152,25 @@ export const useActionDispatchStore = create<ActionDispatchState>((set, get) => 
       descriptor,
       status: shouldQueue ? "queued" : "loading",
     };
-    set((state) => ({ agentTabs: [...state.agentTabs, tab] }));
+    set((state: ActionDispatchState) => ({ agentTabs: [...state.agentTabs, tab] }));
     if (!shouldQueue) startAgentDispatch(tab, set);
     return id;
   },
 
-  closeAgentTab: (id) => {
-    const tab = get().agentTabs.find((item) => item.id === id);
+  closeAgentTab: (id: `agent:${string}`) => {
+    const tab = get().agentTabs.find((item: AgentActionTab) => item.id === id);
     tab?.controller?.abort();
-    set((state) => ({ agentTabs: state.agentTabs.filter((item) => item.id !== id) }));
+    set((state: ActionDispatchState) => ({
+      agentTabs: state.agentTabs.filter((item: AgentActionTab) => item.id !== id),
+    }));
     promoteQueued(set);
   },
 
-  retryAgentTab: (id) => {
-    const tab = get().agentTabs.find((item) => item.id === id);
+  retryAgentTab: (id: `agent:${string}`) => {
+    const tab = get().agentTabs.find((item: AgentActionTab) => item.id === id);
     if (!tab) return;
     if (inFlightCount(get().agentTabs) >= MAX_IN_FLIGHT) {
-      set((state) => ({
+      set((state: ActionDispatchState) => ({
         agentTabs: state.agentTabs.map((item) =>
           item.id === id ? { ...item, status: "queued", error: undefined } : item
         ),
@@ -177,7 +180,7 @@ export const useActionDispatchStore = create<ActionDispatchState>((set, get) => 
     startAgentDispatch(tab, set);
   },
 
-  openModal: (descriptor, origin) => {
+  openModal: (descriptor: DecisionActionDescriptor, origin?: HTMLElement | null) => {
     const modal: DecisionActionModal = {
       id: nextId(descriptor.id),
       descriptor,
@@ -185,7 +188,7 @@ export const useActionDispatchStore = create<ActionDispatchState>((set, get) => 
       origin,
     };
     if (get().activeModal) {
-      set((state) => ({ modalQueue: [...state.modalQueue, modal] }));
+      set((state: ActionDispatchState) => ({ modalQueue: [...state.modalQueue, modal] }));
       return;
     }
     set({ activeModal: modal });
@@ -208,7 +211,10 @@ export const useActionDispatchStore = create<ActionDispatchState>((set, get) => 
   },
 }));
 
-export function routeAction(descriptor: ActionDescriptor, origin?: HTMLElement | null) {
+export function routeAction(
+  descriptor: ActionDescriptor,
+  origin?: HTMLElement | null
+): RouteActionResult {
   const store = useActionDispatchStore.getState();
   if (descriptor.kind === "agent") return store.openAgentTab(descriptor);
   return store.openModal(descriptor, origin);
