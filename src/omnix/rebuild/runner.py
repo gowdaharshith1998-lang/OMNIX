@@ -44,7 +44,6 @@ from omnix.receipts.rebuild_receipt import (
     GateResult,
     GateStatus,
     RebuildReceipt,
-    default_skipped_gate_results,
     sha256_hex_text,
     sign_rebuild,
 )
@@ -90,15 +89,22 @@ def _run_gates_1_to_5(
     rebuilt_source: str,
     skip_gate_5: bool = False,
 ) -> tuple[GateResult, ...]:
-    """Mechanically run gates 1-5 against a rebuilt source + spec.
+    """Mechanically run gates 1-6 against a rebuilt source + spec.
 
     Each gate returns either `None` (passed) or a `GateError`-shaped dict
     with `details`. We translate that into a `GateResult` with a `passed`
     or `failed` status.
     """
-    from omnix.gates import gate1_syntactic, gate2_typecheck, gate3_signature, gate5_property
+    from omnix.gates import (
+        gate1_syntactic,
+        gate2_typecheck,
+        gate3_signature,
+        gate5_property,
+        gate6_equivalence,
+    )
 
     results: list[GateResult] = []
+    gate5_details: dict[str, Any] = {}
 
     err = gate1_syntactic.check(rebuilt_source)
     results.append(
@@ -149,6 +155,7 @@ def _run_gates_1_to_5(
     )
 
     if skip_gate_5:
+        gate5_details = {"reason": "skipped_by_user", "status": "skipped"}
         results.append(
             GateResult(
                 gate_number=5,
@@ -159,6 +166,7 @@ def _run_gates_1_to_5(
         )
     elif hasattr(gate5_property, "evaluate"):
         evaluation = gate5_property.evaluate(legacy_source, rebuilt_source, node)
+        gate5_details = dict(evaluation.details)
         results.append(
             GateResult(
                 gate_number=5,
@@ -169,7 +177,39 @@ def _run_gates_1_to_5(
         )
     else:  # pragma: no cover — compatibility for older stacked checkouts
         err = gate5_property.check(legacy_source, rebuilt_source, node)
-        results.append(_gate_error_to_result(5, err))
+        gate5_result = _gate_error_to_result(5, err)
+        gate5_details = dict(gate5_result.details)
+        results.append(gate5_result)
+
+    try:
+        gate6_evaluation = gate6_equivalence.evaluate(
+            legacy_source,
+            rebuilt_source,
+            node,
+            gate5_details=gate5_details,
+        )
+        results.append(
+            GateResult(
+                gate_number=6,
+                gate_name=GATE_NAMES[6],
+                status=gate6_evaluation.status,
+                details=dict(gate6_evaluation.details),
+            )
+        )
+    except Exception as exc:  # pragma: no cover — evaluate handles this path
+        results.append(
+            GateResult(
+                gate_number=6,
+                gate_name=GATE_NAMES[6],
+                status="failed",
+                details={
+                    "status": "failed",
+                    "reason": "gate6_internal_exception",
+                    "exception": type(exc).__name__,
+                    "error_message": str(exc),
+                },
+            )
+        )
 
     return tuple(results)
 
@@ -202,10 +242,8 @@ def _build_receipt(
     spec: Any,
     prompt_text_hash: str,
     model: str,
-    gate_results_1_to_5: tuple[GateResult, ...],
+    gate_results_1_to_6: tuple[GateResult, ...],
 ) -> RebuildReceipt:
-    gate6_skipped = tuple(g for g in default_skipped_gate_results() if g.gate_number == 6)
-    full_gates = gate_results_1_to_5 + gate6_skipped
     return RebuildReceipt(
         project_id=project_id,
         node_fqn=node.fqn,
@@ -216,7 +254,7 @@ def _build_receipt(
         prompt_template_version=PROMPT_TEMPLATE_VERSION,
         prompt_text_hash=prompt_text_hash,
         model=model,
-        gate_results=full_gates,
+        gate_results=gate_results_1_to_6,
         timestamp=now_iso8601_utc(),
         omnix_version=_omnix_version(),
     )
@@ -337,7 +375,7 @@ def _run_with_graph(
             prompt_text, prompt_hash = format_prompt(spec, legacy_source)
             rebuilt_source = _invoke(effective_dispatch, prompt_text, model)
 
-            gates_1_to_5 = _run_gates_1_to_5(
+            gates_1_to_6 = _run_gates_1_to_5(
                 node=node,
                 spec=spec,
                 legacy_source=legacy_source,
@@ -353,7 +391,7 @@ def _run_with_graph(
                 spec=spec,
                 prompt_text_hash=prompt_hash,
                 model=model,
-                gate_results_1_to_5=gates_1_to_5,
+                gate_results_1_to_6=gates_1_to_6,
             )
             signature_b64 = sign_rebuild(receipt)
             outputs.append(

@@ -80,6 +80,31 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, _Stu
     return project_root, graph, pub_path
 
 
+@pytest.fixture(autouse=True)
+def fast_gate6(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep rebuild-runner tests focused on receipt wiring, not JVM probe cost."""
+    from omnix.gates import gate6_equivalence
+
+    def _passing_gate6(
+        legacy_source: str,
+        rebuilt_source: str,
+        semantic_node: SemanticNode,
+        *,
+        gate5_details: dict[str, object] | None = None,
+    ):
+        return gate6_equivalence.Gate6Evaluation(
+            status="passed",
+            details={
+                "status": "passed",
+                "probe_count": 20,
+                "divergence_count": 0,
+                "accepted_with_note_count": 0,
+            },
+        )
+
+    monkeypatch.setattr(gate6_equivalence, "evaluate", _passing_gate6)
+
+
 def _good_rebuild_source() -> str:
     """A rebuild that should pass gates 1-3."""
     return (
@@ -112,7 +137,7 @@ def test_runner_emits_one_receipt_per_node(project) -> None:
     assert o.receipt_path.parent == o.signature_path.parent == o.rebuilt_source_path.parent
 
 
-def test_receipt_contains_all_six_gates_with_real_gate5_and_gate6_skipped(
+def test_receipt_contains_all_six_gates_with_real_gate5_and_gate6(
     project,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -144,9 +169,11 @@ def test_receipt_contains_all_six_gates_with_real_gate5_and_gate6_skipped(
     receipt = RebuildReceipt.from_dict(receipt_dict)
 
     gate_status_by_number = {g.gate_number: g.status for g in receipt.gate_results}
+    gate_details_by_number = {g.gate_number: g.details for g in receipt.gate_results}
     assert sorted(gate_status_by_number) == [1, 2, 3, 4, 5, 6]
     assert gate_status_by_number[5] == "passed"
-    assert gate_status_by_number[6] == "skipped"
+    assert gate_status_by_number[6] == "passed"
+    assert gate_details_by_number[6]["probe_count"] == 20
     # Gate 4 not yet wired mechanically — emitted as 'skipped'.
     assert gate_status_by_number[4] == "skipped"
 
@@ -200,7 +227,76 @@ def test_receipt_records_gate5_inconclusive_in_summary(
     assert gate5.status == "inconclusive"
     assert gate5.details["examples_used"] == 50
     assert gates_summary(receipt.gate_results) == (
-        "3-passed/0-failed/2-skipped/1-inconclusive/0-deferred_m3"
+        "4-passed/0-failed/1-skipped/1-inconclusive/0-deferred_m3"
+    )
+
+
+def test_receipt_records_gate6_failure_details(
+    project,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from omnix.gates import gate5_property, gate6_equivalence
+    from omnix.gates.result import GateError
+
+    project_root, graph, _ = project
+
+    def _passing_gate5(
+        legacy_source: str,
+        rebuilt_source: str,
+        semantic_node: SemanticNode,
+    ) -> gate5_property.Gate5Evaluation:
+        return gate5_property.Gate5Evaluation(
+            status="passed",
+            details={"status": "passed", "examples_used": 200},
+        )
+
+    def _failing_gate6(
+        legacy_source: str,
+        rebuilt_source: str,
+        semantic_node: SemanticNode,
+        *,
+        gate5_details: dict[str, object] | None = None,
+    ) -> gate6_equivalence.Gate6Evaluation:
+        err = GateError(
+            gate_number=6,
+            gate_name="behavioral_equivalence",
+            message="behavioral equivalence divergence",
+            details={
+                "status": "failed",
+                "classification": "value_diverge",
+                "diverging_input": ["x"],
+                "probe_count": 20,
+                "divergence_count": 1,
+                "accepted_with_note_count": 0,
+            },
+        )
+        return gate6_equivalence.Gate6Evaluation(
+            status="failed",
+            details=dict(err.details),
+            error=err,
+        )
+
+    monkeypatch.setattr(gate5_property, "evaluate", _passing_gate5)
+    monkeypatch.setattr(gate6_equivalence, "evaluate", _failing_gate6)
+
+    outputs = _run_with_graph(
+        graph=graph,
+        project_path=project_root,
+        target_language="java21",
+        node_filter=None,
+        dispatch_fn=lambda prompt, model="claude-opus-4.7": _good_rebuild_source(),
+        model="claude-opus-4.7",
+        output_root=None,
+    )
+    receipt = RebuildReceipt.from_dict(
+        json.loads(outputs[0].receipt_path.read_text(encoding="utf-8"))
+    )
+    gate6 = next(g for g in receipt.gate_results if g.gate_number == 6)
+    assert gate6.status == "failed"
+    assert gate6.details["classification"] == "value_diverge"
+    assert gate6.details["diverging_input"] == ["x"]
+    assert gates_summary(receipt.gate_results) == (
+        "4-passed/1-failed/1-skipped/0-inconclusive/0-deferred_m3"
     )
 
 
