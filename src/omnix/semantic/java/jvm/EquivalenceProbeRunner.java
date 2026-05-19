@@ -38,6 +38,9 @@ import java.util.Map;
 import java.util.Set;
 
 public final class EquivalenceProbeRunner {
+    private static final String DEFAULT_CONSTRUCT_MARKER = "__omnix_default_construct__";
+    private static final String FLOAT_MARKER = "__omnix_float__";
+
     private EquivalenceProbeRunner() {}
 
     public static void main(String[] args) {
@@ -167,6 +170,16 @@ public final class EquivalenceProbeRunner {
 
     private static Object convertValue(Object value, Class<?> targetType) {
         if (value == null) return null;
+        if (value instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> marker = (Map<String, Object>) value;
+            if (marker.containsKey(DEFAULT_CONSTRUCT_MARKER)) {
+                return defaultConstruct(targetType, String.valueOf(marker.get(DEFAULT_CONSTRUCT_MARKER)));
+            }
+            if (marker.containsKey(FLOAT_MARKER)) {
+                return specialFloat(targetType, String.valueOf(marker.get(FLOAT_MARKER)));
+            }
+        }
         if (targetType == String.class) return String.valueOf(value);
         if (targetType == boolean.class || targetType == Boolean.class) return (Boolean) value;
         if (targetType == int.class || targetType == Integer.class) return Integer.valueOf(((Number) value).intValue());
@@ -186,6 +199,34 @@ public final class EquivalenceProbeRunner {
         return value;
     }
 
+    private static Object defaultConstruct(Class<?> targetType, String requestedType) {
+        if (!targetType.getName().equals(requestedType)) {
+            throw new IllegalArgumentException(
+                "default construct marker type " + requestedType + " does not match " + targetType.getName()
+            );
+        }
+        try {
+            Constructor<?> ctor = targetType.getDeclaredConstructor();
+            ctor.setAccessible(true);
+            return ctor.newInstance();
+        } catch (ReflectiveOperationException ex) {
+            throw new IllegalArgumentException("cannot default construct " + targetType.getName(), ex);
+        }
+    }
+
+    private static Object specialFloat(Class<?> targetType, String raw) {
+        double value;
+        switch (raw) {
+            case "NaN": value = Double.NaN; break;
+            case "+Infinity": value = Double.POSITIVE_INFINITY; break;
+            case "-Infinity": value = Double.NEGATIVE_INFINITY; break;
+            default: throw new IllegalArgumentException("unknown float marker " + raw);
+        }
+        if (targetType == float.class || targetType == Float.class) return Float.valueOf((float) value);
+        if (targetType == double.class || targetType == Double.class) return Double.valueOf(value);
+        throw new IllegalArgumentException("float marker is incompatible with " + targetType.getName());
+    }
+
     private static String wallClockBucket(long ms) {
         if (ms < 1) return "<1ms";
         if (ms < 10) return "<10ms";
@@ -196,6 +237,18 @@ public final class EquivalenceProbeRunner {
     }
 
     private static Object jsonValue(Object value) {
+        if (value instanceof Double) {
+            Double d = (Double) value;
+            if (d.isNaN()) return specialFloatJson("NaN");
+            if (d == Double.POSITIVE_INFINITY) return specialFloatJson("+Infinity");
+            if (d == Double.NEGATIVE_INFINITY) return specialFloatJson("-Infinity");
+        }
+        if (value instanceof Float) {
+            Float f = (Float) value;
+            if (f.isNaN()) return specialFloatJson("NaN");
+            if (f == Float.POSITIVE_INFINITY) return specialFloatJson("+Infinity");
+            if (f == Float.NEGATIVE_INFINITY) return specialFloatJson("-Infinity");
+        }
         if (value == null || value instanceof String || value instanceof Number || value instanceof Boolean) return value;
         Class<?> c = value.getClass();
         if (c.isArray()) {
@@ -205,6 +258,12 @@ public final class EquivalenceProbeRunner {
             return out;
         }
         return String.valueOf(value);
+    }
+
+    private static Map<String, Object> specialFloatJson(String raw) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put(FLOAT_MARKER, raw);
+        return out;
     }
 
     private static String sha256Hex(byte[] bytes) {
