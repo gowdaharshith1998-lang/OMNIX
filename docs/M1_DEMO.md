@@ -22,7 +22,8 @@ A single terminal run, end-to-end, ~60-90 seconds wall-clock:
        routed to `anthropic` by the `claude-opus-4.7` model prefix)
      - run gates 1-3 mechanically (syntactic, typecheck, signature)
      - mark gate 4 (dependency) as `skipped` — M1 follow-up
-     - mark gates 5+6 as `deferred_m2` — see honesty gate below
+     - run gate 5 property-based Java equivalence when M2 wiring is present
+     - mark gate 6 as `skipped` until behavioral equivalence lands
      - sign the result with the project Ed25519 key and write three files:
        - `.omnix/receipts/rebuilds/<ts>/<fqn>.java`  — rebuilt source
        - `.omnix/receipts/rebuilds/<ts>/<fqn>.json`  — canonical receipt
@@ -47,27 +48,25 @@ Strongly, with the project's Ed25519 public key:
 - The receipt's canonical JSON is deterministic — two receipts built
   from the same logical inputs sign-equal.
 
-## What the receipt does NOT prove (deferred to M2)
+## What the receipt does NOT prove
 
 This distinction is load-bearing for OMNIX's positioning. The receipt
-**explicitly** marks these gates `deferred_m2`, never `passed`:
+**explicitly** marks verification that did not run as `skipped` or
+`inconclusive`, never `passed`:
 
-- **Gate 5 — property-based testing.** M2 will wire Hypothesis-Java to
-  derive properties from the spec and check the rebuild against them
-  (e.g. `reverse(reverse(s)) == s` for all `s`).
+- **Gate 5 — property-based testing.** M2 Phase 3 wires Hypothesis-Java
+  for supported Java parameter types. Unsupported or under-tested methods
+  are reported as `skipped` or `inconclusive`, not passed.
 - **Gate 6 — behavioral equivalence.** M2 will build the dual-runtime
   harness: run both the legacy Java 6 source and the rebuilt Java 21
   source on the same inputs, diff outputs.
 
-The `RebuildReceipt` schema enforces this via
-`GateResult.__post_init__`: a gate-5 or gate-6 marker with
-`status='passed'` raises immediately. The honesty gate cannot be
-silently bypassed.
+The `RebuildReceipt` schema enforces this via `GateResult.__post_init__`
+and receipt-level honesty checks. A gate with an internal exception cannot
+be marked `passed`.
 
 Additionally, gate 4 (dependency) is marked `skipped` in M1 receipts —
-the mechanical dep-check is a Phase-6 follow-up slice. `skipped` is
-distinct from `deferred_m2`: skipped = "didn't run this time"; deferred
-= "this category of verification doesn't exist in M1".
+the mechanical dep-check is a Phase-6 follow-up slice.
 
 ## Reproduce
 
@@ -79,7 +78,7 @@ javac -version    # need 21+
 
 # Vendored JavaParser stack (one-time)
 bash src/omnix/semantic/java/jvm/build.sh
-# → OK: emitter functional
+# → OK: Java semantic harnesses functional
 
 # Project Ed25519 keypair for signing
 omnix axiom keygen --project .
@@ -162,8 +161,7 @@ Any of these requires a fresh take:
 - Bump of the default model (`claude-opus-4.7` → `claude-opus-5.0` etc).
 - New default value of `--target` (currently always `java21`).
 - Schema bump on `RebuildReceipt` (`schema_version` major change).
-- Any change to the gate set (M2 will land gates 5+6; the receipt then
-  stops marking them `deferred_m2`).
+- Any change to the gate set or gate semantics.
 
 Cosmetic OMNIX changes (CLI help text, logging tweaks) do not require
 re-recording.

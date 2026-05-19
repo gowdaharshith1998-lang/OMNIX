@@ -10,8 +10,9 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 from hypothesis import HealthCheck, Phase, find, given, settings
 from hypothesis import strategies as st
@@ -22,6 +23,17 @@ from omnix.semantic.node import SemanticNode
 
 _GATE_NUMBER = 5
 _GATE_NAME = "property_based"
+
+Gate5Status = Literal["passed", "failed", "runtime_crash", "skipped", "inconclusive"]
+
+
+@dataclass(frozen=True)
+class Gate5Evaluation:
+    """Detailed gate 5 result for receipt wiring."""
+
+    status: Gate5Status
+    details: dict[str, Any]
+    error: GateError | None = None
 
 HARNESS_JAR_PATH: Path = (
     Path(__file__).resolve().parent.parent
@@ -83,21 +95,32 @@ def check(
     semantic_node: SemanticNode,
 ) -> GateError | None:
     """Return None when generated Java cases show no behavioral divergence."""
+    return evaluate(legacy_source, rebuilt_source, semantic_node).error
+
+
+def evaluate(
+    legacy_source: str,
+    rebuilt_source: str,
+    semantic_node: SemanticNode,
+) -> Gate5Evaluation:
+    """Run gate 5 and retain pass details for signed receipts."""
     param_types = tuple(semantic_node.resolved_param_types)
     unsupported = [t for t in param_types if _strategy_for(t) is None]
     if unsupported:
-        return _gate_error(
-            "unsupported parameter type for gate 5",
-            status="skipped",
-            reason="unsupported_parameter_type",
-            unsupported_types=unsupported,
+        return _error_evaluation(
+            _gate_error(
+                "unsupported parameter type for gate 5",
+                status="skipped",
+                reason="unsupported_parameter_type",
+                unsupported_types=unsupported,
+            )
         )
 
     max_examples = _max_examples()
     case_strategy = st.tuples(*(_strategy_for(t) for t in param_types))
     generated = _collect_cases(case_strategy, max_examples)
     if isinstance(generated, GateError):
-        return generated
+        return _error_evaluation(generated)
 
     cases = _boundary_cases(param_types)
     boundary_count = len(cases)
@@ -114,10 +137,11 @@ def check(
         "parameter_types": list(param_types),
         "cases": [_json_safe_case(case) for case in cases[:max_examples]],
     }
+    examples_used = len(payload["cases"])
 
     records_or_error = _run_harness(payload, timeout_s=_total_timeout_s())
     if isinstance(records_or_error, GateError):
-        return records_or_error
+        return _error_evaluation(records_or_error)
 
     for record in records_or_error:
         if record.get("equivalent") is True:
@@ -139,20 +163,29 @@ def check(
                 record = rerun[0]
         legacy = record.get("legacy", {})
         rebuilt = record.get("rebuilt", {})
-        return _gate_error(
-            "property-based equivalence divergence",
-            status="failed",
-            reason="behavior_divergence",
-            diverging_input=diverging_input,
-            divergence=record.get("divergence"),
-            legacy_return=legacy.get("return_value"),
-            rebuilt_return=rebuilt.get("return_value"),
-            legacy_exception=legacy.get("exception"),
-            rebuilt_exception=rebuilt.get("exception"),
-            examples_used=len(payload["cases"]),
+        return _error_evaluation(
+            _gate_error(
+                "property-based equivalence divergence",
+                status="failed",
+                reason="behavior_divergence",
+                diverging_input=diverging_input,
+                divergence=record.get("divergence"),
+                legacy_return=legacy.get("return_value"),
+                rebuilt_return=rebuilt.get("return_value"),
+                legacy_exception=legacy.get("exception"),
+                rebuilt_exception=rebuilt.get("exception"),
+                examples_used=examples_used,
+            )
         )
 
-    return None
+    return Gate5Evaluation(
+        status="passed",
+        details={
+            "status": "passed",
+            "examples_tried": max_examples,
+            "examples_used": examples_used,
+        },
+    )
 
 
 def _strategy_for(java_type: str) -> st.SearchStrategy[Any] | None:
@@ -374,4 +407,12 @@ def _gate_error(message: str, **details: Any) -> GateError:
         gate_name=_GATE_NAME,
         message=message,
         details=details,
+    )
+
+
+def _error_evaluation(error: GateError) -> Gate5Evaluation:
+    return Gate5Evaluation(
+        status=cast(Gate5Status, error.details.get("status", "failed")),
+        details=dict(error.details),
+        error=error,
     )

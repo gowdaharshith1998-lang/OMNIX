@@ -22,7 +22,7 @@ from __future__ import annotations
 import fnmatch
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from omnix.orchestrator.attempt import sha256_hex
 from omnix.orchestrator.dispatcher import (
@@ -40,7 +40,9 @@ from omnix.receipts.finding_receipt import (
 )
 from omnix.receipts.rebuild_receipt import (
     GATE_NAMES,
+    VALID_GATE_STATUSES,
     GateResult,
+    GateStatus,
     RebuildReceipt,
     default_skipped_gate_results,
     sha256_hex_text,
@@ -80,18 +82,21 @@ def _omnix_version() -> str:
     return str(v)
 
 
-def _run_gates_1_to_4(
+def _run_gates_1_to_5(
     *,
+    node: SemanticNode,
     spec: Any,
+    legacy_source: str,
     rebuilt_source: str,
+    skip_gate_5: bool = False,
 ) -> tuple[GateResult, ...]:
-    """Mechanically run gates 1-4 against a rebuilt source + spec.
+    """Mechanically run gates 1-5 against a rebuilt source + spec.
 
     Each gate returns either `None` (passed) or a `GateError`-shaped dict
     with `details`. We translate that into a `GateResult` with a `passed`
     or `failed` status.
     """
-    from omnix.gates import gate1_syntactic, gate2_typecheck, gate3_signature
+    from omnix.gates import gate1_syntactic, gate2_typecheck, gate3_signature, gate5_property
 
     results: list[GateResult] = []
 
@@ -143,7 +148,48 @@ def _run_gates_1_to_4(
         )
     )
 
+    if skip_gate_5:
+        results.append(
+            GateResult(
+                gate_number=5,
+                gate_name=GATE_NAMES[5],
+                status="skipped",
+                details={"reason": "skipped_by_user"},
+            )
+        )
+    elif hasattr(gate5_property, "evaluate"):
+        evaluation = gate5_property.evaluate(legacy_source, rebuilt_source, node)
+        results.append(
+            GateResult(
+                gate_number=5,
+                gate_name=GATE_NAMES[5],
+                status=evaluation.status,
+                details=dict(evaluation.details),
+            )
+        )
+    else:  # pragma: no cover — compatibility for older stacked checkouts
+        err = gate5_property.check(legacy_source, rebuilt_source, node)
+        results.append(_gate_error_to_result(5, err))
+
     return tuple(results)
+
+
+def _gate_error_to_result(gate_number: int, err: Any) -> GateResult:
+    if err is None:
+        return GateResult(
+            gate_number=gate_number,
+            gate_name=GATE_NAMES[gate_number],
+            status="passed",
+            details={},
+        )
+    raw_status = err.details.get("status", "failed")
+    status = cast(GateStatus, raw_status if raw_status in VALID_GATE_STATUSES else "failed")
+    return GateResult(
+        gate_number=gate_number,
+        gate_name=GATE_NAMES[gate_number],
+        status=status,
+        details=dict(err.details),
+    )
 
 
 def _build_receipt(
@@ -156,9 +202,10 @@ def _build_receipt(
     spec: Any,
     prompt_text_hash: str,
     model: str,
-    gate_results_1_to_4: tuple[GateResult, ...],
+    gate_results_1_to_5: tuple[GateResult, ...],
 ) -> RebuildReceipt:
-    full_gates = gate_results_1_to_4 + default_skipped_gate_results()
+    gate6_skipped = tuple(g for g in default_skipped_gate_results() if g.gate_number == 6)
+    full_gates = gate_results_1_to_5 + gate6_skipped
     return RebuildReceipt(
         project_id=project_id,
         node_fqn=node.fqn,
@@ -209,6 +256,7 @@ def run(
     dispatch_fn: Callable[..., str] | None = None,
     model: str = "claude-opus-4.7",
     output_root: Path | None = None,
+    skip_gate_5: bool = False,
 ) -> list[RebuildOutput]:
     """Walk the graph and emit one signed RebuildReceipt per matched node.
 
@@ -235,6 +283,7 @@ def run(
         dispatch_fn=dispatch_fn,
         model=model,
         output_root=output_root,
+        skip_gate_5=skip_gate_5,
     )
 
 
@@ -247,6 +296,7 @@ def _run_with_graph(
     dispatch_fn: Callable[..., str] | None,
     model: str,
     output_root: Path | None,
+    skip_gate_5: bool = False,
 ) -> list[RebuildOutput]:
     """Inner loop — split out so tests can inject a fully-stubbed graph."""
     effective_dispatch = dispatch_fn if dispatch_fn is not None else _default_dispatch_fn
@@ -287,7 +337,13 @@ def _run_with_graph(
             prompt_text, prompt_hash = format_prompt(spec, legacy_source)
             rebuilt_source = _invoke(effective_dispatch, prompt_text, model)
 
-            gates_1_to_4 = _run_gates_1_to_4(spec=spec, rebuilt_source=rebuilt_source)
+            gates_1_to_5 = _run_gates_1_to_5(
+                node=node,
+                spec=spec,
+                legacy_source=legacy_source,
+                rebuilt_source=rebuilt_source,
+                skip_gate_5=skip_gate_5,
+            )
             receipt = _build_receipt(
                 project_id=project_id,
                 node=node,
@@ -297,7 +353,7 @@ def _run_with_graph(
                 spec=spec,
                 prompt_text_hash=prompt_hash,
                 model=model,
-                gate_results_1_to_4=gates_1_to_4,
+                gate_results_1_to_5=gates_1_to_5,
             )
             signature_b64 = sign_rebuild(receipt)
             outputs.append(
