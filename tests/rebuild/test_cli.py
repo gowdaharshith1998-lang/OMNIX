@@ -197,3 +197,55 @@ def test_rebuild_cli_passes_skip_gate5_flag_to_runner(
     assert result.exit_code == 0, result.output
     assert captured["project_path"] == project_root.resolve()
     assert captured["skip_gate_5"] is True
+
+
+def test_rebuild_cli_module_maps_to_node_filter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    captured: dict[str, object] = {}
+
+    def _fake_rebuild_run(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(omnix.rebuild, "run", _fake_rebuild_run)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "rebuild",
+            str(project_root),
+            "--target",
+            "java21",
+            "--module",
+            "org.apache.commons.lang.StringUtils",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["node_filter"] == "org.apache.commons.lang.StringUtils.*"
+
+
+def test_rebuild_cli_rejects_module_with_node_filter(tmp_path: Path) -> None:
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "rebuild",
+            str(project_root),
+            "--module",
+            "org.apache.commons.lang.StringUtils",
+            "--node-filter",
+            "*StringUtils.reverse",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--module cannot be combined with --node-filter" in result.output

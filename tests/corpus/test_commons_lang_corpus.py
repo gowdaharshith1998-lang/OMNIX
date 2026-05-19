@@ -16,6 +16,10 @@ from omnix.semantic.java.parser import JAR_PATH, parse_file
 
 _CORPUS_DIR = Path(__file__).resolve().parent / "commons_lang"
 _STRING_UTILS = _CORPUS_DIR / "StringUtils.java"
+_FULL_CORPUS_DIR = Path(__file__).resolve().parent / "commons_lang_full"
+_FULL_STRING_UTILS = (
+    _FULL_CORPUS_DIR / "org" / "apache" / "commons" / "lang" / "StringUtils.java"
+)
 
 # The corpus tests need the vendored emitter JAR; mirror the gate pattern
 # used by the existing tests/semantic/java/* xfail tripwires.
@@ -39,6 +43,7 @@ def test_license_file_present_and_apache() -> None:
     assert "Apache License 2.0" in text
     assert "commons-lang:commons-lang:2.6" in text
     assert "trimmed" in text.lower() or "trim" in text.lower()
+    assert "commons_lang_full" in text
 
 
 @_NO_JAR
@@ -67,3 +72,22 @@ def test_corpus_self_contained_no_unresolved_symbols() -> None:
     # a clean call means all symbols resolved through java.lang.* or the file itself.
     nodes = parse_file(_STRING_UTILS)
     assert len(nodes) >= 1
+
+
+@_NO_JAR
+def test_full_stringutils_source_is_vendored_at_upstream_size() -> None:
+    assert _FULL_STRING_UTILS.exists(), f"missing full corpus file: {_FULL_STRING_UTILS}"
+    lines = _FULL_STRING_UTILS.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 6594
+    assert "public static String[] split(String str, char separatorChar)" in "\n".join(lines)
+
+
+@_NO_JAR
+def test_full_stringutils_source_parses_cleanly() -> None:
+    nodes = parse_file(_FULL_STRING_UTILS, timeout_s=60)
+    stringutils_nodes = [
+        n for n in nodes if n.fqn.startswith("org.apache.commons.lang.StringUtils.")
+    ]
+    assert len(stringutils_nodes) == 177
+    assert any(n.fqn == "org.apache.commons.lang.StringUtils.reverse" for n in nodes)
+    assert any(n.fqn == "org.apache.commons.lang.StringUtils.split" for n in nodes)
