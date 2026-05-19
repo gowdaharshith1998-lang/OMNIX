@@ -169,17 +169,41 @@ def _default_gate_runner(spec: Spec, response_text: str, target_language: str) -
     """
     from omnix.gates.runner import run as _run  # local import — avoid cycle
 
-    return _run(spec=spec, response_text=response_text, target_language=target_language)
+    attempt = RebuildAttempt(
+        node_fqn=spec.identity.fqn,
+        spec_hash=sha256_hex(spec.to_json()),
+        prompt_template_version=PROMPT_TEMPLATE_VERSION,
+        prompt_text_hash=sha256_hex(""),
+        response_text=response_text,
+        timestamp=RebuildAttempt.now_utc(),
+        model=f"retry-default-gate-runner:{target_language}",
+    )
+    return _run(rebuild_attempt=attempt, spec=spec, source_code=response_text)
 
 
-def _default_nodes_for(project_path: Path) -> Sequence[Spec]:
-    """Lazy adapter to `omnix.orchestrator.topological.walk`.
+def _default_nodes_for(project_path: Path, target_language: str) -> Sequence[Spec]:
+    """Lazy adapter from the persisted graph to dispatch-order specs.
 
     Tests inject `nodes` directly; production walks the project.
     """
-    from omnix.orchestrator.topological import walk  # local import — avoid cycle
+    from omnix.orchestrator.dispatcher import (  # local imports — avoid cycles
+        _collect_graph_inputs,
+        _generate_spec,
+        _load_graph,
+    )
+    from omnix.orchestrator.topological import topo_sort
 
-    return tuple(walk(project_path))
+    graph = _load_graph(project_path)
+    nodes, edges, fqn_index = _collect_graph_inputs(graph)
+    order = topo_sort([n.fqn for n in nodes], edges)
+
+    specs: list[Spec] = []
+    for entry in order:
+        if isinstance(entry, list):
+            specs.extend(_generate_spec(fqn_index[fqn], graph, target_language) for fqn in entry)
+        else:
+            specs.append(_generate_spec(fqn_index[entry], graph, target_language))
+    return tuple(specs)
 
 
 # ---------- main entry point -------------------------------------------------
@@ -217,7 +241,7 @@ def run_with_retry(
     _dispatch = dispatch_fn if dispatch_fn is not None else _default_dispatch
     _gates = gate_runner if gate_runner is not None else _default_gate_runner
     _nodes: Sequence[Spec] = (
-        tuple(nodes) if nodes is not None else _default_nodes_for(project_path)
+        tuple(nodes) if nodes is not None else _default_nodes_for(project_path, target_language)
     )
 
     successful: list[RebuildAttempt] = []

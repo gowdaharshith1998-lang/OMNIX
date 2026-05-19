@@ -65,7 +65,9 @@ ignore = [
 "scripts/*" = ["E", "F401", "F541"]
 "omnix.py" = ["E402"]                  # entry-point: path-manipulation precedes imports
 "src/omnix/cli.py" = ["E402"]          # entry-point: path-manipulation precedes imports
+"src/omnix/receipts/rebuild_receipt.py" = ["F401"]  # M2-owned file; keep content untouched in hygiene sweep
 "src/omnix/studio/delta.py" = ["E402"] # legitimate post-conditional-import pattern
+"tests/receipts/test_rebuild_receipt.py" = ["I001"] # M2-owned file; keep content untouched in hygiene sweep
 "src/omnix/receipts/ntt.py" = ["E741"] # `l` is intrinsic in NTT math (RFC 8391 / Dilithium)
 
 [tool.mypy]
