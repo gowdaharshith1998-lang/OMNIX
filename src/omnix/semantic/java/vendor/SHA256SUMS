@@ -1,4 +1,5 @@
 a24c4fa7799ffe0c7a9af11d4eecd757098ed4498f86067bf28b46b2bfea1833  javaparser-core-3.26.3.jar
+c58e2129703edbf991e4118d0c25c66a48f06afd9e5741109232466733eaee20  equivalence-probe-runner.jar
 8a47b4bd7d828679b38e6df95deee395dda6aa14dfec91937ae64a7c04bfe253  javaparser-emitter.jar
 7961d10156747764756cf3c26b293a8fcfcd89e4304ef61ff695baeb0688a72a  java-equivalence-harness.jar
 56b8a20297b940e0554584bea6429a62a424f3385d7eb8040f5a0254d6f715ac  javaparser-symbol-solver-core-3.26.3.jar
