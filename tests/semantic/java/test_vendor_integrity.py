@@ -35,6 +35,7 @@ _EXPECTED_JARS: frozenset[str] = frozenset(
         "javassist-3.30.2-GA.jar",
         "javaparser-emitter.jar",
         "java-equivalence-harness.jar",
+        "equivalence-probe-runner.jar",
     }
 )
 
