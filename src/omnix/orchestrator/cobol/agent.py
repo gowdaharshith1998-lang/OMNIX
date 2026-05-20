@@ -14,11 +14,13 @@ from omnix.graph.store import GraphStore
 from omnix.orchestrator.cobol.audit_export import copy_receipt_to_run, export_audit_zip
 from omnix.orchestrator.cobol.decision_queue import DecisionOption, DecisionQueue, DecisionRequest
 from omnix.orchestrator.cobol.discovery import DiscoveredProgram, discover
+from omnix.orchestrator.cobol.reflexion import ReflexionContext, refine_prompt
 from omnix.orchestrator.cobol.run_state import ProgramStateRow, RunState
 from omnix.parser.ingest_dispatch import ingest_unified_codebase
 from omnix.rebuild.cobol_runner import (
     CobolRebuildError,
     GateFailure,
+    _default_llm_dispatch,
     iter_cobol_programs,
     rebuild_cobol_program,
 )
@@ -69,6 +71,7 @@ class ModernizeAgent:
         started = time.monotonic()
         discovery = discover(self.config.codebase_root, fixtures_root=self.config.fixtures_root)
         self.run_state.emit_event("run_started", {"program_count": len(discovery.programs)})
+        configure_copybook_path([path for program in discovery.programs for path in program.copybook_paths])
         for program in discovery.programs:
             self.run_state.add_program(program)
         self._ensure_graph()
@@ -109,17 +112,18 @@ class ModernizeAgent:
             self._spec_gen(program)
             self.run_state.transition(program.program_id, "spec_generated")
             self.run_state.transition(program.program_id, "rebuilding")
-            receipt = self._rebuild(program)
+            receipt, gate6_attempts = self._rebuild_with_gate6_retries(program)
             copied = copy_receipt_to_run(receipt, self.run_state.run_dir / "receipts")
-            self.run_state.transition(program.program_id, "verified", receipt_path=str(copied))
+            self.run_state.transition(
+                program.program_id,
+                "verified",
+                receipt_path=str(copied),
+                gate6_attempts=gate6_attempts,
+            )
         except GateFailure as exc:
             if exc.gate_number == 6:
-                self.run_state.transition(
-                    program.program_id,
-                    "gate6_failed",
-                    gate6_attempts=self.config.max_gate6_retries,
-                    last_error=str(exc.details),
-                )
+                attempts = int(self.run_state.get_program(program.program_id).gate6_attempts)
+                self._mark_gate6_failed(program, exc, attempts)
                 if self.config.halt_on_failure:
                     raise
                 return
@@ -152,7 +156,28 @@ class ModernizeAgent:
             Path.cwd() / "tests" / "cobol" / "generated",
         )
 
-    def _rebuild(self, program: DiscoveredProgram) -> Path:
+    def _rebuild_with_gate6_retries(self, program: DiscoveredProgram) -> tuple[Path, int]:
+        attempts = 0
+        gate6_failures: list[dict] | None = None
+        while True:
+            try:
+                return self._rebuild(program, gate6_failures=gate6_failures), attempts
+            except GateFailure as exc:
+                if exc.gate_number != 6:
+                    raise
+                if attempts >= self.config.max_gate6_retries:
+                    self._mark_gate6_failed(program, exc, attempts)
+                    raise
+                attempts += 1
+                gate6_failures = list(exc.details.get("failures") or [])
+                self.run_state.transition(
+                    program.program_id,
+                    "rebuilding",
+                    gate6_attempts=attempts,
+                    last_error=str(exc.details),
+                )
+
+    def _rebuild(self, program: DiscoveredProgram, *, gate6_failures: list[dict] | None = None) -> Path:
         receipts_dir = self.run_state.run_dir / "raw_receipts"
         if self.config.rebuild_fn is not None:
             return self.config.rebuild_fn(program, receipts_dir)
@@ -168,7 +193,7 @@ class ModernizeAgent:
                 target_language=self.config.target_language,
                 receipts_dir=receipts_dir,
                 keystore=None,
-                llm_dispatch=None,
+                llm_dispatch=_reflexion_dispatch(gate6_failures),
                 project_path=self.config.codebase_root,
             )
         finally:
@@ -215,6 +240,14 @@ class ModernizeAgent:
         self.run_state.transition(program.program_id, "error", last_error=str(exc))
         if self.config.halt_on_failure:
             raise exc
+
+    def _mark_gate6_failed(self, program: DiscoveredProgram, exc: GateFailure, attempts: int) -> None:
+        self.run_state.transition(
+            program.program_id,
+            "gate6_failed",
+            gate6_attempts=attempts,
+            last_error=str(exc.details),
+        )
 
     def _summary(self, started: float, audit_zip: Path | None) -> AgentSummary:
         rows = self.run_state.all_programs()
@@ -280,4 +313,23 @@ def configure_copybook_path(copybook_paths: list[Path]) -> None:
     if not dirs:
         return
     existing = os.environ.get("COBCPY")
-    os.environ["COBCPY"] = os.pathsep.join([*dirs, existing] if existing else dirs)
+    parts = [*dirs, *(existing.split(os.pathsep) if existing else [])]
+    deduped = list(dict.fromkeys(part for part in parts if part))
+    os.environ["COBCPY"] = os.pathsep.join(deduped)
+
+
+def _reflexion_dispatch(gate6_failures: list[dict] | None) -> Callable[[str], str] | None:
+    if not gate6_failures:
+        return None
+
+    def dispatch(prompt: str) -> str:
+        refined = refine_prompt(
+            ReflexionContext(
+                original_prompt=prompt,
+                failed_replica="",
+                gate6_failures=gate6_failures,
+            )
+        )
+        return _default_llm_dispatch(refined)
+
+    return dispatch
