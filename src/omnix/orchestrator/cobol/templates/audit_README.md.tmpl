@@ -1,0 +1,13 @@
+# OMNIX COBOL Audit Export
+
+Run: `{run_id}`
+
+Contents:
+- `receipts/`: signed rebuild receipts and detached signatures
+- `replicas/`: generated Python replicas when included
+- `public_key.pem`: project Ed25519 public key
+- `verify.py`: standalone receipt signature checker
+- `run_summary.json`: orchestrator state summary
+
+Run `python3 verify.py` from the extracted archive root.
+

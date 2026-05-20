@@ -1,0 +1,17 @@
+---
+description: OMNIX COBOL orchestrator backend engineering discipline
+globs:
+  - "src/omnix/orchestrator/cobol/**"
+  - "tests/cobol/orchestrator/**"
+---
+
+# COBOL Orchestrator Backend
+
+- Keep orchestrator work additive under `src/omnix/orchestrator/cobol/`.
+- Do not modify the COBOL runner, gates, receipt schema, fabric providers, runtime capture layer, Studio frontend, find-bugs, or scan pipeline for this slice.
+- Keep terminal decisions explicit: missing fixtures, unresolved copybooks, budget warnings, and exhausted Gate 6 retries must be visible to the operator.
+- Persist run state under `.omnix/runs/<run_id>/state.db`.
+- Use stdlib plus existing OMNIX modules only.
+- Receipt schema is locked; orchestrator metadata belongs in run state and audit summaries.
+- Tests for this backend live under `tests/cobol/orchestrator/S<N>/`.
+

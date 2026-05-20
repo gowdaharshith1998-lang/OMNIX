@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **OMNIX** (11520 symbols, 21373 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **OMNIX** (12184 symbols, 22397 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -46,3 +46,5 @@ This project is indexed by GitNexus as **OMNIX** (11520 symbols, 21373 relations
 - COBOL ingest for `.cob`, `.cbl`, `.cobol`, `.cpy`
 - JCL ingest for `.jcl`, `.prc`
 - Behavioral capture and spec generation via `omnix cobol` CLI
+- COBOL orchestrator backend: additive code lives in `src/omnix/orchestrator/cobol/`; tests live in `tests/cobol/orchestrator/`; CLI surface is `omnix cobol modernize`, `decide`, `audit-export`, and `runs`.
+- Do not change the locked COBOL runner, runtime capture layer, gate logic, receipt schema, fabric dispatcher, Studio frontend, find-bugs, or scan pipeline when working on this orchestrator.

@@ -172,3 +172,8 @@ OMNIX now includes a COBOL/JCL substrate:
 - COBOL capture and spec generation commands:
   - `omnix cobol capture <program> --fixtures <dir>`
   - `omnix cobol spec-gen <program>`
+- COBOL orchestrator backend:
+  - `omnix cobol modernize <codebase> --target python`
+  - `omnix cobol decide --run <run_id> --decision <decision_id> --answer <key>`
+  - `omnix cobol audit-export <run_id> --out /tmp/audit.zip`
+  - `omnix cobol runs`
