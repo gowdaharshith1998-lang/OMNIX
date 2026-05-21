@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -35,6 +36,13 @@ def cobol_group() -> None:
 @click.option("--decision-timeout-s", default=60.0, type=float, show_default=True)
 @click.option("--no-auto-audit", is_flag=True, default=False)
 @click.option("--resume", "resume_run_id", default=None)
+@click.option("--graphrag-token-budget", default=30000, type=int, show_default=True)
+@click.option("--graphrag-hop-depth", default=4, type=int, show_default=True)
+@click.option("--graphrag-max-turns", default=8, type=int, show_default=True)
+@click.option("--graphrag-confidence-threshold", default=0.75, type=float, show_default=True)
+@click.option("--graphrag-skill-top-k", default=3, type=int, show_default=True)
+@click.option("--graphrag-model", default="claude-sonnet-4.6", show_default=True)
+@click.option("--no-graphrag", is_flag=True, default=False)
 def modernize_cmd(
     codebase: Path | None,
     target_language: str,
@@ -45,6 +53,13 @@ def modernize_cmd(
     decision_timeout_s: float,
     no_auto_audit: bool,
     resume_run_id: str | None,
+    graphrag_token_budget: int,
+    graphrag_hop_depth: int,
+    graphrag_max_turns: int,
+    graphrag_confidence_threshold: float,
+    graphrag_skill_top_k: int,
+    graphrag_model: str,
+    no_graphrag: bool,
 ) -> None:
     """Run the sequential COBOL modernization orchestrator."""
     from omnix.orchestrator.cobol.agent import AgentConfig, ModernizeAgent, print_summary
@@ -70,6 +85,13 @@ def modernize_cmd(
             halt_on_failure=halt_on_failure,
             decision_timeout_s=decision_timeout_s,
             no_auto_audit=no_auto_audit,
+            graphrag_token_budget=graphrag_token_budget,
+            graphrag_hop_depth=graphrag_hop_depth,
+            graphrag_max_turns=graphrag_max_turns,
+            graphrag_confidence_threshold=graphrag_confidence_threshold,
+            graphrag_skill_top_k=graphrag_skill_top_k,
+            graphrag_model=graphrag_model,
+            no_graphrag=no_graphrag,
         ),
         run_state=state,
         decision_queue=queue,
@@ -86,6 +108,107 @@ def modernize_cmd(
         raise SystemExit(130)
     finally:
         state.close()
+
+
+@cobol_group.command("enrich")
+@click.argument("codebase_root", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("--passes", "passes_text", default="1,2,3,4", show_default=True)
+@click.option("--budget-usd", default=None, type=float)
+@click.option("--batch-size", default=50, type=int, show_default=True)
+@click.option("--force", is_flag=True, default=False)
+def enrich_cmd(
+    codebase_root: Path,
+    passes_text: str,
+    budget_usd: float | None,
+    batch_size: int,
+    force: bool,
+) -> None:
+    """Run offline COBOL GraphRAG enrichment against the project graph."""
+    from omnix.enrich.mock_provider import MockEnrichmentProvider
+    from omnix.enrich.passes import run_passes
+    from omnix.orchestrator.cobol.agent import ensure_cobol_graph
+
+    root = codebase_root.resolve()
+    db_path = root / ".omnix" / "omnix.db"
+    store = ensure_cobol_graph(root, db_path)
+    provider = MockEnrichmentProvider()
+    try:
+        report = asyncio.run(
+            run_passes(
+                store,
+                provider,
+                passes_text,
+                budget_usd=budget_usd,
+                batch_size=batch_size,
+                force=force,
+            )
+        )
+        click.echo(
+            f"enriched passes={len(report.reports)} cost=${report.total_cost_usd:.4f} "
+            f"mock_calls={len(provider.calls)} db={db_path}"
+        )
+    finally:
+        store.close()
+
+
+@cobol_group.group("skills")
+def skills_group() -> None:
+    """Manage COBOL GraphRAG skill-bank entries."""
+
+
+@skills_group.command("list")
+@click.argument("codebase_root", required=False, type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("--invalid", "include_invalid", is_flag=True, default=False)
+def skills_list_cmd(codebase_root: Path | None, include_invalid: bool) -> None:
+    from omnix.enrich.common import graph_db_path
+    from omnix.evolve.skill_bank import SkillBank
+
+    root = (codebase_root or Path.cwd()).resolve()
+    store = GraphStore(str(graph_db_path(root)))
+    try:
+        skills = SkillBank(store).list_all(include_invalid=include_invalid)
+        if not skills:
+            click.echo("No COBOL GraphRAG skills")
+            return
+        for skill in skills:
+            status = "invalid" if skill.t_invalid else "active"
+            click.echo(f"{skill.skill_id} v{skill.version} {status} {skill.title}")
+    finally:
+        store.close()
+
+
+@skills_group.command("rollback")
+@click.argument("skill_id")
+@click.argument("codebase_root", required=False, type=click.Path(exists=True, file_okay=False, path_type=Path))
+def skills_rollback_cmd(skill_id: str, codebase_root: Path | None) -> None:
+    from omnix.enrich.common import graph_db_path
+    from omnix.evolve.skill_bank import SkillBank
+
+    root = (codebase_root or Path.cwd()).resolve()
+    store = GraphStore(str(graph_db_path(root)))
+    try:
+        SkillBank(store).invalidate(skill_id, "manual rollback")
+        click.echo(f"rolled back {skill_id}")
+    finally:
+        store.close()
+
+
+@skills_group.command("review")
+@click.argument("codebase_root", required=False, type=click.Path(exists=True, file_okay=False, path_type=Path))
+def skills_review_cmd(codebase_root: Path | None) -> None:
+    from omnix.enrich.common import graph_db_path
+    from omnix.enrich.mock_provider import MockEnrichmentProvider
+    from omnix.evolve.designer import run_designer
+    from omnix.evolve.hard_case_buffer import HardCaseBuffer
+
+    root = (codebase_root or Path.cwd()).resolve()
+    store = GraphStore(str(graph_db_path(root)))
+    provider = MockEnrichmentProvider()
+    try:
+        report = asyncio.run(run_designer(store, HardCaseBuffer(store), provider))
+        click.echo(f"clusters={report.clusters_examined} skills_minted={report.skills_minted}")
+    finally:
+        store.close()
 
 
 @cobol_group.command("decide")

@@ -18,3 +18,10 @@ class DecisionUnavailable(CobolOrchestratorError):
 class BudgetExceeded(CobolOrchestratorError):
     """Budget guard blocked further dispatch."""
 
+
+class InsufficientContext(CobolOrchestratorError):
+    """GraphRAG traversal exhausted its context budget."""
+
+
+class SkillRolledBack(CobolOrchestratorError):
+    """A GraphRAG skill was invalidated after regression detection."""

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import shutil
 import time
@@ -46,6 +48,13 @@ class AgentConfig:
     rebuild_fn: RebuildHook | None = None
     capture_fn: StepHook | None = None
     spec_gen_fn: StepHook | None = None
+    graphrag_token_budget: int = 30000
+    graphrag_hop_depth: int = 4
+    graphrag_max_turns: int = 8
+    graphrag_confidence_threshold: float = 0.75
+    graphrag_skill_top_k: int = 3
+    graphrag_model: str = "claude-sonnet-4.6"
+    no_graphrag: bool = False
 
 
 @dataclass(frozen=True)
@@ -66,6 +75,7 @@ class ModernizeAgent:
         self.config = config
         self.run_state = run_state
         self.decision_queue = decision_queue
+        self._graphrag_contexts: dict[str, dict] = {}
 
     def run(self) -> AgentSummary:
         started = time.monotonic()
@@ -114,6 +124,7 @@ class ModernizeAgent:
             self.run_state.transition(program.program_id, "rebuilding")
             receipt, gate6_attempts = self._rebuild_with_gate6_retries(program)
             copied = copy_receipt_to_run(receipt, self.run_state.run_dir / "receipts")
+            self._write_graphrag_sidecar(program, copied)
             self.run_state.transition(
                 program.program_id,
                 "verified",
@@ -187,13 +198,17 @@ class ModernizeAgent:
             programs = iter_cobol_programs(store, self.config.codebase_root, node_filter=f"*{program.program_id}*")
             if not programs:
                 raise CobolRebuildError(f"COBOL program not found in graph: {program.program_id}")
+            target_node_id = resolve_graphrag_node_id(store, programs[0].node_id, program.program_id, program.source_path)
+            llm_dispatch = _reflexion_dispatch(gate6_failures)
+            if not self.config.no_graphrag and _has_target_enrichment(store, target_node_id):
+                llm_dispatch = self._graphrag_dispatch(store, target_node_id, program.program_id, gate6_failures)
             return rebuild_cobol_program(
                 store=store,
                 program_node_id=programs[0].node_id,
                 target_language=self.config.target_language,
                 receipts_dir=receipts_dir,
                 keystore=None,
-                llm_dispatch=_reflexion_dispatch(gate6_failures),
+                llm_dispatch=llm_dispatch,
                 project_path=self.config.codebase_root,
             )
         finally:
@@ -228,13 +243,7 @@ class ModernizeAgent:
 
     def _ensure_graph(self) -> None:
         db = self.config.codebase_root / ".omnix" / "omnix.db"
-        db.parent.mkdir(parents=True, exist_ok=True)
-        store = GraphStore(str(db))
-        try:
-            if store.node_count() == 0:
-                ingest_unified_codebase(str(self.config.codebase_root), store)
-        finally:
-            store.close()
+        ensure_cobol_graph(self.config.codebase_root, db).close()
 
     def _error_or_halt(self, program: DiscoveredProgram, exc: Exception) -> None:
         self.run_state.transition(program.program_id, "error", last_error=str(exc))
@@ -264,6 +273,107 @@ class ModernizeAgent:
             audit_zip=audit_zip,
         )
 
+    def _graphrag_dispatch(
+        self,
+        store: GraphStore,
+        target_node_id: str,
+        program_id: str,
+        gate6_failures: list[dict] | None,
+    ) -> Callable[[str], str]:
+        from omnix.evolve.controller import select_skills_for
+        from omnix.evolve.skill_bank import SkillBank
+        from omnix.retrieval.hybrid import retrieve
+
+        def dispatch(prompt: str) -> str:
+            try:
+                bundle = retrieve(
+                    store,
+                    target_node_id,
+                    budget_tokens=self.config.graphrag_token_budget,
+                    hop_depth=self.config.graphrag_hop_depth,
+                )
+                skills = select_skills_for(
+                    target_node_id,
+                    store,
+                    SkillBank(store),
+                    top_k=self.config.graphrag_skill_top_k,
+                )
+                skill_text = "\n".join(skill.prompt_addendum for skill in skills)
+                graphrag_context = (
+                    "\n\n# GraphRAG context\n"
+                    f"Target graph node: {target_node_id}\n"
+                    f"Retrieval modes: {json.dumps(bundle.retrieval_modes, sort_keys=True)}\n"
+                    f"Included graph context:\n{bundle.content}\n"
+                )
+                if skill_text:
+                    graphrag_context += "\n# Skills applied (from past rebuilds):\n" + skill_text + "\n"
+                final_prompt = prompt + graphrag_context
+                if gate6_failures:
+                    final_prompt = refine_prompt(
+                        ReflexionContext(
+                            original_prompt=final_prompt,
+                            failed_replica="",
+                            gate6_failures=gate6_failures,
+                        )
+                    )
+                self._graphrag_contexts[program_id] = {
+                    "target_node_id": target_node_id,
+                    "node_ids": bundle.node_ids,
+                    "retrieval_modes": bundle.retrieval_modes,
+                    "skills_applied": [
+                        {"skill_id": skill.skill_id, "version": skill.version, "t_valid": skill.t_valid}
+                        for skill in skills
+                    ],
+                    "token_cost": {
+                        "retrieval": bundle.estimated_tokens,
+                        "agent_loop": 0,
+                        "generation": 0,
+                        "designer": 0,
+                    },
+                    "enrichment_data_hash": hashlib.sha256(bundle.content.encode("utf-8")).hexdigest(),
+                }
+                return _default_llm_dispatch(final_prompt)
+            except Exception as exc:
+                self.run_state.emit_event(
+                    "graphrag_fallback",
+                    {"program_id": program_id, "error": f"{type(exc).__name__}: {exc}"},
+                )
+                fallback_prompt = (
+                    refine_prompt(
+                        ReflexionContext(
+                            original_prompt=prompt,
+                            failed_replica="",
+                            gate6_failures=gate6_failures,
+                        )
+                    )
+                    if gate6_failures
+                    else prompt
+                )
+                return _default_llm_dispatch(fallback_prompt)
+
+        return dispatch
+
+    def _write_graphrag_sidecar(self, program: DiscoveredProgram, receipt_path: Path) -> None:
+        context = self._graphrag_contexts.get(program.program_id)
+        if not context:
+            return
+        from omnix.provenance.sidecar import build_minimal_sidecar, write_sidecar
+        from omnix.provenance.signer import SidecarSigner
+
+        sidecar = build_minimal_sidecar(
+            program_id=program.program_id,
+            receipt_path=receipt_path,
+            receipt_sig_path=receipt_path.with_suffix(".sig"),
+            retrieval_modes=context.get("retrieval_modes", {}),
+            traversal_path=[],
+            skills_applied=context.get("skills_applied", []),
+            token_cost=context.get("token_cost", {}),
+        )
+        sidecar["subgraph_node_ids"] = list(context.get("node_ids", []))
+        sidecar["target_node_id"] = context.get("target_node_id")
+        sidecar["enrichment_data_hash"] = context.get("enrichment_data_hash")
+        write_sidecar(receipt_path.parent, program.program_id, sidecar, SidecarSigner(self.config.codebase_root))
+
 
 def _prepared_fixtures(program: DiscoveredProgram, root: Path) -> Path:
     fixtures_root = root / program.program_id
@@ -286,6 +396,47 @@ def _prepared_fixtures(program: DiscoveredProgram, root: Path) -> Path:
         empty.mkdir()
         (empty / "input.bin").write_bytes(b"")
     return fixtures_root
+
+
+def ensure_cobol_graph(codebase_root: Path, db_path: Path) -> GraphStore:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    store = GraphStore(str(db_path))
+    if store.node_count() == 0:
+        ingest_unified_codebase(str(codebase_root), store)
+    return store
+
+
+def resolve_graphrag_node_id(
+    store: GraphStore,
+    program_node_id: str,
+    program_id: str,
+    source_path: Path,
+) -> str:
+    if _node_exists(store, program_node_id):
+        return program_node_id
+    source_name = source_path.name
+    for node in store.iter_all_nodes():
+        if node.file_path and Path(node.file_path).name == source_name:
+            return node.id
+    needle = program_id.upper()
+    for node in store.iter_all_nodes():
+        if needle in node.name.upper() or needle in node.id.upper():
+            return node.id
+    return program_node_id
+
+
+def _node_exists(store: GraphStore, node_id: str) -> bool:
+    row = store.sqlite_connection().execute("SELECT 1 FROM nodes WHERE id = ? LIMIT 1", (node_id,)).fetchone()
+    return row is not None
+
+
+def _has_target_enrichment(store: GraphStore, target_node_id: str) -> bool:
+    from omnix.enrich.common import get_node, has_enrichment
+
+    target = get_node(store, target_node_id)
+    if has_enrichment(target):
+        return True
+    return any(has_enrichment(neighbor) for neighbor in store.get_neighbors(target_node_id))
 
 
 def _counts(rows: list[ProgramStateRow]) -> dict[str, int]:

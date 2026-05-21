@@ -9,12 +9,17 @@ description = "Code intelligence platform with AXIOM ML-DSA-65 provenance"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "bm25s>=0.2.0",
     "cryptography>=42.0",
     "click>=8.1",
     "fastapi>=0.110",
+    "graspologic>=3.4.0; python_version < '3.13'",
     "hypothesis>=6.100",
     "keyring>=25.0",
     "py4j==0.10.9.7",
+    "sentence-transformers>=2.7.0,<3.0",
+    "sqlite-vec>=0.1.10a4",
+    "tiktoken>=0.7.0",
     "uvicorn[standard]>=0.25",
     "watchdog>=6.0",
 ]

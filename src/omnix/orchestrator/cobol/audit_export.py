@@ -38,6 +38,12 @@ def export_audit_zip(
             sig = receipt.with_suffix(".sig")
             if sig.is_file():
                 zf.write(sig, f"receipts/{sig.name}")
+            sidecar = receipt.with_suffix(".provenance.json")
+            sidecar_sig = receipt.with_suffix(".provenance.sig")
+            if sidecar.is_file():
+                zf.write(sidecar, f"receipts/{sidecar.name}")
+            if sidecar_sig.is_file():
+                zf.write(sidecar_sig, f"receipts/{sidecar_sig.name}")
             if include_replicas:
                 replica = receipt.with_suffix(".py")
                 if replica.is_file():
@@ -54,7 +60,7 @@ def copy_receipt_to_run(receipt: Path, run_receipts_dir: Path) -> Path:
     run_receipts_dir.mkdir(parents=True, exist_ok=True)
     dest = run_receipts_dir / receipt.name
     shutil.copy2(receipt, dest)
-    for suffix in (".sig", ".py"):
+    for suffix in (".sig", ".py", ".provenance.json", ".provenance.sig"):
         sibling = receipt.with_suffix(suffix)
         if sibling.is_file():
             shutil.copy2(sibling, dest.with_suffix(suffix))
@@ -93,6 +99,10 @@ def canonical(payload: dict) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
+def canonical_sidecar(payload: dict) -> bytes:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+
+
 def main() -> int:
     pub_path = Path("public_key.pem")
     if not pub_path.is_file() or not pub_path.read_text(encoding="utf-8").strip():
@@ -102,6 +112,8 @@ def main() -> int:
     failures = 0
     receipts = sorted(Path("receipts").glob("*.json"))
     for receipt in receipts:
+        if receipt.name.endswith(".provenance.json"):
+            continue
         payload = json.loads(receipt.read_text(encoding="utf-8"))
         sig = base64.b64decode(receipt.with_suffix(".sig").read_text(encoding="utf-8").strip(), validate=True)
         try:
@@ -112,6 +124,17 @@ def main() -> int:
         except InvalidSignature:
             print(f"{receipt.name}: BAD_SIGNATURE")
             failures += 1
+        sidecar = receipt.with_suffix(".provenance.json")
+        sidecar_sig = receipt.with_suffix(".provenance.sig")
+        if sidecar.is_file() and sidecar_sig.is_file():
+            sidecar_payload = json.loads(sidecar.read_text(encoding="utf-8"))
+            sig2 = base64.b64decode(sidecar_sig.read_text(encoding="utf-8").strip(), validate=True)
+            try:
+                key.verify(sig2, canonical_sidecar(sidecar_payload))
+                print(f"{sidecar.name}: OK")
+            except InvalidSignature:
+                print(f"{sidecar.name}: BAD_SIGNATURE")
+                failures += 1
     if not receipts:
         print("no receipts")
         return 1
@@ -121,4 +144,3 @@ def main() -> int:
 if __name__ == "__main__":
     sys.exit(main())
 '''
-

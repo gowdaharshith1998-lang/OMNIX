@@ -9,6 +9,7 @@ import inspect
 import json
 import os
 import sys
+from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
 from typing import Any, Callable
@@ -35,6 +36,27 @@ class ExitCode(IntEnum):
     OK = 0
     FAIL = 1
     ERROR = 2
+
+
+@dataclass(frozen=True)
+class VerificationResult:
+    ok: bool
+    artifact: str
+    message: str = ""
+
+
+def verify_sidecar(sidecar_path: Path, sig_path: Path, pubkey: Path) -> VerificationResult:
+    """Verify a supplementary GraphRAG provenance sidecar independently."""
+    from omnix.provenance.sidecar import load_sidecar
+    from omnix.provenance.signer import verify_sidecar_signature
+
+    if not sidecar_path.is_file():
+        return VerificationResult(False, str(sidecar_path), "sidecar missing")
+    if not sig_path.is_file():
+        return VerificationResult(False, str(sidecar_path), "sidecar signature missing")
+    payload = load_sidecar(sidecar_path)
+    ok = verify_sidecar_signature(payload, sig_path.read_text(encoding="utf-8").strip(), pubkey)
+    return VerificationResult(ok, str(sidecar_path), "OK" if ok else "BAD_SIGNATURE")
 
 
 def _sha256_file(p: Path) -> str:
@@ -188,7 +210,7 @@ def _hypothesis_example_database() -> DirectoryBasedExampleDatabase | InMemoryEx
         base.mkdir(parents=True, exist_ok=True)
     except OSError:
         return InMemoryExampleDatabase()
-    return DirectoryBasedExampleDatabase(str(base))
+    return DirectoryBasedExampleDatabase(base)
 
 
 def _tuple_strat(

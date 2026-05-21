@@ -1,0 +1,8 @@
+# OMNIX GraphRAG M2
+
+- Ownership: `omnix.enrich` owns offline COBOL enrichment; `omnix.retrieval` owns BM25/vector/graph retrieval; `omnix.traversal` owns the bounded single-agent tool loop; `omnix.provenance` owns sidecar JSON and detached signatures; `omnix.evolve` owns skill-bank and hard-case evolution.
+- Heavy dependencies must lazy-load. Importing `omnix.enrich`, `omnix.retrieval`, `omnix.traversal`, `omnix.provenance`, or `omnix.evolve` must not download models or load sqlite extensions.
+- Locked picks: BAAI/bge-small-en-v1.5, sqlite-vec, bm25s, graspologic hierarchical Leiden, tiktoken cl100k_base, Ed25519 sidecar signatures.
+- Do not modify receipt JSON schema, `src/omnix/gates/gate6_behavioral.py`, or the core `rebuild_cobol_program` algorithm in `src/omnix/rebuild/cobol_runner.py`.
+- Runtime architecture is single-agent with tools. Test execution may use helper agents, but product orchestration must not introduce separate runtime agents.
+- Canonical spec: `.omnix/m2-graphrag-spec.md`.
