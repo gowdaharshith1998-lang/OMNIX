@@ -31,7 +31,7 @@ async def run_designer(
         fabric_provider,
         "Return JSON {'skills': [...]} for reusable COBOL rebuild skills from these hard cases: "
         + repr([case.__dict__ for case in cases]),
-        model="claude-opus-4.7",
+        model="gpt-4.1",
         json_mode=True,
     )
     content, cost = response_content(result)

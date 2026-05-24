@@ -18,7 +18,7 @@ def test_enrich_cli_uses_project_omnix_db(tmp_path) -> None:
     store.commit()
     store.close()
     runner = CliRunner()
-    result = runner.invoke(main, ["cobol", "enrich", str(tmp_path), "--passes", "1"])
+    result = runner.invoke(main, ["cobol", "enrich", str(tmp_path), "--passes", "1", "--mock"])
     assert result.exit_code == 0, result.output
     assert "mock_calls=" in result.output
 

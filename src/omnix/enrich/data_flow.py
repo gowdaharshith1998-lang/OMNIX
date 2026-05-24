@@ -20,7 +20,7 @@ from omnix.enrich.common import (
 from omnix.graph.store import GraphStore, NodeRow
 
 PASS_NAME = "data_flow"
-MODEL = "claude-opus-4.7"
+MODEL = "gpt-4.1"
 
 
 async def enrich_data_flow(

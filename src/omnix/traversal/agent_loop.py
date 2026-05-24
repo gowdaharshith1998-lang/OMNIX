@@ -37,7 +37,7 @@ async def run_agentic_traversal(
     budget: TraversalBudget,
     *,
     run_dir: Path | None = None,
-    model: str = "claude-sonnet-4.6",
+    model: str = "gpt-4.1",
     confidence_threshold: float = 0.75,
     system_prompt_suffix: str = "",
 ) -> TraversalResult:

@@ -116,14 +116,17 @@ def modernize_cmd(
 @click.option("--budget-usd", default=None, type=float)
 @click.option("--batch-size", default=50, type=int, show_default=True)
 @click.option("--force", is_flag=True, default=False)
+@click.option("--mock/--live", "mock", default=False, show_default=True)
 def enrich_cmd(
     codebase_root: Path,
     passes_text: str,
     budget_usd: float | None,
     batch_size: int,
     force: bool,
+    mock: bool,
 ) -> None:
     """Run offline COBOL GraphRAG enrichment against the project graph."""
+    from omnix.enrich.live_provider import OpenAIEnrichmentProvider
     from omnix.enrich.mock_provider import MockEnrichmentProvider
     from omnix.enrich.passes import run_passes
     from omnix.orchestrator.cobol.agent import ensure_cobol_graph
@@ -131,7 +134,8 @@ def enrich_cmd(
     root = codebase_root.resolve()
     db_path = root / ".omnix" / "omnix.db"
     store = ensure_cobol_graph(root, db_path)
-    provider = MockEnrichmentProvider()
+    mock_provider = MockEnrichmentProvider() if mock else None
+    provider = mock_provider if mock_provider is not None else OpenAIEnrichmentProvider()
     try:
         report = asyncio.run(
             run_passes(
@@ -143,9 +147,15 @@ def enrich_cmd(
                 force=force,
             )
         )
+        if mock_provider is not None:
+            provider_label = "mock"
+            extra = f" mock_calls={len(mock_provider.calls)}"
+        else:
+            provider_label = "openai"
+            extra = ""
         click.echo(
             f"enriched passes={len(report.reports)} cost=${report.total_cost_usd:.4f} "
-            f"mock_calls={len(provider.calls)} db={db_path}"
+            f"provider={provider_label}{extra} db={db_path}"
         )
     finally:
         store.close()

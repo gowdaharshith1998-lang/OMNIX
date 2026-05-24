@@ -20,7 +20,7 @@ from omnix.enrich.common import (
 from omnix.graph.store import GraphStore, NodeRow
 
 PASS_NAME = "logic"
-MODEL = "claude-sonnet-4.6"
+MODEL = "gpt-4.1"
 
 
 async def enrich_logic(

@@ -15,7 +15,7 @@ from omnix.enrich.common import (
 from omnix.graph.store import GraphStore, NodeRow
 
 PASS_NAME = "communities"
-MODEL = "claude-opus-4.7"
+MODEL = "gpt-4.1"
 DEPENDENCY_EDGES = {
     "CALLS",
     "COPIES",

@@ -23,7 +23,7 @@ from omnix.enrich.common import (
 from omnix.graph.store import GraphStore, NodeRow
 
 PASS_NAME = "signatures"
-MODEL = "claude-haiku-4.5"
+MODEL = "gpt-4.1-mini"
 
 
 async def enrich_signatures(
