@@ -2,6 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getStudioInitial, openWorkspace } from "@/lib/api";
 import { Welcome } from "./components/Welcome";
 import { Workspace } from "./components/Workspace";
+import { M42Workspace } from "./components/m42/M42Workspace";
+
+const USE_M42 =
+  typeof window === "undefined"
+    ? true
+    : new URLSearchParams(window.location.search).get("legacy") !== "1";
 
 export default function App() {
   const [busy, setBusy] = useState(false);
@@ -56,6 +62,16 @@ export default function App() {
   }, [onOpenPath]);
 
   if (session) {
+    if (USE_M42) {
+      return (
+        <M42Workspace
+          workspaceId={session.workspaceId}
+          projectPath={session.path}
+          initialStats={session.stats}
+          onBack={() => setSession(null)}
+        />
+      );
+    }
     return (
       <Workspace
         workspaceId={session.workspaceId}
