@@ -45,9 +45,12 @@ def _bench_draws(name: str, strategy: Any, iterations: int, rng_seed: int = 0) -
     from random import Random
 
     rnd = Random(rng_seed)
+    # Hypothesis >=6.119 made max_length + prefix required positionals on
+    # ConjectureData.__init__ (previously defaulted). 8192 matches the
+    # historical BUFFER_SIZE default and is plenty for calibration draws.
     for i in range(iterations):
         rnd.seed(rng_seed + i)
-        strategy.do_draw(ConjectureData(random=rnd))
+        strategy.do_draw(ConjectureData(max_length=8192, prefix=b"", random=rnd))
 
 
 def _run_benchmark_profile(
