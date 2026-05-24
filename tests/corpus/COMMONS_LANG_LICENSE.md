@@ -12,7 +12,7 @@ part of any OMNIX product.
 | Upstream artifact | `commons-lang:commons-lang:2.6` |
 | Upstream source | `https://repo1.maven.org/maven2/commons-lang/commons-lang/2.6/commons-lang-2.6-sources.jar` |
 | Full file size | 6594 lines / ~268 KB |
-| Vendored | `tests/corpus/commons_lang/StringUtils.java` (trimmed — see below) |
+| Vendored | `tests/corpus/commons_lang/StringUtils.java` (trimmed — see below); full regression fixture at `tests/fixtures/java/commons-lang-2.6/src/main/java/org/apache/commons/lang/StringUtils.java` |
 | License | Apache License 2.0 |
 | Era | Java 6 (`org.apache.commons.lang` package — not `lang3`) |
 
@@ -73,5 +73,7 @@ JavaDoc. No author attribution was removed (the trimmed file references
 "Apache Software Foundation" only — individual contributor `@author` tags
 applied to deleted methods).
 
-OMNIX vendors this file as test data only. It is not part of any
-distributable artifact.
+OMNIX vendors these files as test data only. They are not part of any
+distributable artifact. The full fixture is retained specifically to guard
+method-count and overload-indexing behavior; the trimmed corpus remains the
+self-contained rebuild smoke fixture.

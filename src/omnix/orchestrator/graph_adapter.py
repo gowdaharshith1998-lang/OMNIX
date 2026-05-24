@@ -6,11 +6,13 @@ and `get_node(fqn) -> SemanticNode`. The real `GraphStore` exposes `NodeRow` /
 `EdgeRow` instead. This adapter does the format translation.
 
 Storage convention (this adapter's contract with `populate_from_semantic_nodes`):
-- `NodeRow.id` holds the FQN (used as primary key).
+- `NodeRow.id` holds a stable graph FQN. For overloaded Java methods this is
+  the semantic FQN plus resolved parameter types, so overloads do not collide.
 - `NodeRow.name` holds the unqualified symbol name.
 - `NodeRow.type` holds the `SemanticNode.kind` value (v1: "method").
 - `NodeRow.metadata` is a JSON dict with keys: `signature`, `resolved_param_types`,
-  `resolved_return_type`. Round-trips lossless because we control both sides.
+  `resolved_return_type`, and `semantic_fqn`. Round-trips lossless because we
+  control both sides.
 - `EdgeRow.relationship == "calls"` for dependency edges that the dispatcher cares
   about. Other relationships are ignored by the adapter — orchestrator topo only
   walks call edges.
@@ -18,6 +20,8 @@ Storage convention (this adapter's contract with `populate_from_semantic_nodes`)
 
 from __future__ import annotations
 
+import hashlib
+from collections import Counter
 from typing import Iterable
 
 from omnix.graph.store import GraphStore
@@ -64,6 +68,13 @@ class GraphStoreAdapter:
         for n in self.get_all_nodes():
             if n.fqn == fqn:
                 return n
+        matches = [
+            n
+            for n in self.get_all_nodes()
+            if n.fqn.split("(", 1)[0] == fqn
+        ]
+        if matches:
+            return sorted(matches, key=lambda n: n.fqn)[0]
         raise KeyError(fqn)
 
 
@@ -84,30 +95,39 @@ def populate_from_semantic_nodes(
             dispatcher's `_collect_graph_inputs` policy of dropping out-of-graph
             dependencies before topo sort.
     """
-    fqns = {n.fqn for n in nodes}
-    for n in nodes:
+    node_list = list(nodes)
+    node_ids = _node_ids_by_identity(node_list)
+    graph_ids = set(node_ids.values())
+    semantic_to_graph = _semantic_to_graph_id(node_list, node_ids)
+    for n in node_list:
+        graph_id = node_ids[id(n)]
         # Unqualified name = last dotted segment.
         name = n.fqn.rsplit(".", 1)[-1]
         metadata = {
+            "semantic_fqn": n.fqn,
             "signature": n.signature,
             "resolved_param_types": list(n.resolved_param_types),
             "resolved_return_type": n.resolved_return_type,
+            "visibility": _visibility_from_signature(n.signature),
+            "deprecated": False,
         }
         store.add_node(
-            id=n.fqn,
+            id=graph_id,
             name=name,
             type=n.kind,
             file_path=n.source_location.file_path,
             start_line=n.source_location.line,
             metadata=metadata,
         )
-    for n in nodes:
+    for n in node_list:
+        source_id = node_ids[id(n)]
         for edge in n.dependency_edges:
-            if drop_external_edges and edge.target_fqn not in fqns:
+            target_id = semantic_to_graph.get(edge.target_fqn, edge.target_fqn)
+            if drop_external_edges and target_id not in graph_ids:
                 continue
             store.add_edge(
-                source_id=n.fqn,
-                target_id=edge.target_fqn,
+                source_id=source_id,
+                target_id=target_id,
                 relationship=edge.kind,
                 metadata={"line": edge.line},
             )
@@ -115,3 +135,46 @@ def populate_from_semantic_nodes(
     # until an explicit commit. Without this, close() rolls back our inserts and
     # the next connection sees an empty DB.
     store.commit()
+
+
+def _node_ids_by_identity(nodes: list[SemanticNode]) -> dict[int, str]:
+    fqn_counts = Counter(n.fqn for n in nodes)
+    used: set[str] = set()
+    out: dict[int, str] = {}
+    for n in nodes:
+        if fqn_counts[n.fqn] == 1:
+            candidate = n.fqn
+        else:
+            params = ",".join(n.resolved_param_types)
+            candidate = f"{n.fqn}({params})"
+        if candidate in used:
+            sig_hash = hashlib.sha256(n.signature.encode("utf-8")).hexdigest()[:12]
+            candidate = f"{candidate}#{sig_hash}"
+        suffix = 2
+        base_candidate = candidate
+        while candidate in used:
+            candidate = f"{base_candidate}-{suffix}"
+            suffix += 1
+        used.add(candidate)
+        out[id(n)] = candidate
+    return out
+
+
+def _semantic_to_graph_id(
+    nodes: list[SemanticNode], node_ids: dict[int, str]
+) -> dict[str, str]:
+    grouped: dict[str, list[str]] = {}
+    for n in nodes:
+        grouped.setdefault(n.fqn, []).append(node_ids[id(n)])
+    return {
+        semantic_fqn: ids[0]
+        for semantic_fqn, ids in grouped.items()
+        if len(ids) == 1
+    }
+
+
+def _visibility_from_signature(signature: str) -> str:
+    first = (signature.strip().split(" ", 1)[0] if signature.strip() else "").lower()
+    if first in {"public", "protected", "private"}:
+        return first
+    return "package"
