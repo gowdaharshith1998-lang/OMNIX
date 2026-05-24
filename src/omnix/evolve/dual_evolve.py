@@ -31,6 +31,7 @@ BYTE_OFFSET_PATTERNS = (
     r"byte\s+offset\s+\d+",
     r"position\s+\d+\s+mismatch",
     r"trailing\s+whitespace",
+    r"\bdata-item\s+padding\b",
     r"padding\s+(differs|mismatch)",
     r"fixed-width",
     r"PIC\s+[X9]\(\d+\)",

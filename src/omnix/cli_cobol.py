@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import click
@@ -43,6 +45,7 @@ def cobol_group() -> None:
 @click.option("--graphrag-skill-top-k", default=3, type=int, show_default=True)
 @click.option("--graphrag-model", default="claude-sonnet-4.6", show_default=True)
 @click.option("--no-graphrag", is_flag=True, default=False)
+@click.option("--accuracy-boost", is_flag=True, default=False)
 def modernize_cmd(
     codebase: Path | None,
     target_language: str,
@@ -60,6 +63,7 @@ def modernize_cmd(
     graphrag_skill_top_k: int,
     graphrag_model: str,
     no_graphrag: bool,
+    accuracy_boost: bool,
 ) -> None:
     """Run the sequential COBOL modernization orchestrator."""
     from omnix.orchestrator.cobol.agent import AgentConfig, ModernizeAgent, print_summary
@@ -75,39 +79,63 @@ def modernize_cmd(
         root = codebase.resolve()
         state = RunState.create(root, target_language, budget_usd)
     queue = TerminalDecisionQueue(state)
-    agent = ModernizeAgent(
-        AgentConfig(
-            codebase_root=root,
-            target_language=target_language,
-            budget_usd=budget_usd,
-            max_gate6_retries=max_retries,
-            auto_skip_no_fixtures=auto_skip_no_fixtures,
-            halt_on_failure=halt_on_failure,
-            decision_timeout_s=decision_timeout_s,
-            no_auto_audit=no_auto_audit,
-            graphrag_token_budget=graphrag_token_budget,
-            graphrag_hop_depth=graphrag_hop_depth,
-            graphrag_max_turns=graphrag_max_turns,
-            graphrag_confidence_threshold=graphrag_confidence_threshold,
-            graphrag_skill_top_k=graphrag_skill_top_k,
-            graphrag_model=graphrag_model,
-            no_graphrag=no_graphrag,
-        ),
-        run_state=state,
-        decision_queue=queue,
-    )
     try:
-        summary = agent.resume() if resume_run_id else agent.run()
-        click.echo(print_summary(summary), err=True)
-        if summary.gate6_failed or summary.errored:
-            raise SystemExit(1)
-        if summary.verified == 0 and summary.skipped > 0:
-            raise SystemExit(1)
+        with _accuracy_boost_env(accuracy_boost):
+            agent = ModernizeAgent(
+                AgentConfig(
+                    codebase_root=root,
+                    target_language=target_language,
+                    budget_usd=budget_usd,
+                    max_gate6_retries=max_retries,
+                    auto_skip_no_fixtures=auto_skip_no_fixtures,
+                    halt_on_failure=halt_on_failure,
+                    decision_timeout_s=decision_timeout_s,
+                    no_auto_audit=no_auto_audit,
+                    graphrag_token_budget=graphrag_token_budget,
+                    graphrag_hop_depth=graphrag_hop_depth,
+                    graphrag_max_turns=graphrag_max_turns,
+                    graphrag_confidence_threshold=graphrag_confidence_threshold,
+                    graphrag_skill_top_k=graphrag_skill_top_k,
+                    graphrag_model=graphrag_model,
+                    no_graphrag=no_graphrag,
+                ),
+                run_state=state,
+                decision_queue=queue,
+            )
+            summary = agent.resume() if resume_run_id else agent.run()
+            click.echo(print_summary(summary), err=True)
+            if summary.gate6_failed or summary.errored:
+                raise SystemExit(1)
+            if summary.verified == 0 and summary.skipped > 0:
+                raise SystemExit(1)
     except KeyboardInterrupt:
         click.echo(f"Run paused. Resume with: omnix cobol modernize --resume {state.run_id}", err=True)
         raise SystemExit(130)
     finally:
         state.close()
+
+
+@contextmanager
+def _accuracy_boost_env(enabled: bool) -> Iterator[None]:
+    if not enabled:
+        yield
+        return
+    updates = {
+        "OMNIX_CHUNK_MODE": "auto",
+        "OMNIX_GRAPHRAG_RERANK_MODE": "auto",
+        "OMNIX_MCTS_MODE": "auto",
+        "OMNIX_ESE_MODE": "auto",
+    }
+    previous = {key: os.environ.get(key) for key in updates}
+    os.environ.update(updates)
+    try:
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 @cobol_group.command("enrich")

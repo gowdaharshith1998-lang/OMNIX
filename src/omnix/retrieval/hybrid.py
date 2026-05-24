@@ -6,6 +6,7 @@ from omnix.enrich.common import enriched_text, get_node, has_enrichment
 from omnix.graph.store import GraphStore
 from omnix.retrieval.bm25_index import Bm25Index
 from omnix.retrieval.graph_walker import walk_from
+from omnix.retrieval.reranker import rerank, rerank_mode
 from omnix.retrieval.rrf import reciprocal_rank_fusion
 from omnix.retrieval.token_packer import PackedBundle, pack_into_budget
 from omnix.retrieval.vector_index import VectorIndex
@@ -44,13 +45,22 @@ def retrieve(
             content.append((node_id, enriched_text(node) or node.name))
     if target is not None and target.id not in {node_id for node_id, _ in content}:
         content.insert(0, (target.id, enriched_text(target) or target.name))
+    rerank_count = 0
+    if content and rerank_mode() != "off":
+        candidates = content[:20]
+        ranked = rerank(query_text, [text for _node_id, text in candidates], top_n=min(10, len(candidates)))
+        content = [candidates[idx] for idx, _score in ranked if idx < len(candidates)]
+        rerank_count = len(candidates)
+    retrieval_modes = {
+        "bm25": len(bm25),
+        "vector": len(vector),
+        "graph": len(graph_hits),
+    }
+    if rerank_count:
+        retrieval_modes["rerank"] = rerank_count
     return pack_into_budget(
         content,
         budget_tokens,
         scores=scores,
-        retrieval_modes={
-            "bm25": len(bm25),
-            "vector": len(vector),
-            "graph": len(graph_hits),
-        },
+        retrieval_modes=retrieval_modes,
     )

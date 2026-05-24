@@ -8,5 +8,10 @@
 - Canonical spec: `.omnix/m2-graphrag-spec.md`.
 - `omnix cobol enrich --mock` must remain available for CI and sidecar smoke tests without live enrichment spend.
 - `OMNIX_GRAPHRAG_EMBED_MODE` controls retrieval embeddings: `auto` lazily tries `BAAI/bge-small-en-v1.5` then falls back to hash, `real` requires the model, and `hash` is deterministic/offline.
+- `OMNIX_CHUNK_MODE` controls M3.5 COBOL vector-index chunking when explicitly set: `auto` tries AST chunking then falls back to line chunks, `ast` requires the optional tree-sitter COBOL grammar, and `line` uses deterministic line chunks. When unset, vector indexing preserves the M2 node-level behavior.
+- `OMNIX_GRAPHRAG_RERANK_MODE` controls the M3.5 bge-reranker-v2-m3 L2.5 layer: `off` is default, `auto` falls back to fused order if the model is unavailable, and `on` raises if the reranker cannot load.
+- `OMNIX_MCTS_MODE` controls the M3.5 thought-level retry hook: `off` is default, `auto`/`on` run shallow MCTS after the first Gate 6 failure. `OMNIX_MCTS_BUDGET` defaults to `8`.
+- `OMNIX_ESE_MODE` controls the M3.5 Ensemble Semantic Entropy/Cas retry telemetry: `off` is default, `auto`/`on` evaluate candidate-output entropy after the first Gate 6 failure. `OMNIX_ESE_THRESHOLD` defaults to `0.6`.
+- `omnix cobol modernize --accuracy-boost` sets `OMNIX_CHUNK_MODE=auto`, `OMNIX_GRAPHRAG_RERANK_MODE=auto`, `OMNIX_MCTS_MODE=auto`, and `OMNIX_ESE_MODE=auto` for that run only.
 - `SkillBank.auto_rollback_on_regression()` runs after successful GraphRAG rebuild sidecar emission; rollback errors must emit events and must not fail the rebuild.
 - `dual_evolve.parse_failure_analysis()` is deterministic keyword routing and must never call an LLM.

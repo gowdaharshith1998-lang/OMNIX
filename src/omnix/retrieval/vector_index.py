@@ -9,8 +9,9 @@ import os
 import sys
 from typing import Any, Literal
 
-from omnix.enrich.common import enriched_text
+from omnix.enrich.common import enriched_text, source_for_node
 from omnix.graph.store import GraphStore
+from omnix.retrieval.ast_chunker import chunk_cobol
 
 NodeType = Literal["paragraphs", "programs", "copybooks", "data_items"]
 TABLES: dict[str, str] = {
@@ -57,7 +58,13 @@ class VectorIndex:
         for node in store.iter_all_nodes():
             text = enriched_text(node)
             if text and node.type in TABLES:
-                self.upsert(node.id, node.type, text)
+                if _chunking_requested() and node.type in {"CobolProgram", "CobolModule", "CobolCopybook"}:
+                    source = source_for_node(node)
+                    for idx, chunk in enumerate(chunk_cobol(source)):
+                        chunk_text = f"{text}\n{chunk.text}" if text and text not in chunk.text else chunk.text
+                        self.upsert(f"{node.id}::chunk:{idx}", node.type, chunk_text)
+                else:
+                    self.upsert(node.id, node.type, text)
         store.commit()
 
     def query(self, text: str, node_type: str = "programs", top_k: int = 20) -> list[tuple[str, float]]:
@@ -70,8 +77,12 @@ class VectorIndex:
         for row in rows:
             emb = json.loads(str(row["embedding"]))
             distance = 1.0 - cosine_similarity(target, emb)
-            scored.append((str(row["node_id"]), distance))
-        return sorted(scored, key=lambda item: (item[1], item[0]))[:top_k]
+            scored.append((_base_node_id(str(row["node_id"])), distance))
+        best_by_node: dict[str, float] = {}
+        for node_id, distance in scored:
+            if node_id not in best_by_node or distance < best_by_node[node_id]:
+                best_by_node[node_id] = distance
+        return sorted(best_by_node.items(), key=lambda item: (item[1], item[0]))[:top_k]
 
 
 def _table_for(node_type: str) -> str:
@@ -87,6 +98,14 @@ def _table_for(node_type: str) -> str:
     if normalized in {"data_item", "data_items", "dataitem"}:
         return "vec_data_items"
     raise ValueError(f"unknown vector node type: {node_type}")
+
+
+def _chunking_requested() -> bool:
+    return "OMNIX_CHUNK_MODE" in os.environ
+
+
+def _base_node_id(node_id: str) -> str:
+    return node_id.split("::chunk:", 1)[0]
 
 
 def _embed_mode() -> Literal["auto", "real", "hash"]:

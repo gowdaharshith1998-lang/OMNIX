@@ -8,7 +8,7 @@ import os
 import shutil
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 
@@ -68,6 +68,7 @@ class AgentSummary:
     elapsed_seconds: float
     receipts_dir: Path
     audit_zip: Path | None
+    accuracy_boost_metrics: dict[str, int] = field(default_factory=dict)
 
 
 class ModernizeAgent:
@@ -76,6 +77,11 @@ class ModernizeAgent:
         self.run_state = run_state
         self.decision_queue = decision_queue
         self._graphrag_contexts: dict[str, dict] = {}
+        self._accuracy_boost_metrics = {
+            "rerank_invocations": 0,
+            "mcts_invocations": 0,
+            "ese_escalations": 0,
+        }
 
     def run(self) -> AgentSummary:
         started = time.monotonic()
@@ -182,6 +188,8 @@ class ModernizeAgent:
                     raise
                 attempts += 1
                 gate6_failures = list(exc.details.get("failures") or [])
+                if attempts == 1:
+                    gate6_failures = self._apply_accuracy_boost_retry_hooks(program, gate6_failures)
                 self.run_state.transition(
                     program.program_id,
                     "rebuilding",
@@ -272,6 +280,80 @@ class ModernizeAgent:
             elapsed_seconds=time.monotonic() - started,
             receipts_dir=self.run_state.run_dir / "receipts",
             audit_zip=audit_zip,
+            accuracy_boost_metrics=dict(self._accuracy_boost_metrics),
+        )
+
+    def _apply_accuracy_boost_retry_hooks(
+        self,
+        program: DiscoveredProgram,
+        gate6_failures: list[dict],
+    ) -> list[dict]:
+        thought = self._select_mcts_thought(program, gate6_failures)
+        failures = [dict(failure) for failure in gate6_failures]
+        if thought:
+            for failure in failures:
+                failure["mcts_thought"] = thought
+        self._run_ese_cascade(program, failures)
+        return failures
+
+    def _select_mcts_thought(self, program: DiscoveredProgram, gate6_failures: list[dict]) -> str | None:
+        from omnix.traversal import thought_mcts
+
+        if not thought_mcts.mcts_enabled():
+            return None
+        seed_thoughts = [
+            "focus on data-item padding",
+            "focus on file output trailers",
+            "focus on PERFORM ordering",
+        ]
+
+        def expand_fn(node: thought_mcts.ThoughtNode) -> list[str]:
+            return [
+                f"{node.thought} with fixture byte diffs",
+                f"{node.thought} with graph neighbor evidence",
+                f"{node.thought} with captured stdout comparison",
+            ]
+
+        def evaluate_fn(node: thought_mcts.ThoughtNode) -> float:
+            return _score_thought_against_failures(node.thought, gate6_failures)
+
+        best = thought_mcts.search(seed_thoughts, expand_fn, evaluate_fn)
+        if best.thought == "root":
+            return None
+        self._accuracy_boost_metrics["mcts_invocations"] += 1
+        self.run_state.emit_event(
+            "mcts_thought_selected",
+            {"program_id": program.program_id, "thought": best.thought, "visits": best.visits},
+        )
+        return best.thought
+
+    def _run_ese_cascade(self, program: DiscoveredProgram, gate6_failures: list[dict]) -> None:
+        from omnix.evolve import ensemble_entropy
+
+        if ensemble_entropy.ese_mode() not in {"on", "auto"}:
+            return
+        outputs = [str(failure.get("candidate_stdout", "")) for failure in gate6_failures]
+        outputs = [output for output in outputs if output]
+        if not outputs:
+            return
+        idx = 0
+
+        def generate_fn(_model_name: str) -> str:
+            nonlocal idx
+            output = outputs[idx % len(outputs)]
+            idx += 1
+            return output
+
+        chosen, telemetry = ensemble_entropy.cascading_generate(generate_fn)
+        escalations = max(0, len(telemetry.get("stages", [])) - 1)
+        self._accuracy_boost_metrics["ese_escalations"] += escalations
+        self.run_state.emit_event(
+            "ese_cascade_evaluated",
+            {
+                "program_id": program.program_id,
+                "chosen_output_sha256": hashlib.sha256(chosen.encode("utf-8")).hexdigest(),
+                "telemetry": telemetry,
+            },
         )
 
     def _graphrag_dispatch(
@@ -306,6 +388,14 @@ class ModernizeAgent:
                     f"Retrieval modes: {json.dumps(bundle.retrieval_modes, sort_keys=True)}\n"
                     f"Included graph context:\n{bundle.content}\n"
                 )
+                if gate6_failures:
+                    from omnix.evolve.dual_evolve import parse_failure_analysis
+
+                    graphrag_context += (
+                        "\n# Failure-directed retrieval refinement\n"
+                        + parse_failure_analysis(_gate6_failure_analysis_text(gate6_failures))
+                        + "\n"
+                    )
                 if skill_text:
                     graphrag_context += "\n# Skills applied (from past rebuilds):\n" + skill_text + "\n"
                 final_prompt = prompt + graphrag_context
@@ -317,6 +407,7 @@ class ModernizeAgent:
                             gate6_failures=gate6_failures,
                         )
                     )
+                    final_prompt = _append_accuracy_boost_notes(final_prompt, gate6_failures)
                 self._graphrag_contexts[program_id] = {
                     "target_node_id": target_node_id,
                     "node_ids": bundle.node_ids,
@@ -333,6 +424,12 @@ class ModernizeAgent:
                     },
                     "enrichment_data_hash": hashlib.sha256(bundle.content.encode("utf-8")).hexdigest(),
                 }
+                if bundle.retrieval_modes.get("rerank"):
+                    self._accuracy_boost_metrics["rerank_invocations"] += 1
+                    self.run_state.emit_event(
+                        "rerank_invoked",
+                        {"program_id": program_id, "candidate_count": bundle.retrieval_modes["rerank"]},
+                    )
                 return _default_llm_dispatch(final_prompt)
             except Exception as exc:
                 self.run_state.emit_event(
@@ -340,12 +437,15 @@ class ModernizeAgent:
                     {"program_id": program_id, "error": f"{type(exc).__name__}: {exc}"},
                 )
                 fallback_prompt = (
-                    refine_prompt(
-                        ReflexionContext(
-                            original_prompt=prompt,
-                            failed_replica="",
-                            gate6_failures=gate6_failures,
-                        )
+                    _append_accuracy_boost_notes(
+                        refine_prompt(
+                            ReflexionContext(
+                                original_prompt=prompt,
+                                failed_replica="",
+                                gate6_failures=gate6_failures,
+                            )
+                        ),
+                        gate6_failures,
                     )
                     if gate6_failures
                     else prompt
@@ -465,6 +565,39 @@ def _has_target_enrichment(store: GraphStore, target_node_id: str) -> bool:
     return any(has_enrichment(neighbor) for neighbor in store.get_neighbors(target_node_id))
 
 
+def _score_thought_against_failures(thought: str, gate6_failures: list[dict]) -> float:
+    failure_text = json.dumps(gate6_failures, sort_keys=True).lower()
+    thought_text = thought.lower()
+    if "padding" in thought_text and (" " in failure_text or "padding" in failure_text):
+        return 1.0
+    if ("trailers" in thought_text or "file output" in thought_text) and (
+        "\\n" in failure_text or "newline" in failure_text or "trailing" in failure_text
+    ):
+        return 0.8
+    if "perform" in thought_text or "ordering" in thought_text:
+        return 0.5
+    return 0.25
+
+
+def _gate6_failure_analysis_text(gate6_failures: list[dict]) -> str:
+    from omnix.traversal.thought_mcts import format_failure_analysis_with_thought
+
+    thought = next(
+        (str(failure.get("mcts_thought")) for failure in gate6_failures if failure.get("mcts_thought")),
+        None,
+    )
+    return format_failure_analysis_with_thought(gate6_failures, thought)
+
+
+def _append_accuracy_boost_notes(prompt: str, gate6_failures: list[dict] | None) -> str:
+    if not gate6_failures:
+        return prompt
+    thoughts = sorted({str(failure.get("mcts_thought")) for failure in gate6_failures if failure.get("mcts_thought")})
+    if not thoughts:
+        return prompt
+    return prompt + "\n\nAccuracy-boost retry guidance:\n" + "\n".join(f"- {thought}" for thought in thoughts)
+
+
 def _counts(rows: list[ProgramStateRow]) -> dict[str, int]:
     return {
         "verified": sum(1 for row in rows if row.state == "verified"),
@@ -476,10 +609,12 @@ def _counts(rows: list[ProgramStateRow]) -> dict[str, int]:
 
 def print_summary(summary: AgentSummary) -> str:
     audit = str(summary.audit_zip) if summary.audit_zip is not None else "<none>"
+    metrics = " ".join(f"{key}={value}" for key, value in sorted(summary.accuracy_boost_metrics.items()))
     return (
         f"Run {summary.run_id}\n"
         f"verified={summary.verified} gate6_failed={summary.gate6_failed} "
         f"skipped={summary.skipped} errored={summary.errored}\n"
+        f"accuracy_boost={metrics or '<none>'}\n"
         f"receipts={summary.receipts_dir}\n"
         f"audit={audit}\n"
     )
@@ -507,6 +642,7 @@ def _reflexion_dispatch(gate6_failures: list[dict] | None) -> Callable[[str], st
                 gate6_failures=gate6_failures,
             )
         )
+        refined = _append_accuracy_boost_notes(refined, gate6_failures)
         return _default_llm_dispatch(refined)
 
     return dispatch
