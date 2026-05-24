@@ -125,6 +125,7 @@ class ModernizeAgent:
             receipt, gate6_attempts = self._rebuild_with_gate6_retries(program)
             copied = copy_receipt_to_run(receipt, self.run_state.run_dir / "receipts")
             self._write_graphrag_sidecar(program, copied)
+            self._auto_rollback_regressed_skills(program)
             self.run_state.transition(
                 program.program_id,
                 "verified",
@@ -373,6 +374,31 @@ class ModernizeAgent:
         sidecar["target_node_id"] = context.get("target_node_id")
         sidecar["enrichment_data_hash"] = context.get("enrichment_data_hash")
         write_sidecar(receipt_path.parent, program.program_id, sidecar, SidecarSigner(self.config.codebase_root))
+
+    def _auto_rollback_regressed_skills(self, program: DiscoveredProgram) -> None:
+        if self.config.no_graphrag or program.program_id not in self._graphrag_contexts:
+            return
+        from omnix.evolve.skill_bank import SkillBank
+
+        db = self.config.codebase_root / ".omnix" / "omnix.db"
+        store = GraphStore(str(db))
+        try:
+            rolled_back = SkillBank(store).auto_rollback_on_regression(
+                store,
+                runs_dir=self.run_state.run_dir.parent,
+            )
+            for skill_id in rolled_back:
+                self.run_state.emit_event(
+                    "skill_rolled_back",
+                    {"program_id": program.program_id, "skill_id": skill_id},
+                )
+        except Exception as exc:
+            self.run_state.emit_event(
+                "skill_rollback_error",
+                {"program_id": program.program_id, "error": f"{type(exc).__name__}: {exc}"},
+            )
+        finally:
+            store.close()
 
 
 def _prepared_fixtures(program: DiscoveredProgram, root: Path) -> Path:

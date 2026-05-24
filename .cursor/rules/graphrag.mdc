@@ -6,3 +6,7 @@
 - Do not modify receipt JSON schema, `src/omnix/gates/gate6_behavioral.py`, or the core `rebuild_cobol_program` algorithm in `src/omnix/rebuild/cobol_runner.py`.
 - Runtime architecture is single-agent with tools. Test execution may use helper agents, but product orchestration must not introduce separate runtime agents.
 - Canonical spec: `.omnix/m2-graphrag-spec.md`.
+- `omnix cobol enrich --mock` must remain available for CI and sidecar smoke tests without live enrichment spend.
+- `OMNIX_GRAPHRAG_EMBED_MODE` controls retrieval embeddings: `auto` lazily tries `BAAI/bge-small-en-v1.5` then falls back to hash, `real` requires the model, and `hash` is deterministic/offline.
+- `SkillBank.auto_rollback_on_regression()` runs after successful GraphRAG rebuild sidecar emission; rollback errors must emit events and must not fail the rebuild.
+- `dual_evolve.parse_failure_analysis()` is deterministic keyword routing and must never call an LLM.

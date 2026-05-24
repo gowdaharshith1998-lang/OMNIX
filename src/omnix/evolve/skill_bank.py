@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from omnix.enrich.common import utc_now_iso
@@ -25,6 +26,12 @@ class Skill:
     t_invalid: str | None = None
     t_expired: str | None = None
     provenance_hard_cases: list[str] | None = None
+
+
+@dataclass(frozen=True)
+class _RebuildMetric:
+    passed: bool
+    skill_ids: set[str]
 
 
 class SkillBank:
@@ -101,9 +108,55 @@ class SkillBank:
         ).fetchall()
         return [_row_to_skill(row) for row in rows]
 
-    def check_for_regression(self, graph_store: GraphStore, last_n_rebuilds: int = 5) -> list[str]:
-        _ = graph_store, last_n_rebuilds
-        return []
+    def check_for_regression(
+        self,
+        graph_store: GraphStore,
+        last_n_rebuilds: int = 5,
+        *,
+        drop_pct_threshold: float = 15.0,
+        min_applications: int = 3,
+        runs_dir: Path | None = None,
+    ) -> list[str]:
+        active_ids = {skill.skill_id for skill in self.get_active()}
+        if not active_ids:
+            return []
+        metrics = _recent_rebuild_metrics(
+            runs_dir or _default_runs_dir(graph_store),
+            last_n_rebuilds=last_n_rebuilds,
+        )
+        if not metrics:
+            return []
+        baseline_pass_rate = sum(1 for metric in metrics if metric.passed) / len(metrics)
+        threshold = drop_pct_threshold / 100.0
+        regressed: list[str] = []
+        for skill_id in sorted(active_ids):
+            applied = [metric for metric in metrics if skill_id in metric.skill_ids]
+            if len(applied) < min_applications:
+                continue
+            skill_pass_rate = sum(1 for metric in applied if metric.passed) / len(applied)
+            if baseline_pass_rate - skill_pass_rate >= threshold:
+                regressed.append(skill_id)
+        return regressed
+
+    def auto_rollback_on_regression(
+        self,
+        graph_store: GraphStore,
+        last_n_rebuilds: int = 5,
+        *,
+        drop_pct_threshold: float = 15.0,
+        min_applications: int = 3,
+        runs_dir: Path | None = None,
+    ) -> list[str]:
+        regressed = self.check_for_regression(
+            graph_store,
+            last_n_rebuilds=last_n_rebuilds,
+            drop_pct_threshold=drop_pct_threshold,
+            min_applications=min_applications,
+            runs_dir=runs_dir,
+        )
+        for skill_id in regressed:
+            self.invalidate(skill_id, "auto rollback: regression detected")
+        return regressed
 
 
 def _row_to_skill(row: Any) -> Skill:
@@ -121,3 +174,62 @@ def _row_to_skill(row: Any) -> Skill:
         t_expired=row["t_expired"],
         provenance_hard_cases=json.loads(row["provenance_hard_cases"] or "[]"),
     )
+
+
+def _default_runs_dir(graph_store: GraphStore) -> Path:
+    db_path = Path(graph_store.db_path)
+    if db_path.parent.name == ".omnix":
+        return db_path.parent / "runs"
+    return db_path.parent / ".omnix" / "runs"
+
+
+def _recent_rebuild_metrics(runs_dir: Path, *, last_n_rebuilds: int) -> list[_RebuildMetric]:
+    if last_n_rebuilds <= 0 or not runs_dir.is_dir():
+        return []
+    metrics: list[_RebuildMetric] = []
+    run_dirs = sorted((path for path in runs_dir.iterdir() if path.is_dir()), key=lambda path: path.name, reverse=True)
+    for run_dir in run_dirs:
+        receipts_dir = run_dir / "receipts"
+        if not receipts_dir.is_dir():
+            continue
+        for receipt_path in sorted(receipts_dir.glob("*.json")):
+            if receipt_path.name.endswith(".provenance.json"):
+                continue
+            metric = _read_rebuild_metric(receipt_path)
+            if metric is None:
+                continue
+            metrics.append(metric)
+            if len(metrics) >= last_n_rebuilds:
+                return metrics
+    return metrics
+
+
+def _read_rebuild_metric(receipt_path: Path) -> _RebuildMetric | None:
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    gates = receipt.get("gate_results")
+    if not isinstance(gates, list):
+        return None
+    passed = bool(gates) and all(isinstance(gate, dict) and gate.get("status") == "passed" for gate in gates)
+    return _RebuildMetric(passed=passed, skill_ids=_sidecar_skill_ids(receipt_path.with_suffix(".provenance.json")))
+
+
+def _sidecar_skill_ids(sidecar_path: Path) -> set[str]:
+    try:
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    raw_skills = sidecar.get("skills_applied")
+    if not isinstance(raw_skills, list):
+        return set()
+    skill_ids: set[str] = set()
+    for skill in raw_skills:
+        if isinstance(skill, dict):
+            skill_id = skill.get("skill_id") or skill.get("id")
+        else:
+            skill_id = skill
+        if skill_id:
+            skill_ids.add(str(skill_id))
+    return skill_ids

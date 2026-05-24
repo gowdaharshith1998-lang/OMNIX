@@ -1,11 +1,13 @@
-"""Vector index with sqlite-vec-compatible table names and deterministic fallback embeddings."""
+"""Vector index with sqlite-vec-compatible table names and BGE/hash embeddings."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import math
-from typing import Literal
+import os
+import sys
+from typing import Any, Literal
 
 from omnix.enrich.common import enriched_text
 from omnix.graph.store import GraphStore
@@ -18,6 +20,9 @@ TABLES: dict[str, str] = {
     "CobolCopybook": "vec_copybooks",
     "CobolDataItem": "vec_data_items",
 }
+_MODEL_CACHE: Any | None = None
+_MODEL_LOAD_ATTEMPTED = False
+_REAL_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 
 
 class VectorIndex:
@@ -84,7 +89,36 @@ def _table_for(node_type: str) -> str:
     raise ValueError(f"unknown vector node type: {node_type}")
 
 
-def embed_text(text: str, dims: int = 384) -> list[float]:
+def _embed_mode() -> Literal["auto", "real", "hash"]:
+    value = os.environ.get("OMNIX_GRAPHRAG_EMBED_MODE", "auto").strip().lower()
+    if value == "real":
+        return "real"
+    if value == "hash":
+        return "hash"
+    return "auto"
+
+
+def _get_real_model() -> Any | None:
+    global _MODEL_CACHE, _MODEL_LOAD_ATTEMPTED
+    if _MODEL_CACHE is not None:
+        return _MODEL_CACHE
+    if _MODEL_LOAD_ATTEMPTED:
+        return None
+    _MODEL_LOAD_ATTEMPTED = True
+    try:
+        from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
+
+        _MODEL_CACHE = SentenceTransformer(_REAL_MODEL_NAME)
+    except Exception as exc:  # pragma: no cover - exercised with import monkeypatches
+        print(
+            f"OMNIX GraphRAG embedding model unavailable; using hash fallback: {exc}",
+            file=sys.stderr,
+        )
+        return None
+    return _MODEL_CACHE
+
+
+def _embed_text_hash(text: str, dims: int = 384) -> list[float]:
     # Deterministic local fallback keeps tests offline and avoids model downloads.
     vec = [0.0] * dims
     for token in text.lower().split():
@@ -94,6 +128,25 @@ def embed_text(text: str, dims: int = 384) -> list[float]:
         vec[idx] += sign
     norm = math.sqrt(sum(v * v for v in vec)) or 1.0
     return [v / norm for v in vec]
+
+
+def embed_text(text: str, dims: int = 384) -> list[float]:
+    mode = _embed_mode()
+    if mode == "hash":
+        return _embed_text_hash(text, dims=dims)
+
+    model = _get_real_model()
+    if model is None:
+        if mode == "real":
+            raise RuntimeError("OMNIX_GRAPHRAG_EMBED_MODE=real but model unavailable")
+        return _embed_text_hash(text, dims=dims)
+
+    encoded = model.encode(text, normalize_embeddings=True)
+    values = encoded.tolist() if hasattr(encoded, "tolist") else encoded
+    vec = [float(value) for value in values[:dims]]
+    if len(vec) < dims:
+        vec.extend([0.0] * (dims - len(vec)))
+    return vec
 
 
 def cosine_similarity(left: list[float], right: list[float]) -> float:

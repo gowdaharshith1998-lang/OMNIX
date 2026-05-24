@@ -37,6 +37,9 @@ include = ["omnix*"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+    "integration: end-to-end tests requiring external tools or LLM credentials",
+]
 norecursedirs = [
     "_blocked",
     "*.egg",
