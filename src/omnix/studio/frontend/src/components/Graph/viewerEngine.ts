@@ -11,7 +11,8 @@ import {
 import { generateStressGraph } from "./syntheticStressGraph";
 import { setOmnixFpsSample } from "./omnixViewerMetrics";
 import { generateBrainEnvelope } from './brainEnvelope';
-import { colorForType, FALLBACK_COLOR } from './entityPalette';
+import { colorForType, FALLBACK_COLOR, ENTITY_PALETTE } from './entityPalette';
+import { drawGalaxyBackground } from './galaxyBackground';
 
 /** Slice-20 test anchors — keep in sync with inner HEX_BASE_RADIUS / ring pass */
 export const SLICE20_HEX_BASE_RADIUS = 4;
@@ -566,6 +567,8 @@ export function installOmnixViewerEngine(studio) {
   let _gravScreenPt = null;
   let _physarumScreenPt = null;
   let bgGraphics = null;
+  /** Galaxy-view particle dot field + faint grid; drawn on init/resize, dormant otherwise. */
+  let galaxyBgGfx = null;
   let starGraphics = null;
   let gridGraphics = null;
   /** slice-20: ambient filler hex tessellation behind galaxy (world space) */
@@ -5735,6 +5738,7 @@ export function installOmnixViewerEngine(studio) {
       bgGraphics.drawRect(0, (h / steps) * i, w, h / steps + 1);
       bgGraphics.endFill();
     }
+    if (galaxyBgGfx) drawGalaxyBackground(galaxyBgGfx, w, h);
   }
 
   let starfieldTwinkle = null;
@@ -5763,9 +5767,23 @@ export function installOmnixViewerEngine(studio) {
     });
   }
 
+  /** Slice-19 entity-type palette stays load-bearing for non-code entityTypes.
+   *  For the default 'code' bucket we deterministically cycle teal/blue/light-blue
+   *  by dirId hash so the galaxy view shows the pre-regression color variety. */
+  const GALAXY_DEFAULT_PALETTE = [
+    ENTITY_PALETTE.code,       // #5eead4 teal
+    ENTITY_PALETTE.document,   // #5fa3ff blue
+    ENTITY_PALETTE.thread,     // #a5b4fc light blue
+  ];
   function slice20EntityTint(sn) {
-    const typ = sn.entityType || 'code';
-    return slice20CssHexToPixi(colorForType(typ));
+    const typ = sn.entityType;
+    if (typ && typ !== 'code') {
+      return slice20CssHexToPixi(colorForType(typ));
+    }
+    const key = String(sn.dirId || sn.id || '');
+    let h = 0;
+    for (let i = 0; i < key.length; i++) h = ((h << 5) - h + key.charCodeAt(i)) | 0;
+    return slice20CssHexToPixi(GALAXY_DEFAULT_PALETTE[Math.abs(h) % GALAXY_DEFAULT_PALETTE.length]);
   }
 
   function brainNeighborsForWorldPos(wx, wy) {
@@ -5829,26 +5847,10 @@ export function installOmnixViewerEngine(studio) {
       seed: 0x62726169,
     };
     lastBrainHexes = generateBrainEnvelope(spec);
-
-    const fbTint = slice20CssHexToPixi(FALLBACK_COLOR);
-    let used = 0;
-    for (let hi = 0; hi < lastBrainHexes.length; hi++) {
-      const hx = lastBrainHexes[hi];
-      if (hx.isData) continue;
-      if (used >= MAX_FILLER_HEX_POOL) break;
-      const spr = acquireFillerSprite();
-      if (!spr) break;
-      spr.x = hx.cx;
-      spr.y = hx.cy;
-      spr.alpha = 0.16;
-      spr.tint = fbTint;
-      spr.scale.set(1, 1);
-      spr.visible = true;
-      spr._hexId = hx.id;
-      spr._neighborIds = hx.neighbors;
-      brainFillerLayer.addChild(spr);
-      used++;
-    }
+    // Brain envelope filler hex rendering disabled: tessellation produced the
+    // "gray dome" artifact in the galaxy view. lastBrainHexes is still populated
+    // so brainNeighborsForWorldPos() hover logic continues to work; only the
+    // draw loop is gated. brainEnvelope.ts module is preserved (slice-20 work).
   }
 
   function initPixi() {
@@ -5909,6 +5911,8 @@ export function installOmnixViewerEngine(studio) {
 
     bgGraphics = new PIXI.Graphics();
     starGraphics = new PIXI.Graphics();
+    galaxyBgGfx = new PIXI.Graphics();
+    galaxyBgGfx.eventMode = 'none';
     gridGraphics = new PIXI.Graphics();
     world = new PIXI.Container();
     brainFillerLayer = new PIXI.Container();
@@ -5947,6 +5951,7 @@ export function installOmnixViewerEngine(studio) {
 
     app.stage.addChild(bgGraphics);
     app.stage.addChild(starGraphics);
+    app.stage.addChild(galaxyBgGfx);
     app.stage.addChild(gridGraphics);
     app.stage.addChild(world);
 
