@@ -1,12 +1,17 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **OMNIX** (12637 symbols, 23252 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **OMNIX** (13878 symbols, 25601 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
+> OMNIX self-hosts as of M3.5.2. Prefer `omnix impact`, `omnix detect-changes`, and `omnix status` in this repo. The `npx gitnexus` and GitNexus MCP instructions below are retained for fallback only.
+> If `omnix status` reports a stale index, run `omnix analyze . --no-open` to refresh the OMNIX graph and signed analyze receipt.
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
 ## Always Do
 
+- **MUST prefer OMNIX-native impact analysis before editing any symbol.** Before modifying a function, class, or method, run `omnix impact <symbolName> --direction upstream --depth 3 --include-tests` and report the blast radius (direct callers, affected processes when available, risk level) to the user. Use GitNexus impact as fallback if the OMNIX index is unavailable.
+- **MUST prefer OMNIX-native change detection before committing.** Run `omnix detect-changes --scope staged` and confirm only expected files/symbols are affected. Use `gitnexus_detect_changes()` as fallback if OMNIX is unavailable.
+- Before starting substantial work, run `omnix status`; if it is stale, run `omnix analyze . --no-open` first.
 - **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
 - **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
 - **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.

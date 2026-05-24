@@ -58,7 +58,19 @@ def analyze(path: str, port: int, no_open: bool) -> None:
 
     target = str(Path(path).resolve())
     _ensure_src_on_syspath()
+    from omnix.self_host_cli import emit_analyze_receipt, run_analyze_ingest
     from omnix.studio.server import run as studio_run
+
+    db_path, wall_clock_seconds = run_analyze_ingest(Path(target))
+    receipt = emit_analyze_receipt(Path(target), db_path, wall_clock_seconds)
+    if receipt.signed:
+        click.echo(f"Signed receipt: {receipt.receipt_path}")
+        click.echo(
+            f"Verify: omnix axiom verify {receipt.receipt_path} "
+            f"{receipt.sig_path} --pubkey ~/.omnix/keys/public.pem"
+        )
+    else:
+        click.echo(f"Receipt: {receipt.receipt_path}")
 
     url = f"http://127.0.0.1:{port}/"
     print(f"🌐 OMNIX running at {url}")
@@ -128,10 +140,131 @@ def rebuild_cmd(
     click.echo(f"\n{len(outputs)} receipt(s) written.")
 
 
+@click.command("impact", context_settings={"help_option_names": ["-h", "--help"]})
+@click.argument("symbol")
+@click.option(
+    "--direction",
+    type=click.Choice(["upstream", "downstream", "both"]),
+    default="upstream",
+    show_default=True,
+)
+@click.option("--depth", type=int, default=3, show_default=True)
+@click.option("--include-tests/--no-include-tests", default=False, show_default=True)
+@click.option("--json/--human", "as_json", default=False, show_default=True)
+@click.option("--db", "db_path", type=click.Path(path_type=Path), default=None)
+def impact_cmd(
+    symbol: str,
+    direction: str,
+    depth: int,
+    include_tests: bool,
+    as_json: bool,
+    db_path: Path | None,
+) -> None:
+    """Show CALLS blast radius for a symbol in the OMNIX graph."""
+    import json
+
+    from omnix.self_host_cli import (
+        NoIndexError,
+        UnknownSymbolError,
+        impact_payload,
+        render_impact_human,
+        repo_root,
+        resolve_db_path,
+    )
+
+    root = repo_root()
+    try:
+        db = resolve_db_path(root, db_path)
+        payload = impact_payload(
+            symbol,
+            db_path=db,
+            direction=direction,
+            depth=depth,
+            include_tests=include_tests,
+        )
+    except (NoIndexError, UnknownSymbolError) as exc:
+        raise click.UsageError(str(exc)) from exc
+    click.echo(json.dumps(payload, sort_keys=True) if as_json else render_impact_human(payload))
+
+
+@click.command("detect-changes", context_settings={"help_option_names": ["-h", "--help"]})
+@click.option(
+    "--scope",
+    type=click.Choice(["staged", "worktree", "all"]),
+    default="worktree",
+    show_default=True,
+)
+@click.option("--json/--human", "as_json", default=False, show_default=True)
+@click.option("--since-commit", default=None)
+@click.option("--db", "db_path", type=click.Path(path_type=Path), default=None)
+def detect_changes_cmd(
+    scope: str,
+    as_json: bool,
+    since_commit: str | None,
+    db_path: Path | None,
+) -> None:
+    """Report git changes with symbol counts from the OMNIX graph index."""
+    import json
+
+    from omnix.self_host_cli import (
+        NoIndexError,
+        detect_changes_payload,
+        render_detect_changes_human,
+        repo_root,
+        resolve_db_path,
+    )
+
+    root = repo_root()
+    db: Path | None = None
+    try:
+        db = resolve_db_path(root, db_path)
+    except NoIndexError as exc:
+        if db_path is not None:
+            raise click.UsageError(str(exc)) from exc
+    payload = detect_changes_payload(
+        root=root,
+        db_path=db,
+        scope=scope,
+        since_commit=since_commit,
+    )
+    click.echo(
+        json.dumps(payload, sort_keys=True)
+        if as_json
+        else render_detect_changes_human(payload)
+    )
+
+
+@click.command("status", context_settings={"help_option_names": ["-h", "--help"]})
+@click.option("--db", "db_path", type=click.Path(path_type=Path), default=None)
+@click.option("--json/--human", "as_json", default=False, show_default=True)
+def status_cmd(db_path: Path | None, as_json: bool) -> None:
+    """Report OMNIX graph index freshness for the current repository."""
+    import json
+
+    from omnix.self_host_cli import (
+        NoIndexError,
+        render_status_human,
+        repo_root,
+        resolve_db_path,
+        status_payload,
+    )
+
+    root = repo_root()
+    try:
+        db = resolve_db_path(root, db_path)
+    except NoIndexError as exc:
+        raise click.UsageError(str(exc)) from exc
+    payload = status_payload(root=root, db_path=db)
+    click.echo(json.dumps(payload, sort_keys=True) if as_json else render_status_human(payload))
+
+
 main.add_command(axiom_group, name="axiom")
 main.add_command(grammar_group, name="grammar")
 main.add_command(cobol_group, name="cobol")
 main.add_command(analyze)
+main.add_command(impact_cmd)
+main.add_command(detect_changes_cmd)
+main.add_command(status_cmd)
 main.add_command(rebuild_cmd)
 
 
