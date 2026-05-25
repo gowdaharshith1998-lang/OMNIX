@@ -54,7 +54,21 @@ If you are running an engineering org with:
 - a quote from Accenture / IBM / Deloitte / Capgemini that's somewhere between $20M and $200M, and an industry failure rate near 60%
 - one internal team that tried once and bounced
 
-OMNIX is the tooling layer for the VP Eng who has to ship one production module without breaking anything, then point at the receipts when an auditor asks how they know it's equivalent.
+OMNIX is built for the VP Eng who has to ship one production module without breaking anything, then point at the receipts when an auditor asks how they know it's equivalent. Your team can drive the pipeline themselves, or we can drive it for you — see below.
+
+---
+
+## Two ways to run it
+
+OMNIX is both a tool and a team.
+
+**Run it yourself.** Install the CLI, point it at your codebase, drive the migration in-house. Open source, MIT, runs entirely on your infrastructure. Everything in **What works today** below is what your engineers get.
+
+**Have us run it.** If your team doesn't have the bandwidth or the modernization reps — most don't, this is a once-per-career project — we take the whole thing end-to-end. Spec definition for your domain. LLM dispatch. Gate triage. The engineer-review workspace. Shadow-bridge deployment against production traffic. Cutover plan and rollback rehearsal. And the signed audit bundle you hand to a regulator at the end. Your engineers can review every step or stay out of it; the receipts are the same either way.
+
+We charge per engagement, scoped by codebase size, target language, and how deep into the pipeline you want us. Most VP Engs take the service tier for the first migrated module, then move the rest in-house once their team has reps. Some keep us on the shadow-bridge side through cutover.
+
+[Open an issue](https://github.com/gowdaharshith1998-lang/OMNIX/issues) if you want a scoping call.
 
 ---
 
