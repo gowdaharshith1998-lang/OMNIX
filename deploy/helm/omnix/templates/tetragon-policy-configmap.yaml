@@ -1,0 +1,22 @@
+{{- if .Values.ebpf.tetragon.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "omnix.fullname" . }}-tetragon-policy
+  labels:
+    {{- include "omnix.labels" . | nindent 4 }}
+    component: observe-ebpf
+data:
+  filter.json: |
+    {
+      "namespace_allow_list": {{ .Values.ebpf.tetragon.namespaceAllowList | default (list .Release.Namespace) | toJson }},
+      "pod_label_required": "omnix.io/observe=true",
+      "redact_fields": ["email", "ssn", "pan", "ipv4", "token", "Authorization", "X-API-Key"]
+    }
+  export.json: |
+    {
+      "destination": "http://{{ include "omnix.fullname" . }}-collector:9050/v1/observe/tetragon",
+      "batch_size": 100,
+      "flush_interval_ms": 500
+    }
+{{- end }}
