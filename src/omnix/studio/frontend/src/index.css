@@ -1,5 +1,6 @@
 @import "./styles/tokens.css";
 @import "./styles/globals.css";
+@import "./styles/m42-tokens.css";
 
 @tailwind base;
 @tailwind components;
