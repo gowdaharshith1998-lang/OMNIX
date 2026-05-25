@@ -1,5 +1,5 @@
 import Fastify from "fastify";
-import { createNodeMiddleware, createProbot } from "probot";
+import { createNodeMiddleware, createProbot, type Probot } from "probot";
 
 import { config } from "./config.js";
 import { registerInstallationHandler } from "./handlers/installation.js";
@@ -16,19 +16,26 @@ async function main(): Promise<void> {
     },
   });
 
-  await probot.load((app) => {
+  // probot v13: createNodeMiddleware takes an ApplicationFunction (the same
+  // shape probot.load expects), not the Probot instance. Define once, share
+  // between probot.load (so handlers register) and the middleware factory
+  // (so webhook deliveries fan out through the same handler graph).
+  const appFn = (app: Probot): void => {
     registerPushHandler(app);
     registerPrCommentHandler(app);
     registerInstallationHandler(app);
-  });
+  };
+
+  await probot.load(appFn);
 
   const fastify = Fastify({ logger: { level: config.logLevel() } });
 
   // Mount the Probot webhook receiver alongside our own /webhooks/job-complete.
-  fastify.all("/api/github/webhooks", (req, reply) => {
-    const middleware = createNodeMiddleware(probot, { webhooksPath: "/api/github/webhooks" });
-    return middleware(req.raw, reply.raw);
+  const probotMiddleware = createNodeMiddleware(appFn, {
+    probot,
+    webhooksPath: "/api/github/webhooks",
   });
+  fastify.all("/api/github/webhooks", (req, reply) => probotMiddleware(req.raw, reply.raw));
 
   registerJobCompleteRoute(fastify, probot);
 
