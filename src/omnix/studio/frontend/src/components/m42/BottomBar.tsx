@@ -37,7 +37,10 @@ export function BottomBar(props: Props) {
       <footer className="m42-bottombar" data-testid="m42-bottombar" data-state="running">
         <span className="m42-bottombar-label">running</span>
         <div className="m42-progress-track" aria-label="Progress" role="progressbar" aria-valuenow={Math.round(props.progressPct)} aria-valuemin={0} aria-valuemax={100}>
-          <div className="m42-progress-fill" style={{ width: `${Math.min(100, Math.max(0, props.progressPct))}%` }} />
+          <div
+            className="m42-progress-fill"
+            style={{ transform: `scaleX(${Math.min(1, Math.max(0, props.progressPct / 100))})` }}
+          />
         </div>
         <span className="m42-progress-label">{Math.round(props.progressPct)}% · eta {eta(props.etaSeconds)}</span>
         {props.currentSymbol ? <span className="m42-symbol">{props.currentSymbol}</span> : null}
