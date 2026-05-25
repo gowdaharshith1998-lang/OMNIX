@@ -1,0 +1,70 @@
+name: cloud-ci
+
+on:
+  push:
+    branches: [main, "feat/deploy-shape-a-cloud"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  cloud-tests:
+    name: Cloud (Shape A) — pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install OMNIX with cloud extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[cloud,dev]"
+      - name: Run cloud tests
+        env:
+          OMNIX_DATABASE_URL: sqlite+aiosqlite:///:memory:
+          OMNIX_SYNC_DATABASE_URL: sqlite:///:memory:
+          OMNIX_STORAGE_BACKEND: memory
+          OMNIX_DEBUG: "true"
+        run: |
+          python -m pytest tests/cloud/ -q --tb=short
+
+  github-app-build:
+    name: GitHub App (Shape C) — build + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: services/github-app/package.json
+      - name: Install
+        working-directory: services/github-app
+        run: npm install
+      - name: Build
+        working-directory: services/github-app
+        run: npm run build
+      - name: Test
+        working-directory: services/github-app
+        run: npm test
+
+  helm-lint:
+    name: Helm chart (Shape B) — lint + template
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.0
+      - name: helm lint
+        run: helm lint deploy/helm/omnix
+      - name: helm template (smoke render)
+        run: helm template omnix deploy/helm/omnix > /tmp/rendered.yaml
+      - name: ensure key kinds rendered
+        run: |
+          for kind in Deployment Service Ingress; do
+            grep -q "kind: ${kind}" /tmp/rendered.yaml || { echo "missing ${kind}"; exit 1; }
+          done

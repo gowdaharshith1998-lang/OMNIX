@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>OMNIX receipt {{RECEIPT_ID}} — verify</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      --bg: #000;
+      --fg: #e6edf3;
+      --muted: #8b949e;
+      --accent-green: #3fb950;
+      --accent-red: #f85149;
+      --accent-blue: #58a6ff;
+      --line: rgba(255,255,255,0.15);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 40px 32px;
+      font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.55;
+      background: var(--bg);
+      color: var(--fg);
+    }
+    .container { max-width: 920px; margin: 0 auto; }
+    h1 { font-size: 22px; letter-spacing: 0.4px; font-weight: 500; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+    h2 { font-size: 13px; letter-spacing: 0.3px; font-weight: 500; text-transform: uppercase; color: #9aa4ad; margin-top: 28px; }
+    .grid { display: grid; grid-template-columns: 200px 1fr; gap: 8px 16px; font-size: 12.5px; margin: 10px 0 24px; }
+    .grid b { color: #fff; font-weight: 500; }
+    pre { background: #0a0a0a; border: 0.5px solid var(--line); padding: 14px 16px; border-radius: 4px; overflow-x: auto; font-size: 12.5px; line-height: 1.5; }
+    pre.bytes { word-break: break-all; white-space: pre-wrap; font-size: 11.5px; color: #9aa4ad; }
+    button { background: var(--accent-blue); color: #fff; border: 0; padding: 9px 18px; font-family: inherit; font-size: 13px; font-weight: 500; border-radius: 4px; cursor: pointer; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .verdict { margin-top: 18px; padding: 14px 18px; border-radius: 4px; border: 0.5px solid var(--line); display: none; }
+    .verdict.ok { border-left: 2px solid var(--accent-green); color: #7ee787; background: #0a1a0a; }
+    .verdict.bad { border-left: 2px solid var(--accent-red); color: #ffa198; background: #1f0a0a; }
+    .verdict.pending { border-left: 2px solid var(--accent-blue); color: #79c0ff; background: #08121f; display: block; }
+    .foot { margin-top: 36px; font-size: 11.5px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 16px; }
+    a { color: var(--accent-blue); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>OMNIX receipt — {{RECEIPT_ID}}</h1>
+
+    <h2>Metadata</h2>
+    <div class="grid">
+      <b>Job ID</b><span>{{JOB_ID}}</span>
+      <b>Kind</b><span>{{KIND}}</span>
+      <b>Created</b><span>{{CREATED_AT}}</span>
+      <b>Payload SHA-256</b><span>{{SHA256}}</span>
+      <b>Signature</b><span>ML-DSA-65 (FIPS 204)</span>
+    </div>
+
+    <h2>Signed payload</h2>
+    <pre id="payload">{{PAYLOAD_JSON}}</pre>
+
+    <h2>Public key (base64)</h2>
+    <pre class="bytes" id="pubkey">{{PUBKEY_B64}}</pre>
+
+    <h2>Signature (base64)</h2>
+    <pre class="bytes" id="sig">{{SIG_B64}}</pre>
+
+    <h2>Independent verification</h2>
+    <p>Click below to verify the ML-DSA-65 signature. The verifier runs entirely in your browser when WASM is available; otherwise it calls the public API endpoint <code>/verify/api/verify</code>, which uses the same pure-Python verifier that ships with OMNIX. No private key material is ever transmitted.</p>
+    <button id="btn-verify">Verify signature</button>
+    <div id="verdict" class="verdict"></div>
+
+    <div class="foot">
+      <p>This receipt is part of the OMNIX behavioral replicator. The cryptographic guarantee is ML-DSA-65 (FIPS 204) — quantum-resistant per NIST PQC mandate (2030) and CNSA 2.0 (2035).</p>
+      <p>Source links: <a href="/verify/r/{{RECEIPT_ID}}.json">raw receipt JSON</a> · <a href="/verify/r/{{RECEIPT_ID}}.sig">raw signature</a> · <a href="/verify/pubkey/{{RECEIPT_ID}}">public key</a></p>
+      <p>CLI verify: <code>omnix verify https://verify.axiomcontrol.systems/r/{{RECEIPT_ID}}</code></p>
+    </div>
+  </div>
+
+  <script src="/verify/wasm/verify.js"></script>
+  <script>
+    document.getElementById('btn-verify').addEventListener('click', async () => {
+      const btn = document.getElementById('btn-verify');
+      const verdict = document.getElementById('verdict');
+      btn.disabled = true;
+      verdict.className = 'verdict pending';
+      verdict.textContent = 'Verifying...';
+
+      const payload = document.getElementById('payload').textContent;
+      const payloadCanonical = new TextEncoder().encode(payload);
+      const payloadB64 = btoa(String.fromCharCode(...payloadCanonical));
+      const sigB64 = document.getElementById('sig').textContent.trim();
+      const pkB64 = document.getElementById('pubkey').textContent.trim();
+
+      try {
+        const result = await window.__omnix_verify({
+          payload_canonical_b64: payloadB64,
+          signature_b64: sigB64,
+          public_key_b64: pkB64,
+          ctx_b64: ''
+        });
+        if (result.valid) {
+          verdict.className = 'verdict ok';
+          verdict.textContent = '✓ Signature valid. SHA-256: ' + result.sha256;
+        } else {
+          verdict.className = 'verdict bad';
+          verdict.textContent = '✗ Signature invalid.';
+        }
+      } catch (e) {
+        verdict.className = 'verdict bad';
+        verdict.textContent = '✗ Verifier error: ' + e.message;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

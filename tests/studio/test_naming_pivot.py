@@ -96,15 +96,22 @@ def test_cli_docstring_knowledge_intelligence() -> None:
 def test_readme_locked_positioning_opening() -> None:
     """README opens with the locked positioning (graph-native legacy modernization).
 
-    Tracks the positioning lock — the README was rewritten in commit 6ee9053 to drop
-    the prior 'open-core company brain / code intelligence product' marketing and
-    state OMNIX's actual scope. This test guards the new opening + the explicit
-    no-overclaim disclaimer that the positioning lock requires.
+    Tracks the positioning lock — PRs #35 (de0170b) + #36 (0b237b8) rewrote the README
+    to a mechanism-first, dev-tool voice and shipped 'graph-native pipeline' as the
+    opening positioning. The original test on commit 6ee9053 asserted
+    'graph-native platform' and 'verified behavioral equivalence' as a single phrase;
+    PRs #35/#36 split the value-prop into 'verified equivalence' (gate output) and
+    'behavioral equivalence' (gate 6). This test is updated to match the shipped
+    wording while preserving every other positioning assertion.
     """
     t = _read("README.md")
-    # Positive: locked positioning is the opening sentence
-    assert "graph-native platform for migrating legacy systems" in t
-    assert "verified behavioral equivalence" in t
+    # Positive: locked positioning is the opening sentence (PRs #35/#36 wording)
+    assert "graph-native pipeline for migrating legacy systems" in t
+    # Positive: the value-prop — both 'verified equivalence' and 'behavioral equivalence'
+    # must appear (the README threads them: gate 6 produces behavioral equivalence,
+    # which the verifier stack signs into 'verified equivalence with auditable evidence').
+    assert "verified equivalence" in t
+    assert "behavioral equivalence" in t
     # Negative: prior marketing positionings must not return
     assert "open-core company brain" not in t
     assert "open-core code intelligence product" not in t
