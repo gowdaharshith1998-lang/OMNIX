@@ -1,0 +1,31 @@
+{
+  "name": "@omnix/scientist",
+  "version": "0.1.0",
+  "private": false,
+  "description": "OMNIX Scientist — drop-in GitHub-Scientist port for Node.js services",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "license": "SEE LICENSE IN LICENSE",
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/node": "^22.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "typescript": "^5.6.0"
+  }
+}

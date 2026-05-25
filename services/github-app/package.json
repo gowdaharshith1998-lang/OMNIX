@@ -1,0 +1,39 @@
+{
+  "name": "@omnix/github-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OMNIX GitHub App — Shape C deployment surface",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "test": "jest --passWithNoTests",
+    "lint": "eslint . --ext .ts"
+  },
+  "dependencies": {
+    "@octokit/auth-app": "^7.1.0",
+    "@octokit/rest": "^21.0.0",
+    "@octokit/webhooks": "^13.3.0",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.27.0",
+    "pino": "^9.4.0",
+    "probot": "^13.4.0",
+    "smee-client": "^2.0.4",
+    "stripe": "^17.0.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.10.0",
+    "jest": "^29.7.0",
+    "nock": "^13.5.0",
+    "ts-jest": "^29.2.5",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
