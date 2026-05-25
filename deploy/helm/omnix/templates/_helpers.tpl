@@ -36,3 +36,13 @@ helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
 {{- $tag := default .Chart.AppVersion .Values.verifier.image.tag -}}
 {{- printf "%s/%s:%s" $r $repo $tag -}}
 {{- end -}}
+
+{{/* Compose the Trillian MySQL URI for Rekor's logserver / logsigner sidecars. */}}
+{{- define "omnix.rekor.trillianMysqlUri" -}}
+{{- $cfg := .Values.rekor.trillian.externalMysql -}}
+{{- if $cfg.host -}}
+trillian:trillian@tcp({{ $cfg.host }}:{{ $cfg.port }})/{{ $cfg.database }}
+{{- else -}}
+trillian:trillian@tcp({{ include "omnix.fullname" . }}-rekor-mysql:3306)/trillian
+{{- end -}}
+{{- end -}}

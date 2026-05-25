@@ -1,0 +1,17 @@
+{{- if .Values.rekor.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omnix.fullname" . }}-rekor
+  labels:
+    {{- include "omnix.labels" . | nindent 4 }}
+    component: rekor
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    component: rekor
+  ports:
+  - { name: rest, port: 3000, targetPort: rest }
+  - { name: metrics, port: 2112, targetPort: metrics }
+{{- end }}

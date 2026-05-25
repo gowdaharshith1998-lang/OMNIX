@@ -1,0 +1,66 @@
+{{- if and .Values.rekor.enabled (not .Values.rekor.trillian.externalMysql.host) }}
+# In-cluster MySQL backing Trillian. Falls back when no external MySQL is
+# configured. For HA, set rekor.trillian.externalMysql.host to point at an
+# operator-managed MySQL cluster (Aurora, RDS, CloudSQL, on-prem).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "omnix.fullname" . }}-rekor-mysql
+  labels:
+    {{- include "omnix.labels" . | nindent 4 }}
+    component: rekor-mysql
+spec:
+  serviceName: {{ include "omnix.fullname" . }}-rekor-mysql
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      component: rekor-mysql
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        component: rekor-mysql
+    spec:
+      containers:
+      - name: mysql
+        image: "mysql:8.4"
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: "trillian"
+        - name: MYSQL_DATABASE
+          value: "trillian"
+        - name: MYSQL_USER
+          value: "trillian"
+        - name: MYSQL_PASSWORD
+          value: "trillian"
+        ports:
+        - { name: mysql, containerPort: 3306 }
+        resources:
+          requests: { cpu: 200m, memory: 512Mi }
+          limits:   { cpu: 1, memory: 2Gi }
+        volumeMounts:
+        - { name: data, mountPath: /var/lib/mysql }
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests: { storage: 20Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omnix.fullname" . }}-rekor-mysql
+  labels:
+    {{- include "omnix.labels" . | nindent 4 }}
+    component: rekor-mysql
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    component: rekor-mysql
+  ports:
+  - { port: 3306, targetPort: mysql }
+{{- end }}
