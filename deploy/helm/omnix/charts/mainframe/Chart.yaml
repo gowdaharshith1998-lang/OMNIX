@@ -1,0 +1,15 @@
+apiVersion: v2
+name: mainframe
+description: OMNIX mainframe observation bridges — tcVISION / Ironstream / C\Prof
+type: application
+version: 0.1.0
+appVersion: "0.6.1"
+maintainers:
+  - name: AXIOM Control Systems Inc.
+keywords:
+  - mainframe
+  - zos
+  - tcvision
+  - ironstream
+  - cics
+  - observability

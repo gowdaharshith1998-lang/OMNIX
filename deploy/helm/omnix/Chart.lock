@@ -1,0 +1,6 @@
+dependencies:
+- name: mainframe
+  repository: file://charts/mainframe
+  version: 0.1.0
+digest: sha256:bcd84df6d4123976058b9540d5e05e7de99135e0a8253a6d0709e58c9d3ca7e9
+generated: "2026-05-25T15:02:18.968585765-07:00"

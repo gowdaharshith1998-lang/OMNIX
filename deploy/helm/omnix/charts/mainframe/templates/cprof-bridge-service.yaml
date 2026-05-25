@@ -1,0 +1,16 @@
+{{- if .Values.cprof.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mainframe.fullname" . }}-cprof
+  labels:
+    {{- include "mainframe.labels" . | nindent 4 }}
+    vendor: cprof
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: mainframe
+    vendor: cprof
+  ports:
+  - { name: metrics, port: 9053, targetPort: metrics }
+{{- end }}

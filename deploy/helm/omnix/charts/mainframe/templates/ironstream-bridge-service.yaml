@@ -1,0 +1,16 @@
+{{- if .Values.ironstream.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mainframe.fullname" . }}-ironstream
+  labels:
+    {{- include "mainframe.labels" . | nindent 4 }}
+    vendor: ironstream
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: mainframe
+    vendor: ironstream
+  ports:
+  - { name: metrics, port: 9052, targetPort: metrics }
+{{- end }}
