@@ -56,6 +56,12 @@ omnix = "omnix.cli:main"
 where = ["src"]
 include = ["omnix*"]
 
+[tool.setuptools.package-data]
+"omnix.cloud.verify_page" = ["templates/*.html", "templates/*.js"]
+"omnix.cloud.db" = ["migrations/*.mako", "migrations/script.py.mako"]
+"omnix.parser" = ["hints/*.json", "quality_profiles/*.json", "quality_profiles/README.md"]
+"omnix.semantic" = ["java/vendor/*.jar", "java/vendor/SHA256SUMS", "java/vendor/VENDOR.md", "java/jvm/*.class", "java/jvm/*.java", "java/jvm/build.sh", "java/jvm/README.md"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
