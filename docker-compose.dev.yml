@@ -1,0 +1,70 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: omnix-postgres
+    environment:
+      POSTGRES_USER: omnix
+      POSTGRES_PASSWORD: omnix
+      POSTGRES_DB: omnix
+    ports:
+      - "5432:5432"
+    volumes:
+      - omnix_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omnix -d omnix"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: omnix-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: omnix-cloud-api:dev
+    build:
+      context: .
+      dockerfile: deploy/docker/api.Dockerfile
+    environment:
+      OMNIX_DATABASE_URL: postgresql+asyncpg://omnix:omnix@postgres:5432/omnix
+      OMNIX_SYNC_DATABASE_URL: postgresql+psycopg://omnix:omnix@postgres:5432/omnix
+      OMNIX_REDIS_URL: redis://redis:6379/0
+      OMNIX_DEBUG: "true"
+      OMNIX_TUS_DATA_DIR: /var/lib/omnix-tus
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    volumes:
+      - omnix_tus_data:/var/lib/omnix-tus
+    profiles:
+      - app
+
+  worker:
+    image: omnix-cloud-api:dev
+    command: ["celery", "-A", "omnix.cloud.tasks.celery_app:celery_app", "worker", "--loglevel=info", "-Q", "omnix.default"]
+    environment:
+      OMNIX_DATABASE_URL: postgresql+asyncpg://omnix:omnix@postgres:5432/omnix
+      OMNIX_SYNC_DATABASE_URL: postgresql+psycopg://omnix:omnix@postgres:5432/omnix
+      OMNIX_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - app
+
+volumes:
+  omnix_pg_data:
+  omnix_tus_data:
