@@ -62,7 +62,7 @@ OMNIX is built for the VP Eng who has to ship one production module without brea
 
 OMNIX is both a tool and a team.
 
-**Run it yourself.** Install the CLI, point it at your codebase, drive the migration in-house. Open source, MIT, runs entirely on your infrastructure. Everything in **What works today** below is what your engineers get.
+**Run it yourself.** Install the CLI, point it at your codebase, drive the migration in-house. Everything runs on your infrastructure — code, graph, receipts, keys. Nothing leaves your perimeter unless you wire it to a hosted LLM yourself. Everything in **What works today** below is what your engineers get.
 
 **Have us run it.** If your team doesn't have the bandwidth or the modernization reps — most don't, this is a once-per-career project — we take the whole thing end-to-end. Spec definition for your domain. LLM dispatch. Gate triage. The engineer-review workspace. Shadow-bridge deployment against production traffic. Cutover plan and rollback rehearsal. And the signed audit bundle you hand to a regulator at the end. Your engineers can review every step or stay out of it; the receipts are the same either way.
 
@@ -189,4 +189,4 @@ If you want to talk to whoever is building this: [@gowdaharshith1998-lang](https
 
 ## License
 
-MIT
+All rights reserved. Source is visible for evaluation and review; commercial use requires a license. [Open an issue](https://github.com/gowdaharshith1998-lang/OMNIX/issues) for licensing inquiries.
