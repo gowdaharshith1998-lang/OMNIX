@@ -1,0 +1,17 @@
+{{- if .Values.facade.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omnix.fullname" . }}-facade
+  labels:
+    {{- include "omnix.labels" . | nindent 4 }}
+    component: facade
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    component: facade
+  ports:
+  - { name: http, port: 8080, targetPort: http }
+  - { name: admin, port: 9901, targetPort: admin }
+{{- end }}

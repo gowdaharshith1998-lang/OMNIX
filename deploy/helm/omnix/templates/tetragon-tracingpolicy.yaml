@@ -1,0 +1,49 @@
+{{- if .Values.ebpf.tetragon.enabled }}
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: {{ include "omnix.fullname" . }}-tracing
+  labels:
+    {{- include "omnix.labels" . | nindent 4 }}
+    component: observe-ebpf
+spec:
+  kprobes:
+  - call: "tcp_connect"
+    syscall: false
+    return: false
+    args:
+    - index: 0
+      type: "sock"
+  - call: "tcp_close"
+    syscall: false
+    return: false
+    args:
+    - index: 0
+      type: "sock"
+  - call: "__x64_sys_execve"
+    syscall: true
+    args:
+    - index: 0
+      type: "string"
+  - call: "__x64_sys_openat"
+    syscall: true
+    args:
+    - index: 1
+      type: "string"
+    selectors:
+    - matchArgs:
+      - index: 1
+        operator: "Prefix"
+        values:
+        - "/etc/"
+        - "/var/lib/"
+        {{- range .Values.ebpf.tetragon.filePaths }}
+        - {{ . | quote }}
+        {{- end }}
+  tracepoints:
+  - subsystem: "syscalls"
+    event: "sys_enter_getaddrinfo"
+  podSelector:
+    matchLabels:
+      omnix.io/observe: "true"
+{{- end }}

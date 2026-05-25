@@ -18,37 +18,74 @@ spec:
         component: observe-ebpf
     spec:
       hostNetwork: true
+      # hostPID is required for syscall tracing across the host's process tree.
       hostPID: true
       tolerations:
       - operator: Exists
       containers:
       - name: tetragon
         image: "{{ .Values.ebpf.tetragon.image.repository }}:{{ .Values.ebpf.tetragon.image.tag }}"
+        # privileged: true is required for eBPF program loading (verifier needs CAP_SYS_ADMIN
+        # + bpf() syscalls + kernel module access for kprobes); the explicit capabilities
+        # list below documents what we actually need.
         securityContext:
           privileged: true
           capabilities:
             add: ["BPF", "SYS_ADMIN", "PERFMON"]
+        args:
+        - --tracing-policy=/etc/tetragon/policy/tracing.yaml
+        - --export-filename=/var/run/tetragon/events.jsonl
+        - --metrics-server=:2112
+        - --enable-process-cred
+        - --enable-process-ns
+        - --enable-export-aggregation
+        ports:
+        - { name: metrics, containerPort: 2112 }
+        readinessProbe:
+          httpGet: { path: /metrics, port: 2112 }
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        livenessProbe:
+          httpGet: { path: /metrics, port: 2112 }
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        resources:
+          requests: { cpu: 100m, memory: 256Mi }
+          limits:   { cpu: 500m, memory: 512Mi }
         volumeMounts:
         - { name: cgroup, mountPath: /sys/fs/cgroup, readOnly: true }
         - { name: bpf,    mountPath: /sys/fs/bpf }
         - { name: kernel, mountPath: /lib/modules, readOnly: true }
         - { name: events, mountPath: /var/run/tetragon }
-        args:
-        - --enable-process-cred
-        - --enable-process-ns
-        - --enable-export-aggregation
-        - --export-filename=/var/run/tetragon/events.jsonl
-      - name: collector
+        - { name: policy, mountPath: /etc/tetragon/policy, readOnly: true }
+        - { name: filter, mountPath: /etc/tetragon/filter, readOnly: true }
+      - name: forwarder
         image: {{ include "omnix.api.image" . }}
         command: ["python", "-m", "omnix.cloud.observe.tetragon_runner"]
         env:
         - name: OMNIX_TETRAGON_LOG_PATH
           value: /var/run/tetragon/events.jsonl
+        - name: OMNIX_COLLECTOR_URL
+          value: "http://{{ include "omnix.fullname" . }}-collector:9050/v1/observe/tetragon"
+        - name: OMNIX_FILTER_PATH
+          value: /etc/tetragon/filter/filter.json
+        resources:
+          requests: { cpu: 50m, memory: 128Mi }
+          limits:   { cpu: 250m, memory: 256Mi }
         volumeMounts:
-        - { name: events, mountPath: /var/run/tetragon }
+        - { name: events, mountPath: /var/run/tetragon, readOnly: true }
+        - { name: filter, mountPath: /etc/tetragon/filter, readOnly: true }
       volumes:
       - { name: cgroup, hostPath: { path: /sys/fs/cgroup } }
       - { name: bpf,    hostPath: { path: /sys/fs/bpf } }
       - { name: kernel, hostPath: { path: /lib/modules } }
       - { name: events, emptyDir: {} }
+      - name: policy
+        configMap:
+          name: {{ include "omnix.fullname" . }}-tetragon-policy
+          items:
+          - { key: export.json, path: tracing.yaml }
+      - name: filter
+        configMap:
+          name: {{ include "omnix.fullname" . }}-tetragon-policy
 {{- end }}

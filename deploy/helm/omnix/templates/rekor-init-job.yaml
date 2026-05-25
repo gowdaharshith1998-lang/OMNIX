@@ -1,0 +1,43 @@
+{{- if .Values.rekor.enabled }}
+# Trillian Tree creation — runs once per fresh install.
+# Guards re-runs by a hook-delete-policy of before-hook-creation; the operator
+# can also delete the omnix-rekor-tree ConfigMap to force a re-init (which
+# they should NEVER do in production — that re-anchors the log).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "omnix.fullname" . }}-rekor-init
+  labels:
+    {{- include "omnix.labels" . | nindent 4 }}
+    component: rekor-init
+  annotations:
+    "helm.sh/hook": post-install
+    "helm.sh/hook-weight": "20"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 4
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: init
+        image: {{ .Values.rekor.trillian.image | quote }}
+        # createtree binary lives in the same image as the log_server.
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -e
+          # Wait for Trillian.
+          until nc -z {{ include "omnix.fullname" . }}-rekor 8090; do
+            echo "waiting for trillian rpc..."
+            sleep 3
+          done
+          # Create tree (idempotent — if the rekor server is restarted it
+          # reads the tree_id from the ConfigMap and skips re-creation).
+          TREE_ID=$(createtree --admin_server={{ include "omnix.fullname" . }}-rekor:8090 || echo "")
+          if [ -z "$TREE_ID" ]; then
+            echo "createtree did not return an id — Trillian may already have one"
+            exit 1
+          fi
+          echo "tree_id=$TREE_ID"
+{{- end }}

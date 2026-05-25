@@ -17,6 +17,11 @@ keywords:
   - replication
   - fips-204
   - ml-dsa-65
+dependencies:
+  - name: mainframe
+    version: 0.1.0
+    condition: mainframe.enabled
+    repository: "file://charts/mainframe"
 annotations:
   category: DeveloperTools
   licenses: Proprietary

@@ -1,0 +1,39 @@
+{{- if .Values.tcvision.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mainframe.fullname" . }}-tcvision
+  labels:
+    {{- include "mainframe.labels" . | nindent 4 }}
+    vendor: tcvision
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mainframe
+      vendor: tcvision
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mainframe
+        vendor: tcvision
+    spec:
+      containers:
+      - name: bridge
+        image: {{ include "mainframe.image" . }}
+        command: ["python", "-m", "omnix.cloud.observe.mainframe_bridge",
+                  "--vendor", "tcvision"]
+        env:
+        - name: OMNIX_MAINFRAME_TOPIC
+          value: {{ .Values.tcvision.topic | quote }}
+        - name: OMNIX_MAINFRAME_BOOTSTRAP
+          value: {{ required "mainframe.tcvision.bootstrapServers required" .Values.tcvision.bootstrapServers | quote }}
+        - name: OMNIX_MAINFRAME_GROUP
+          value: {{ .Values.tcvision.consumerGroup | quote }}
+        - name: OMNIX_COLLECTOR_URL
+          value: {{ .Values.collectorUrl | quote }}
+        ports:
+        - { name: metrics, containerPort: 9051 }
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+{{- end }}

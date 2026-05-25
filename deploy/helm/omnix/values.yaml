@@ -138,9 +138,17 @@ llm:
 
 rekor:
   enabled: false   # optional Sigstore Rekor v2 (Phase B4)
-  image:
-    repository: ghcr.io/sigstore/rekor-server
-    tag: v2.0.0
+  image: "gcr.io/projectsigstore/rekor-server:v1.3.10"
+  storage:
+    size: 50Gi
+    className: ""
+  trillian:
+    image: "gcr.io/trillian-opensource-ci/log_server:latest"
+    signerImage: "gcr.io/trillian-opensource-ci/log_signer:latest"
+    externalMysql:
+      host: ""
+      port: 3306
+      database: trillian
 
 ebpf:
   tetragon:
@@ -148,6 +156,61 @@ ebpf:
     image:
       repository: quay.io/cilium/tetragon
       tag: v1.4.0
+    # Extra absolute paths to capture file_open events on, beyond /etc and /var/lib.
+    filePaths: []
+    # Kubernetes namespaces whose pods are eligible for capture. When empty,
+    # the collector falls back to the release's namespace.
+    namespaceAllowList: []
+
+observe:
+  collector:
+    enabled: false
+    replicaCount: 1
+    # sink: memory | stdout | redis. Production should set redis + redisUrl.
+    sink: memory
+    redisUrl: ""
+  # Customer-managed Kafka (Confluent Cloud, MSK, Strimzi). OMNIX deploys
+  # Kafka Connect + Debezium plugins in-cluster and points them at this.
+  kafka:
+    bootstrapServers: ""
+  cdc:
+    enabled: false
+    postgres: { enabled: false }
+    mysql: { enabled: false }
+    sqlserver: { enabled: false }
+    oracle: { enabled: false }
+    db2: { enabled: false }
+  connect:
+    image: "debezium/connect-with-omnix-plugins:2.7"
+    resources:
+      requests: { cpu: 500m, memory: 1Gi }
+      limits:   { cpu: 2, memory: 4Gi }
+
+mainframe:
+  enabled: false
+  tcvision:
+    enabled: false
+    topic: "tcvision.records"
+    bootstrapServers: ""
+  ironstream:
+    enabled: false
+    topic: "ironstream.smf"
+    bootstrapServers: ""
+  cprof:
+    enabled: false
+    topic: "cprof.cics"
+    bootstrapServers: ""
+
+facade:
+  enabled: false
+  legacyService: ""
+  candidateServiceTemplate: ""
+  envoyImage: "envoyproxy/envoy:v1.32.0"
+  writerImage: ""
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 1000m, memory: 1Gi }
 
 drata:
   enabled: false

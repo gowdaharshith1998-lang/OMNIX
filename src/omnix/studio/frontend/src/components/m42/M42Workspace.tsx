@@ -63,6 +63,7 @@ import { InspectorHistoryTab } from "./InspectorHistoryTab";
 import { InspectorReceiptsTab, type ReceiptEntry as M42Receipt } from "./InspectorReceiptsTab";
 import { BottomBar } from "./BottomBar";
 import { DecisionModal } from "./DecisionModal";
+import { CutoverModal } from "./CutoverModal";
 import { SlideSettingsDrawer } from "./SlideSettingsDrawer";
 import { SplitGraphContainer } from "./SplitGraphContainer";
 import type {
@@ -206,6 +207,9 @@ export function M42Workspace({
   const [doneReceiptHash, setDoneReceiptHash] = useState<string | null>(null);
   const [decisionPayload, setDecisionPayload] = useState<DecisionPayload | null>(null);
   const [decisionOpen, setDecisionOpen] = useState(false);
+  // Cutover modal — Shape B v2. Trigger surface lives in the XRay node action menu;
+  // the modal mount is additive here so existing modal infrastructure is untouched.
+  const [cutoverUnit, setCutoverUnit] = useState<string | null>(null);
 
   const [sourceLang, setSourceLang] = useState("auto");
   const [targetLang, setTargetLang] = useState("java21");
@@ -1153,6 +1157,10 @@ export function M42Workspace({
         }}
         onClose={() => setDecisionOpen(false)}
       />
+
+      {cutoverUnit && (
+        <CutoverModal unit={cutoverUnit} onClose={() => setCutoverUnit(null)} />
+      )}
 
       <SlideSettingsDrawer
         open={settingsOpen}

@@ -63,6 +63,12 @@ class FacadeController:
         self._states: dict[tuple[str, str], CutoverState] = {}
         self._signer = signer
         self._verifier = verifier
+        # In-process subscribers (e.g. FacadeWriter) that want to react to
+        # every shift the controller authorizes. Kept in-process to avoid
+        # taking a hard dependency on Redis/streams here — the production
+        # deployment co-locates the writer as a sidecar in the same pod, so
+        # in-process pub/sub is correct.
+        self._writer_subscribers: list = []
 
     def state(self, tenant_id: str, unit_id: str) -> CutoverState:
         with self._lock:
@@ -121,7 +127,31 @@ class FacadeController:
                 event.receipt_id = "rcpt-" + uuid.uuid4().hex
             state.percentage = target_percentage
             state.history.append(event)
+            self._notify_writers(event)
             return event
+
+    def subscribe_writer(self, callback) -> None:
+        """Register a callback invoked for every authorized shift event.
+
+        The callback is called inside the controller's lock; subscribers MUST
+        return quickly (e.g. enqueue and apply on another thread). The
+        FacadeWriter sidecar does exactly that.
+        """
+        with self._lock:
+            self._writer_subscribers.append(callback)
+
+    def _notify_writers(self, event: CutoverEvent) -> None:
+        # Errors in subscribers must not roll back the shift; the controller's
+        # contract is signed-receipt-authorized state mutation, and once a
+        # signature exists the operator's audit trail is committed.
+        for cb in self._writer_subscribers:
+            try:
+                cb(event)
+            except Exception:  # noqa: BLE001
+                import logging
+                logging.getLogger("omnix.facade_controller").exception(
+                    "writer subscriber raised; swallowing"
+                )
 
     def rollback(self, *, tenant_id: str, unit_id: str) -> CutoverEvent:
         return self.request_shift(

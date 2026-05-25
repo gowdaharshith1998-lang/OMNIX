@@ -1,0 +1,27 @@
+{{- if .Values.observe.cdc.enabled }}
+# Kafka Connect distributed config. The customer's Kafka cluster is supplied
+# via .Values.observe.kafka.bootstrapServers; OMNIX assumes customer-managed
+# Kafka (Confluent Cloud, MSK, Strimzi) — see chart README for setup.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "omnix.fullname" . }}-connect-config
+  labels:
+    {{- include "omnix.labels" . | nindent 4 }}
+    component: observe-connect
+data:
+  connect-distributed.properties: |
+    bootstrap.servers={{ required "observe.kafka.bootstrapServers is required when observe.cdc.enabled=true" .Values.observe.kafka.bootstrapServers }}
+    group.id=omnix-connect
+    key.converter=org.apache.kafka.connect.json.JsonConverter
+    value.converter=org.apache.kafka.connect.json.JsonConverter
+    key.converter.schemas.enable=false
+    value.converter.schemas.enable=false
+    offset.storage.topic=omnix-connect-offsets
+    offset.storage.replication.factor=3
+    config.storage.topic=omnix-connect-configs
+    config.storage.replication.factor=3
+    status.storage.topic=omnix-connect-status
+    status.storage.replication.factor=3
+    plugin.path=/opt/kafka/plugins,/opt/debezium/plugins
+{{- end }}

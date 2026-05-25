@@ -1,0 +1,16 @@
+{{- if .Values.tcvision.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mainframe.fullname" . }}-tcvision
+  labels:
+    {{- include "mainframe.labels" . | nindent 4 }}
+    vendor: tcvision
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: mainframe
+    vendor: tcvision
+  ports:
+  - { name: metrics, port: 9051, targetPort: metrics }
+{{- end }}

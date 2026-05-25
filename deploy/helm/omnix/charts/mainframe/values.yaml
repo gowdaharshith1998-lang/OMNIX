@@ -1,0 +1,41 @@
+# Subchart defaults — mirrored from the parent chart's .mainframe block.
+# The parent passes its .Values.mainframe down via the subchart dependency
+# alias, so these defaults only fire when the subchart is installed standalone.
+
+enabled: false
+
+# Override at install time per pilot — each vendor's mainframe-side agent
+# (tcVISION, Ironstream, C\Prof) is operator-licensed; OMNIX deploys the
+# in-cluster consumer bridges only.
+
+tcvision:
+  enabled: false
+  topic: "tcvision.records"
+  bootstrapServers: ""
+  consumerGroup: "omnix-mainframe-tcvision"
+
+ironstream:
+  enabled: false
+  topic: "ironstream.smf"
+  bootstrapServers: ""
+  consumerGroup: "omnix-mainframe-ironstream"
+
+cprof:
+  enabled: false
+  topic: "cprof.cics"
+  bootstrapServers: ""
+  consumerGroup: "omnix-mainframe-cprof"
+
+image:
+  # Re-uses the api image (Python + omnix package) by default; the parent
+  # passes the resolved api image down via subchart imports.
+  repository: omnix-cloud-api
+  tag: ""
+
+# Where bridges POST normalized observations. The parent collector service
+# at omnix-<release>-collector:9050 is the production target.
+collectorUrl: "http://omnix-collector:9050"
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits:   { cpu: 500m, memory: 512Mi }

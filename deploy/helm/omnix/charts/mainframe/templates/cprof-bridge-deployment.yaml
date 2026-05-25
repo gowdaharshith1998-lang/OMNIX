@@ -1,0 +1,39 @@
+{{- if .Values.cprof.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mainframe.fullname" . }}-cprof
+  labels:
+    {{- include "mainframe.labels" . | nindent 4 }}
+    vendor: cprof
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mainframe
+      vendor: cprof
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mainframe
+        vendor: cprof
+    spec:
+      containers:
+      - name: bridge
+        image: {{ include "mainframe.image" . }}
+        command: ["python", "-m", "omnix.cloud.observe.mainframe_bridge",
+                  "--vendor", "cprof"]
+        env:
+        - name: OMNIX_MAINFRAME_TOPIC
+          value: {{ .Values.cprof.topic | quote }}
+        - name: OMNIX_MAINFRAME_BOOTSTRAP
+          value: {{ required "mainframe.cprof.bootstrapServers required" .Values.cprof.bootstrapServers | quote }}
+        - name: OMNIX_MAINFRAME_GROUP
+          value: {{ .Values.cprof.consumerGroup | quote }}
+        - name: OMNIX_COLLECTOR_URL
+          value: {{ .Values.collectorUrl | quote }}
+        ports:
+        - { name: metrics, containerPort: 9053 }
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+{{- end }}
