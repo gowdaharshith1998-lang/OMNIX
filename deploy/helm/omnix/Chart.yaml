@@ -1,0 +1,22 @@
+apiVersion: v2
+name: omnix
+description: OMNIX behavioral replicator — air-gapped enterprise deployment (Shape B)
+type: application
+version: 0.1.0
+appVersion: "0.6.1"
+home: https://axiomcontrol.systems
+sources:
+  - https://github.com/gowdaharshith1998-lang/omnix
+maintainers:
+  - name: AXIOM Control Systems Inc.
+keywords:
+  - cobol
+  - mainframe
+  - modernization
+  - migration
+  - replication
+  - fips-204
+  - ml-dsa-65
+annotations:
+  category: DeveloperTools
+  licenses: Proprietary

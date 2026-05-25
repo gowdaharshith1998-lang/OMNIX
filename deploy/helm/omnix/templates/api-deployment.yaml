@@ -1,0 +1,57 @@
+{{- if .Values.api.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "omnix.fullname" . }}-api
+  labels:
+    {{- include "omnix.labels" . | nindent 4 }}
+    component: api
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        component: api
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: api
+        image: {{ include "omnix.api.image" . }}
+        imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        {{- range $k, $v := .Values.api.env }}
+        - name: {{ $k }}
+          value: {{ $v | quote }}
+        {{- end }}
+        - name: OMNIX_DATABASE_URL
+          valueFrom:
+            secretKeyRef: { name: omnix-db-dsn, key: async-url }
+        - name: OMNIX_SYNC_DATABASE_URL
+          valueFrom:
+            secretKeyRef: { name: omnix-db-dsn, key: sync-url }
+        - name: OMNIX_REDIS_URL
+          valueFrom:
+            secretKeyRef: { name: omnix-redis-dsn, key: url }
+        - name: OMNIX_JWT_SECRET
+          valueFrom:
+            secretKeyRef: { name: omnix-jwt, key: secret }
+        resources: {{ toYaml .Values.api.resources | nindent 10 }}
+        readinessProbe:
+          httpGet: { path: /health, port: http }
+          periodSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          httpGet: { path: /health, port: http }
+          periodSeconds: 10
+          failureThreshold: 5
+{{- end }}

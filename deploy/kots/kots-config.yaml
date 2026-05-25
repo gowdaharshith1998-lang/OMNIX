@@ -1,0 +1,50 @@
+apiVersion: kots.io/v1beta1
+kind: Config
+metadata:
+  name: omnix-config
+spec:
+  groups:
+    - name: deployment
+      title: Deployment
+      items:
+        - name: hostname
+          title: Hostname
+          type: text
+          default: app.omnix.local
+        - name: tier
+          title: Tenant tier
+          type: select_one
+          default: smb
+          items:
+            - name: smb
+              title: SMB (shared schema)
+            - name: banking
+              title: Banking (DB-per-tenant, BYO CMK)
+
+    - name: llm
+      title: LLM Routing
+      items:
+        - name: default_provider
+          title: Default provider
+          type: select_one
+          default: anthropic
+          items:
+            - name: anthropic
+              title: Anthropic (api.anthropic.com)
+            - name: bedrock
+              title: AWS Bedrock
+            - name: claude-platform
+              title: Claude Platform on AWS
+            - name: selfhosted
+              title: Self-hosted (Llama 3.3 70B / Qwen 3 Coder / DeepSeek V3.2)
+
+    - name: compliance
+      title: Compliance
+      items:
+        - name: enable_rekor
+          title: Enable private Rekor transparency log
+          type: bool
+          default: "0"
+        - name: drata_api_key
+          title: Drata API key (optional)
+          type: password

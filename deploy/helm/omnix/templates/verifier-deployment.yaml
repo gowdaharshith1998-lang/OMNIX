@@ -1,0 +1,44 @@
+{{- if .Values.verifier.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "omnix.fullname" . }}-verifier
+  labels:
+    {{- include "omnix.labels" . | nindent 4 }}
+    component: verifier
+spec:
+  replicas: {{ .Values.verifier.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      component: verifier
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        component: verifier
+    spec:
+      containers:
+      - name: verifier
+        image: {{ include "omnix.verifier.image" . }}
+        imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+        command: ["uvicorn", "omnix.cloud.verify_page.app:app", "--host", "0.0.0.0", "--port", "8090"]
+        ports:
+        - containerPort: 8090
+          name: http
+        readinessProbe:
+          httpGet: { path: /wasm/verify.js, port: http }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omnix.fullname" . }}-verifier
+spec:
+  type: {{ .Values.verifier.service.type }}
+  ports:
+  - port: {{ .Values.verifier.service.port }}
+    targetPort: 8090
+  selector:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    component: verifier
+{{- end }}

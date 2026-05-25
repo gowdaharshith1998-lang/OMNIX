@@ -1,0 +1,22 @@
+apiVersion: kots.io/v1beta1
+kind: Application
+metadata:
+  name: omnix
+spec:
+  title: OMNIX Replication Platform
+  icon: https://axiomcontrol.systems/omnix.png
+  releaseNotes: "Initial OMNIX Shape B airgapped release"
+  applicationUrl: https://app.omnix.local
+  statusInformers:
+    - deployment/omnix-api
+    - deployment/omnix-worker
+    - deployment/omnix-verifier
+  ports:
+    - serviceName: omnix-api
+      servicePort: 8080
+      localPort: 8080
+      applicationUrl: "http://app.omnix.local"
+    - serviceName: omnix-verifier
+      servicePort: 8090
+      localPort: 8090
+      applicationUrl: "http://verify.omnix.local"

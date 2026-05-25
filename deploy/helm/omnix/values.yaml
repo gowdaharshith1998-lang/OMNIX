@@ -1,0 +1,162 @@
+# OMNIX Helm values — defaults are sensible for a single-node dev cluster.
+# Production overrides should be supplied via -f production-values.yaml.
+
+global:
+  image:
+    registry: ghcr.io/gowdaharshith1998-lang
+    pullPolicy: IfNotPresent
+  storageClass: ""
+  imagePullSecrets: []
+  airgap:
+    enabled: false
+
+api:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: omnix-cloud-api
+    tag: ""
+  service:
+    type: ClusterIP
+    port: 8080
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
+  env:
+    OMNIX_DEBUG: "false"
+    OMNIX_STORAGE_BACKEND: s3
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPU: 70
+
+worker:
+  enabled: true
+  replicaCount: 4
+  image:
+    repository: omnix-cloud-api
+    tag: ""
+  resources:
+    requests:
+      cpu: 1
+      memory: 2Gi
+    limits:
+      cpu: 4
+      memory: 8Gi
+  queues: ["omnix.default"]
+  hpa:
+    enabled: true
+    minReplicas: 4
+    maxReplicas: 32
+    targetCPU: 70
+
+studio:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: omnix-studio
+    tag: ""
+  service:
+    type: ClusterIP
+    port: 8081
+
+verifier:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: omnix-verifier
+    tag: ""
+  service:
+    type: ClusterIP
+    port: 8090
+
+postgres:
+  enabled: true   # set false to use an external Aurora / cloud-managed PG
+  image:
+    repository: bitnami/postgresql
+    tag: "16"
+  auth:
+    database: omnix
+    username: omnix
+    existingSecret: omnix-postgres
+  persistence:
+    enabled: true
+    size: 100Gi
+
+redis:
+  enabled: true
+  image:
+    repository: bitnami/redis
+    tag: "7"
+  auth:
+    existingSecret: omnix-redis
+  persistence:
+    enabled: true
+    size: 10Gi
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: app.omnix.local
+      paths: [{ path: /, pathType: Prefix, service: api }]
+    - host: verify.omnix.local
+      paths: [{ path: /, pathType: Prefix, service: verifier }]
+    - host: studio.omnix.local
+      paths: [{ path: /, pathType: Prefix, service: studio }]
+  tls: []
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-body-size: 105g
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+
+networkPolicy:
+  enabled: true
+  denyAll: true
+
+pdb:
+  enabled: true
+  minAvailable: 1
+
+llm:
+  selfHosted:
+    enabled: false
+    image:
+      repository: vllm/vllm-openai
+      tag: latest
+    gpus:
+      requested: 2
+      type: nvidia.com/gpu
+    model:
+      name: meta-llama/Meta-Llama-3.3-70B-Instruct
+      quantization: fp8
+
+rekor:
+  enabled: false   # optional Sigstore Rekor v2 (Phase B4)
+  image:
+    repository: ghcr.io/sigstore/rekor-server
+    tag: v2.0.0
+
+ebpf:
+  tetragon:
+    enabled: false   # Phase B2 — requires kernel >=5.8
+    image:
+      repository: quay.io/cilium/tetragon
+      tag: v1.4.0
+
+drata:
+  enabled: false
+  apiKeySecret: omnix-drata-api-key
+
+sentry:
+  enabled: false
+  dsnSecret: omnix-sentry-dsn
+
+mldsa:
+  signingKeySecret: omnix-mldsa-signing
+  verifyKeySecret: omnix-mldsa-verify
