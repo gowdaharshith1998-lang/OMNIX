@@ -132,6 +132,10 @@ main.add_command(grammar_group, name="grammar")
 main.add_command(analyze)
 main.add_command(rebuild_cmd)
 
+from omnix.cli_scan import scan_cmd  # noqa: E402 — additive registration
+
+main.add_command(scan_cmd)
+
 
 @main.command(
     "find-bugs",
