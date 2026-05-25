@@ -1,0 +1,136 @@
+{{- if .Values.observe.cdc.enabled }}
+{{- $omnixName := include "omnix.fullname" . -}}
+{{- $cdc := .Values.observe.cdc -}}
+{{- /*
+Per-DBMS connector JSON specs. The shape per Debezium 2.7+ is one ConfigMap
+per enabled DBMS holding `<dbms>.json`; the registration Job (below) curls it
+into the Connect REST API. Topic-prefix conventions match
+src/omnix/cloud/observe/cdc_collector.py's "db://<db>.<table>" service URI.
+*/}}
+{{- if $cdc.postgres.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $omnixName }}-debezium-postgres-config
+  labels: { app.kubernetes.io/name: omnix, component: debezium-postgres }
+data:
+  postgres.json: |
+    {
+      "name": "omnix-debezium-postgres",
+      "config": {
+        "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+        "database.hostname": "${file:/etc/secrets/host}",
+        "database.port": "${file:/etc/secrets/port}",
+        "database.user": "${file:/etc/secrets/user}",
+        "database.password": "${file:/etc/secrets/password}",
+        "database.dbname": "${file:/etc/secrets/database}",
+        "topic.prefix": "omnix.postgres",
+        "plugin.name": "pgoutput",
+        "slot.name": "omnix_slot",
+        "publication.autocreate.mode": "filtered",
+        "snapshot.mode": "initial"
+      }
+    }
+{{- end }}
+{{- if $cdc.mysql.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $omnixName }}-debezium-mysql-config
+  labels: { app.kubernetes.io/name: omnix, component: debezium-mysql }
+data:
+  mysql.json: |
+    {
+      "name": "omnix-debezium-mysql",
+      "config": {
+        "connector.class": "io.debezium.connector.mysql.MySqlConnector",
+        "database.hostname": "${file:/etc/secrets/host}",
+        "database.port": "${file:/etc/secrets/port}",
+        "database.user": "${file:/etc/secrets/user}",
+        "database.password": "${file:/etc/secrets/password}",
+        "database.server.id": "184054",
+        "topic.prefix": "omnix.mysql",
+        "schema.history.internal.kafka.topic": "omnix.mysql.history",
+        "schema.history.internal.kafka.bootstrap.servers": "{{ .Values.observe.kafka.bootstrapServers }}",
+        "include.schema.changes": "true"
+      }
+    }
+{{- end }}
+{{- if $cdc.sqlserver.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $omnixName }}-debezium-sqlserver-config
+  labels: { app.kubernetes.io/name: omnix, component: debezium-sqlserver }
+data:
+  sqlserver.json: |
+    {
+      "name": "omnix-debezium-sqlserver",
+      "config": {
+        "connector.class": "io.debezium.connector.sqlserver.SqlServerConnector",
+        "database.hostname": "${file:/etc/secrets/host}",
+        "database.port": "${file:/etc/secrets/port}",
+        "database.user": "${file:/etc/secrets/user}",
+        "database.password": "${file:/etc/secrets/password}",
+        "database.names": "${file:/etc/secrets/database}",
+        "database.encrypt": "true",
+        "topic.prefix": "omnix.sqlserver",
+        "schema.history.internal.kafka.topic": "omnix.sqlserver.history",
+        "schema.history.internal.kafka.bootstrap.servers": "{{ .Values.observe.kafka.bootstrapServers }}"
+      }
+    }
+{{- end }}
+{{- if $cdc.oracle.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $omnixName }}-debezium-oracle-config
+  labels: { app.kubernetes.io/name: omnix, component: debezium-oracle }
+data:
+  oracle.json: |
+    {
+      "name": "omnix-debezium-oracle",
+      "config": {
+        "connector.class": "io.debezium.connector.oracle.OracleConnector",
+        "database.hostname": "${file:/etc/secrets/host}",
+        "database.port": "${file:/etc/secrets/port}",
+        "database.user": "${file:/etc/secrets/user}",
+        "database.password": "${file:/etc/secrets/password}",
+        "database.dbname": "${file:/etc/secrets/database}",
+        "database.pdb.name": "${file:/etc/secrets/pdb}",
+        "topic.prefix": "omnix.oracle",
+        "schema.history.internal.kafka.topic": "omnix.oracle.history",
+        "schema.history.internal.kafka.bootstrap.servers": "{{ .Values.observe.kafka.bootstrapServers }}",
+        "log.mining.strategy": "online_catalog"
+      }
+    }
+{{- end }}
+{{- if $cdc.db2.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $omnixName }}-debezium-db2-config
+  labels: { app.kubernetes.io/name: omnix, component: debezium-db2 }
+data:
+  db2.json: |
+    {
+      "name": "omnix-debezium-db2",
+      "config": {
+        "connector.class": "io.debezium.connector.db2.Db2Connector",
+        "database.hostname": "${file:/etc/secrets/host}",
+        "database.port": "${file:/etc/secrets/port}",
+        "database.user": "${file:/etc/secrets/user}",
+        "database.password": "${file:/etc/secrets/password}",
+        "database.dbname": "${file:/etc/secrets/database}",
+        "topic.prefix": "omnix.db2",
+        "schema.history.internal.kafka.topic": "omnix.db2.history",
+        "schema.history.internal.kafka.bootstrap.servers": "{{ .Values.observe.kafka.bootstrapServers }}"
+      }
+    }
+{{- end }}
+{{- end }}

@@ -1,0 +1,49 @@
+{{- if .Values.observe.cdc.enabled }}
+{{- $omnixName := include "omnix.fullname" . -}}
+{{- $cdc := .Values.observe.cdc -}}
+{{- $dbmsList := list "postgres" "mysql" "sqlserver" "oracle" "db2" -}}
+{{- range $dbms := $dbmsList -}}
+{{- $cfg := index $cdc $dbms -}}
+{{- if $cfg.enabled }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $omnixName }}-debezium-{{ $dbms }}
+  labels:
+    {{- include "omnix.labels" $ | nindent 4 }}
+    component: debezium-{{ $dbms }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 4
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: register
+        image: curlimages/curl:8.10.1
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -e
+          # Wait for Connect REST API to be reachable.
+          until curl -sS -o /dev/null http://{{ $omnixName }}-kafka-connect:8083/connectors; do
+            echo "waiting for Kafka Connect..."
+            sleep 5
+          done
+          curl -sS -X POST http://{{ $omnixName }}-kafka-connect:8083/connectors \
+            -H 'Content-Type: application/json' \
+            -d @/config/{{ $dbms }}.json
+        volumeMounts:
+        - name: config
+          mountPath: /config
+      volumes:
+      - name: config
+        configMap:
+          name: {{ $omnixName }}-debezium-{{ $dbms }}-config
+{{- end }}
+{{- end }}
+{{- end }}

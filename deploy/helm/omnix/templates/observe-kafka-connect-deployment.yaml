@@ -1,0 +1,51 @@
+{{- if .Values.observe.cdc.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "omnix.fullname" . }}-kafka-connect
+  labels:
+    {{- include "omnix.labels" . | nindent 4 }}
+    component: observe-connect
+spec:
+  replicas: {{ .Values.observe.connect.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      component: observe-connect
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        component: observe-connect
+    spec:
+      containers:
+      - name: connect
+        image: "{{ .Values.observe.connect.image }}"
+        command: ["bash", "-c"]
+        args:
+        - |
+          exec /opt/kafka/bin/connect-distributed.sh /etc/kafka/connect-distributed.properties
+        ports:
+        - { name: rest, containerPort: 8083 }
+        env:
+        - name: KAFKA_HEAP_OPTS
+          value: "-Xms512m -Xmx1g"
+        resources:
+          {{- toYaml .Values.observe.connect.resources | nindent 10 }}
+        readinessProbe:
+          httpGet: { path: /connectors, port: 8083 }
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        livenessProbe:
+          httpGet: { path: /connectors, port: 8083 }
+          initialDelaySeconds: 90
+          periodSeconds: 30
+        volumeMounts:
+        - { name: config, mountPath: /etc/kafka }
+      volumes:
+      - name: config
+        configMap:
+          name: {{ include "omnix.fullname" . }}-connect-config
+          items:
+          - { key: connect-distributed.properties, path: connect-distributed.properties }
+{{- end }}
