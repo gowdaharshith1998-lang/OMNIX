@@ -1,0 +1,36 @@
+{{- if .Values.facade.enabled }}
+# Bootstrap routes.json — 100% legacy until the controller authorizes its
+# first signed shift. The facade_writer sidecar overwrites this file
+# atomically on every shift event.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "omnix.fullname" . }}-facade-routes
+  labels:
+    {{- include "omnix.labels" . | nindent 4 }}
+    component: facade
+data:
+  routes.json: |
+    {
+      "resources": [{
+        "@type": "type.googleapis.com/envoy.config.route.v3.RouteConfiguration",
+        "name": "omnix_routes",
+        "virtual_hosts": [{
+          "name": "omnix-default",
+          "domains": ["*"],
+          "routes": [{
+            "match": { "prefix": "/" },
+            "route": {
+              "weighted_clusters": {
+                "clusters": [
+                  { "name": "legacy_default",    "weight": 100 },
+                  { "name": "candidate_default", "weight": 0 }
+                ],
+                "total_weight": 100
+              }
+            }
+          }]
+        }]
+      }]
+    }
+{{- end }}
