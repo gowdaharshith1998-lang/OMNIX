@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "omnix.fullname" . }}-provider-fabric
+data:
+  fabric.json: |
+    {
+      "default": "anthropic",
+      "providers": {
+        "anthropic":       {"kind": "anthropic", "model": "claude-opus-4-7"},
+        "bedrock":         {"kind": "bedrock",   "model": "anthropic.claude-opus-4-7-v1:0", "region": "us-east-1"},
+        "claude-platform": {"kind": "claude-platform-aws", "model": "claude-opus-4-7"},
+        "vertex":          {"kind": "vertex",    "model": "claude-opus-4-7@2026-04-16"},
+        "foundry":         {"kind": "foundry",   "model": "claude-opus-4-7"},
+        "openai":          {"kind": "openai",    "model": "gpt-5.5"},
+        "azure-openai":    {"kind": "azure-openai", "model": "gpt-5.5", "deployment": "azure-gpt55"},
+        "selfhosted":      {"kind": "self-hosted", "endpoint": "http://omnix-vllm:8000", "model": "meta-llama/Meta-Llama-3.3-70B-Instruct"}
+      },
+      "routing": {
+        "fully_airgapped":     ["selfhosted"],
+        "fedramp_high":        ["bedrock", "claude-platform"],
+        "smb_default":         ["anthropic"],
+        "banking_aws_resident":["claude-platform", "bedrock"]
+      }
+    }

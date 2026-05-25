@@ -1,0 +1,40 @@
+apiVersion: troubleshoot.sh/v1beta2
+kind: Preflight
+metadata:
+  name: omnix-preflights
+spec:
+  collectors:
+    - clusterInfo: {}
+    - clusterResources: {}
+    - hostOS: {}
+  analyzers:
+    - clusterVersion:
+        outcomes:
+          - fail:
+              when: "< 1.28.0"
+              message: "OMNIX requires Kubernetes 1.28 or later."
+          - pass:
+              message: "Kubernetes version is supported."
+    - nodeResources:
+        checkName: "Sufficient cluster CPU"
+        outcomes:
+          - fail:
+              when: "sum(cpuCapacity) < 8"
+              message: "OMNIX requires >= 8 CPU cores cluster-wide."
+          - pass:
+              message: "CPU capacity sufficient."
+    - nodeResources:
+        checkName: "Sufficient cluster memory"
+        outcomes:
+          - fail:
+              when: "sum(memoryCapacity) < 16Gi"
+              message: "OMNIX requires >= 16Gi memory cluster-wide."
+          - pass:
+              message: "Memory capacity sufficient."
+    - storageClass:
+        checkName: "Default StorageClass available"
+        outcomes:
+          - fail:
+              message: "A default StorageClass is required."
+          - pass:
+              message: "Default StorageClass present."

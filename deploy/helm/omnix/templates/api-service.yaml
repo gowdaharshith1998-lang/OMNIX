@@ -1,0 +1,18 @@
+{{- if .Values.api.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omnix.fullname" . }}-api
+  labels:
+    {{- include "omnix.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.api.service.type }}
+  ports:
+  - port: {{ .Values.api.service.port }}
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    component: api
+{{- end }}
