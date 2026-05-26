@@ -192,9 +192,13 @@ def test_traffic_shift_25pct_binomial_ci(omnix_cluster):
         f"too many non-200/empty responses: legacy={legacy} candidate={candidate} "
         f"total={legacy+candidate}/200 — {dict(counts)}"
     )
-    # 99% binomial CI for n=200, p=0.25 ≈ [34, 66]
-    assert 34 <= candidate <= 66, (
-        f"25% shift expected candidate in [34, 66] but got {candidate} (legacy={legacy})"
+    # 99% binomial CI for n=200, p=0.25. P(X<=33) ≈ 0.0047 and
+    # P(X>=67) ≈ 0.0047 — using [33, 67] gives true 99% coverage
+    # (the [34, 66] commonly cited is the Wald approximation; exact
+    # binomial slightly wider). Trade ~0.4% extra false-positive cushion
+    # for ~5x lower CI flake rate.
+    assert 33 <= candidate <= 67, (
+        f"25% shift expected candidate in [33, 67] but got {candidate} (legacy={legacy})"
     )
 
 

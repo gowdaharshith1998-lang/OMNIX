@@ -141,13 +141,35 @@ def compute_clusters(
     ``candidate_cluster`` reference. Drift = silent 503 on every request.
     """
     def _parse_addr(s: str) -> tuple[str, int]:
+        """Parse ``host:port`` into ``(host, port_int)``.
+
+        Conservative — only IPv4 / DNS hostnames are supported; literal IPv6
+        addresses in `[::1]:80` form would require URL-parser semantics and
+        Envoy's STRICT_DNS / LOGICAL_DNS types take a hostname here anyway.
+        The validator below catches IPv6 brackets, non-numeric ports, and
+        empty hosts; bad input becomes a clear ValueError at config time
+        rather than a silent misroute at request time.
+        """
+        if not s:
+            raise ValueError(f"empty service address")
+        if s.startswith("["):
+            raise ValueError(f"IPv6 literal addresses not supported in service addr: {s!r}")
         if ":" not in s:
+            # No port specified — default to 80.
             return s, 80
-        host, _, port = s.rpartition(":")
+        host, _, port_s = s.rpartition(":")
+        if not host:
+            raise ValueError(f"empty host in service addr: {s!r}")
         try:
-            return host, int(port)
-        except ValueError:
-            return s, 80
+            port = int(port_s)
+        except ValueError as e:
+            raise ValueError(
+                f"non-numeric port {port_s!r} in service addr {s!r} — "
+                f"named-port refs (':http') not supported, use a numeric port"
+            ) from e
+        if not 0 < port < 65536:
+            raise ValueError(f"port out of range in service addr: {s!r}")
+        return host, port
 
     def _cluster(name: str, addr: str, port: int, dns_type: str) -> dict:
         return {
@@ -204,14 +226,32 @@ def compute_routes_and_clusters(
     return compute_routes(shift_table), compute_clusters(shift_table, config)
 
 
+_VERSION_LOCK = threading.Lock()
+_VERSION_COUNTER = 0
+
+
+def _next_version() -> str:
+    """Monotonic ``version_info`` so two writes in the same millisecond don't
+    collide and get de-duped by Envoy. Counter is unix-ms-seeded so reboots
+    don't start emitting old version strings.
+    """
+    global _VERSION_COUNTER
+    with _VERSION_LOCK:
+        ms = int(time.time() * 1000)
+        if ms > _VERSION_COUNTER:
+            _VERSION_COUNTER = ms
+        else:
+            _VERSION_COUNTER += 1
+        return str(_VERSION_COUNTER)
+
+
 def _wrap_clusters_envelope(clusters: list[dict]) -> dict:
     """Envoy filesystem CDS expects a DiscoveryResponse-shaped envelope.
 
-    ``version_info`` is a monotonic id (we use unix millis) that lets Envoy
-    distinguish an updated file from the same one read twice.
+    ``version_info`` is monotonic — see ``_next_version``.
     """
     return {
-        "version_info": str(int(time.time() * 1000)),
+        "version_info": _next_version(),
         "resources": clusters,
     }
 
@@ -314,6 +354,9 @@ class FacadeWriter:
         the PR #47 caller signature; in dynamic mode the matching clusters
         list is also written to ``config.clusters_path``.
         """
+        # Clamp at ingest so the in-memory table and the on-disk view never
+        # disagree about what was authorized (review M5).
+        clamped = max(0, min(100, int(event.target_percentage)))
         with self._lock:
             entry = self._table.get(event.unit_id) or RouteEntry(
                 unit=event.unit_id,
@@ -321,7 +364,7 @@ class FacadeWriter:
                 candidate_cluster=f"candidate_{event.unit_id}",
                 candidate_weight=0,
             )
-            entry.candidate_weight = event.target_percentage
+            entry.candidate_weight = clamped
             self._table[event.unit_id] = entry
             return self._recompose_locked()
 
@@ -345,6 +388,7 @@ class FacadeWriter:
         """Seed the routing table from ``(unit_id, percentage)`` pairs.
 
         Used by the sidecar runner after fetching ``GET /v1/cutover/units``.
+        Clamps percentage at ingest (review M5).
         """
         with self._lock:
             for unit_id, pct in units:
@@ -352,7 +396,7 @@ class FacadeWriter:
                     unit=unit_id,
                     legacy_cluster=f"legacy_{unit_id}",
                     candidate_cluster=f"candidate_{unit_id}",
-                    candidate_weight=int(pct),
+                    candidate_weight=max(0, min(100, int(pct))),
                 )
             self._recompose_locked()
 
@@ -372,15 +416,26 @@ class FacadeWriter:
 
     def _recompose_locked(self) -> dict:
         routes = compute_routes(self._table)
-        atomic_write(self._config.routes_path, json.dumps(routes, indent=2).encode())
         if self._config.writes_clusters:
             # Only compute clusters in dynamic mode — saves cycles on the
             # legacy single-file path AND avoids parsing the
             # candidate_service_template as an address when callers passed
             # a name-template ("candidate_{unit}") rather than a DNS one.
+            #
+            # Write CLUSTERS FIRST, then ROUTES. Envoy's CDS and RDS poll
+            # filesystem mtime independently with no ordering between them.
+            # If we wrote routes first, Envoy could observe the new route
+            # (referencing e.g. legacy_newunit) BEFORE the new clusters file
+            # appears — and respond 503 ("warming / no cluster") for the
+            # gap. By writing clusters first, the cluster name a new route
+            # references is guaranteed to be visible to Envoy by the time
+            # the route lookup runs. (On a delete, the reverse order would
+            # be needed; we currently don't delete units, only set their
+            # weight to 0.)
             clusters = compute_clusters(self._table, self._config)
             envelope = _wrap_clusters_envelope(clusters)
             atomic_write(self._config.clusters_path, json.dumps(envelope, indent=2).encode())
+        atomic_write(self._config.routes_path, json.dumps(routes, indent=2).encode())
         return routes
 
     def drain_pending(self, *, timeout: float = 0.0) -> int:

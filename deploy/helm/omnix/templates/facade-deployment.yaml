@@ -75,6 +75,30 @@ spec:
         {{- if eq .Values.facade.mode "dynamic" }}
         - { name: envoy-clusters, mountPath: /etc/envoy/clusters }
         {{- end }}
+        # startupProbe converts the K8s "Started=true" signal from "process
+        # exec'd" into "process exec'd AND seed_initial_state has produced
+        # valid filesystem state." Without this, the native-sidecar
+        # ordering guarantee (init before main) does not extend to "files
+        # exist before Envoy reads them" — Envoy could start, attempt
+        # filesystem CDS, and fail-fast on a missing /etc/envoy/clusters/
+        # clusters.json. The probe asserts the file is present and contains
+        # the expected "resources" key, which only the writer can produce.
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            {{- if eq .Values.facade.mode "dynamic" }}
+            - test -s {{ .Values.facade.paths.routes }} && test -s {{ .Values.facade.paths.clusters }} && grep -q resources {{ .Values.facade.paths.clusters }}
+            {{- else }}
+            - test -s {{ .Values.facade.paths.routes }}
+            {{- end }}
+          # 30 attempts × 1s = 30s window — fits the 3-retry seed (1+2+4=7s) +
+          # tolerates one transient controller hiccup before kubelet declares
+          # the writer "not started" and Envoy stays gated.
+          initialDelaySeconds: 1
+          periodSeconds: 1
+          failureThreshold: 30
 
       containers:
       - name: envoy

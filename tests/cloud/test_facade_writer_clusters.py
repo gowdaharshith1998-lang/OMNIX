@@ -257,6 +257,115 @@ def test_facade_writer_legacy_construction_still_works(tmp_path):
     assert not list(tmp_path.glob("**/clusters.json"))
 
 
+def test_compute_clusters_rejects_ipv6_bracketed_literal(tmp_path):
+    """Review finding H3: _parse_addr's rpartition(':') would mangle
+    [::1]:80 — reject explicitly with a clear error.
+    """
+    config = RouteCompositionConfig(
+        routes_path=tmp_path / "r.json",
+        clusters_path=tmp_path / "c.json",
+        legacy_service="[::1]:80",
+        candidate_service_template="cand-{unit}:80",
+    )
+    with pytest.raises(ValueError, match="IPv6"):
+        compute_clusters({"calc": _entry("calc")}, config)
+
+
+def test_compute_clusters_rejects_named_port_ref(tmp_path):
+    """Review finding H3: 'myhost:http' previously silently fell back to
+    port 80, masking misconfig. Now raises with the actual port name.
+    """
+    config = RouteCompositionConfig(
+        routes_path=tmp_path / "r.json",
+        clusters_path=tmp_path / "c.json",
+        legacy_service="myhost:http",
+        candidate_service_template="cand-{unit}:80",
+    )
+    with pytest.raises(ValueError, match="non-numeric port"):
+        compute_clusters({"calc": _entry("calc")}, config)
+
+
+def test_compute_clusters_rejects_port_out_of_range(tmp_path):
+    config = RouteCompositionConfig(
+        routes_path=tmp_path / "r.json",
+        clusters_path=tmp_path / "c.json",
+        legacy_service="myhost:0",
+        candidate_service_template="cand-{unit}:80",
+    )
+    with pytest.raises(ValueError, match="out of range"):
+        compute_clusters({"calc": _entry("calc")}, config)
+
+
+def test_facade_writer_writes_clusters_before_routes(tmp_path):
+    """Review finding H1: Envoy CDS and RDS poll filesystem mtime
+    independently. If routes.json updates first, a new route can
+    reference a cluster not yet visible to Envoy → 503 until CDS catches
+    up. Cluster file must land first.
+
+    We assert by mtime: clusters.json mtime <= routes.json mtime after
+    a recompose.
+    """
+    config = _cfg(tmp_path)
+    writer = FacadeWriter(controller=None, config=config)
+    from omnix.cloud.cutover.facade_controller import CutoverEvent
+    writer.apply_event(CutoverEvent(
+        event_id="e1", tenant_id="t", unit_id="newunit",
+        previous_percentage=0, target_percentage=25,
+        verifier_summary={},
+    ))
+    clusters_mtime = (tmp_path / "clusters" / "clusters.json").stat().st_mtime_ns
+    routes_mtime = (tmp_path / "routes.json").stat().st_mtime_ns
+    assert clusters_mtime <= routes_mtime, (
+        f"clusters.json must be written before routes.json to avoid "
+        f"stale-reference 503 window. Got clusters_mtime={clusters_mtime} > "
+        f"routes_mtime={routes_mtime}"
+    )
+
+
+def test_facade_writer_clamps_target_percentage(tmp_path):
+    """Review finding M5: out-of-range target_percentage on the wire
+    must not leak into the in-memory table — clamp at ingest so the
+    on-disk view and the in-memory view never disagree.
+    """
+    config = _cfg(tmp_path)
+    writer = FacadeWriter(controller=None, config=config)
+    from omnix.cloud.cutover.facade_controller import CutoverEvent
+    writer.apply_event(CutoverEvent(
+        event_id="e1", tenant_id="t", unit_id="u",
+        previous_percentage=0, target_percentage=250,  # out of range
+        verifier_summary={},
+    ))
+    routes_doc = json.loads((tmp_path / "routes.json").read_text())
+    weighted = (routes_doc["resources"][0]["virtual_hosts"][0]["routes"][0]
+                ["route"]["weighted_clusters"]["clusters"])
+    by_name = {c["name"]: c["weight"] for c in weighted}
+    assert by_name["candidate_u"] == 100  # clamped to 100, not 250
+    assert by_name["legacy_u"] == 0
+
+
+def test_version_info_is_monotonic_under_rapid_writes(tmp_path):
+    """Review finding M3: wall-clock-ms version_info can collide on rapid
+    writes — Envoy may de-dup the second update. Verify the monotonic
+    counter produces strictly increasing version_info strings even for
+    same-ms writes.
+    """
+    config = _cfg(tmp_path)
+    writer = FacadeWriter(controller=None, config=config)
+    from omnix.cloud.cutover.facade_controller import CutoverEvent
+    versions = []
+    for pct in (10, 20, 30, 40, 50):
+        writer.apply_event(CutoverEvent(
+            event_id=f"e-{pct}", tenant_id="t", unit_id="u",
+            previous_percentage=0, target_percentage=pct,
+            verifier_summary={},
+        ))
+        doc = json.loads((tmp_path / "clusters" / "clusters.json").read_text())
+        versions.append(int(doc["version_info"]))
+    # Strictly monotonic — each version greater than the last
+    for prev, curr in zip(versions, versions[1:]):
+        assert curr > prev, f"version_info regressed: {versions}"
+
+
 def test_routecompositionconfig_writes_clusters_property(tmp_path):
     cfg_no = RouteCompositionConfig(
         routes_path=tmp_path / "r.json",
