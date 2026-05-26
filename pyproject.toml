@@ -45,6 +45,7 @@ cloud = [
     "stripe>=10.0",
     "PyNaCl>=1.5",
     "python-dotenv>=1.0",
+    "sse-starlette>=2.1",
 ]
 github-app = []
 helm = []
