@@ -32,11 +32,23 @@ spec:
         matchLabels:
           kubernetes.io/metadata.name: ingress-nginx
   egress:
-  # Same-namespace OMNIX pods (api ↔ redis ↔ postgres ↔ minio ↔ verifier).
+  {{- if .Values.networkPolicy.allowSameNamespace }}
+  # Same-namespace peers — operator-supplied Redis / Postgres / MinIO /
+  # external services co-deployed without the OMNIX label still need to
+  # be reachable. ``allowSameNamespace=true`` opens the namespace, not
+  # just other OMNIX pods. (allowSameNamespace=false but denyAll=true
+  # falls back to the strict app-only egress below.)
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+  {{- else }}
+  # Strict: only other OMNIX-labeled pods in this namespace.
   - to:
     - podSelector:
         matchLabels:
           app.kubernetes.io/name: {{ .Chart.Name }}
+  {{- end }}
   # DNS resolution is required even for in-cluster service-name lookups.
   - to: []
     ports:
