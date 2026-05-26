@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — OMNIX-DM PR B (D3 AI Transformation Synthesis)
+
+- **`omnix.dm.d3_transformation_synthesis` package** — the AI proposal layer
+  that emits per-column transformers (Python lambda / SQL CASE / Datalog rule)
+  verified by Hypothesis property tests derived from D2's blocker manifest.
+  Built on Migrator (arXiv 1904.05498, Wang/Dillig) CEGIS with minimum-failing-input
+  pruning, Reflexion (Shinn et al., NeurIPS 2023) restructured to ground
+  every critique in concrete MFI rather than LLM self-judgment (Huang ICLR
+  2024 trap explicitly avoided), and Property-Generated Solver (arXiv
+  2506.18315) anchoring of test population in the immutable D2 blocker set
+  to prevent BACE-style drift.
+- **RestrictedPython 8.1 AST-rewriting sandbox** — the CVE-2026-40217
+  (LiteLLM, May 2026) fix path. Strict allowlist of AST nodes + builtins +
+  module attributes (NOT denylist), plus subprocess fence with
+  `resource.setrlimit` (CPU=5s, AS=256MB, NOFILE=8). 10+ known CTF escape
+  patterns pen-tested in `tests/dm/unit/d3/test_transformer_dsl.py`.
+- **Grounded Reflexion loop** — max 5 iterations, MFI monotone (append-only),
+  security halt immediate (never retried), no silent identity fallback.
+  HaltReport receipts for un-synthesizable columns surface the failure mode
+  + every MFI + the last critique for operator adjudication.
+- **Migrator CEGIS with 15-sketch SketchLibrary** — covers the Petclinic
+  surface (DATE→TIMESTAMP_TZ midnight UTC, decimal precision clamp, sentinel
+  to NULL, mojibake normalize, email/phone/UUID format normalize, int
+  widening/narrowing, bool from int/text, JSON encode/decode, binary
+  passthrough, etc.). Pruned sketches recorded in receipt so future
+  migrations learn from prior failures.
+- **Pure-Python semi-naïve Datalog evaluator** (~250 LOC) — replaces
+  unmaintained pyDatalog. Stratified Datalog with negation-as-failure,
+  arithmetic + comparison built-ins, aggregates (count/sum/min/max),
+  cycle/stratification detection at rule-load time. Python 3.14
+  compatible. Zero external deps.
+- **TransformerSpec + HaltReport receipts** — ML-DSA-65 signed, schema
+  validated, atomically written. Every receipt's `predecessor_hash` is the
+  canonical SHA-256 of D2's edge-case-manifest, building the cross-layer
+  Merkle root PR F will finalize. `bisimulation_placeholder` reserves the
+  slot PR E's Z3 TRA proof will fill (Cheung UC Berkeley EECS-2025-174 —
+  bounded proofs feasible).
+- **Auto-Hypothesis property generator** — per-type strategies (INTEGER /
+  DECIMAL(p,s) / DATE / TIMESTAMP_TZ / STRING / BOOLEAN / JSON / BYTES) +
+  per-blocker augmentation (mojibake → KNOWN_MOJIBAKE samples; sentinel →
+  KNOWN_SENTINELS; timezone drift → MIDNIGHT_UTC_SAMPLES; precision boundary
+  → DECIMAL boundary values). `StrategyUnavailable` halt for unmapped types
+  — Codex honesty (never silently skip coverage).
+- **Anthropic SDK ≥0.40 (anthropic 0.85.0 verified)** — Claude API wrapper
+  with mockable backend (`OMNIX_DM_DISABLE_LLM=1` for CI default). Prompt-
+  injection containment via `json.dumps` of all sample values; system prompt
+  caching for 90% cost savings on per-column synthesis. 3-retry exponential
+  backoff on rate limits.
+- **Tests**: +124 new (32 sandbox + AST · 14 Datalog · 10 synthesizer · 15
+  property generator · 10 Reflexion loop · 8 CEGIS · 6 SQL tier · 6 Datalog
+  tier · 8 spec emitter · 6 halt report · 4 consumer · 1 integration · 5
+  invariants). Total ~1236 passing. Pre-existing unrelated turboscan
+  failure carries; not new.
+
 ### Added — OMNIX-DM PR A (D1 + D2)
 
 - **`omnix.dm` package** — first 2 phases of the autonomous AI data migration
