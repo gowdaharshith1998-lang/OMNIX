@@ -245,11 +245,24 @@ mainframe:
 
 facade:
   enabled: false
+  # mode: "dynamic" — writer drives both CDS clusters.json + RDS routes.json.
+  #       Default; matches the product story "operator authorizes shift,
+  #       system handles rest" — new units appear automatically as soon as
+  #       the controller authorizes a shift for them.
+  # mode: "static" — chart pre-renders per-unit clusters from .staticUnits.
+  #       For air-gapped / regulated environments where dynamic config is
+  #       disallowed. Adding a unit requires a helm upgrade.
+  mode: dynamic
+  staticUnits: []   # only consulted when mode=static (e.g., [calculator, payments])
   legacyService: ""
   candidateServiceTemplate: ""
   envoyImage: "envoyproxy/envoy:v1.32.0"
   writerImage: ""
   replicas: 1
+  # Paths inside the facade Pod where the writer + Envoy share state.
+  paths:
+    routes: /etc/envoy/routes/routes.json
+    clusters: /etc/envoy/clusters/clusters.json
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits:   { cpu: 1000m, memory: 1Gi }
