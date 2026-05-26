@@ -1,0 +1,170 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OMNIX Helm Chart Values",
+  "description": "Validation schema for the OMNIX umbrella chart. Checked at helm install / template / lint time so structural errors fail fast with a clear message instead of producing an invalid manifest.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "global": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "image": {
+          "type": "object",
+          "properties": {
+            "registry": {"type": "string"},
+            "pullPolicy": {"type": "string", "enum": ["Always", "IfNotPresent", "Never"]}
+          }
+        }
+      }
+    },
+    "api": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "replicaCount": {"type": "integer", "minimum": 1},
+        "env": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "OMNIX_STORAGE_BACKEND": {
+              "type": "string",
+              "enum": ["minio", "s3", "r2", "memory"]
+            }
+          }
+        }
+      }
+    },
+    "worker": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "replicaCount": {"type": "integer", "minimum": 1}
+      }
+    },
+    "studio": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "replicaCount": {"type": "integer", "minimum": 1}
+      }
+    },
+    "verifier": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "replicaCount": {"type": "integer", "minimum": 1}
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "denyAll": {"type": "boolean"},
+        "allowSameNamespace": {"type": "boolean"}
+      }
+    },
+    "postgres": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "subchart": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "replicas": {"type": "integer", "minimum": 1, "maximum": 9}
+          }
+        },
+        "external": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "dsn": {"type": "string"}
+          }
+        }
+      }
+    },
+    "minio": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "subchart": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {"enabled": {"type": "boolean"}}
+        }
+      }
+    },
+    "facade": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "legacyService": {"type": "string"},
+        "candidateServiceTemplate": {
+          "type": "string",
+          "description": "Must contain the literal {unit} placeholder when facade.enabled=true."
+        },
+        "envoyImage": {"type": "string"},
+        "replicas": {"type": "integer", "minimum": 1}
+      },
+      "if": {
+        "required": ["enabled"],
+        "properties": {"enabled": {"const": true}}
+      },
+      "then": {
+        "required": ["legacyService", "candidateServiceTemplate"],
+        "properties": {
+          "legacyService": {"type": "string", "minLength": 1},
+          "candidateServiceTemplate": {"type": "string", "pattern": ".*\\{unit\\}.*"}
+        }
+      }
+    },
+    "ebpf": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "tetragon": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {"enabled": {"type": "boolean"}}
+        }
+      }
+    },
+    "observe": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "collector": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "sink": {"type": "string", "enum": ["memory", "stdout", "redis"]}
+          }
+        }
+      }
+    },
+    "mainframe": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {"type": "boolean"}
+      }
+    },
+    "rekor": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {"type": "boolean"}
+      }
+    }
+  }
+}

@@ -79,6 +79,22 @@ def _load(upload_id: str) -> UploadDescriptor:
     return UploadDescriptor(**json.loads(mp.read_text()))
 
 
+def get_upload_metadata(upload_id: str) -> UploadDescriptor | None:
+    """Public lookup: returns the descriptor or None when not found.
+
+    Unlike ``_load`` this never raises — callers outside the tus router
+    (e.g. POST /v1/jobs resolving an upload_id to a storage_key) need a
+    plain Optional so they can decide their own HTTP semantics.
+    """
+    mp = _meta_path(upload_id)
+    if not mp.exists():
+        return None
+    try:
+        return UploadDescriptor(**json.loads(mp.read_text()))
+    except Exception:  # noqa: BLE001 — corrupted metadata is treated as "not found"
+        return None
+
+
 def _save(desc: UploadDescriptor) -> None:
     _meta_path(desc.id).write_text(json.dumps(asdict(desc)))
 

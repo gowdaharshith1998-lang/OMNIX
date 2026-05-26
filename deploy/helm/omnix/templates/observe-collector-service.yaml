@@ -1,4 +1,4 @@
-{{- if and .Values.ebpf.tetragon.enabled .Values.observe.collector.enabled }}
+{{- if .Values.observe.collector.enabled }}
 apiVersion: v1
 kind: Service
 metadata:

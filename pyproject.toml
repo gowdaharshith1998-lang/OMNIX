@@ -65,6 +65,9 @@ include = ["omnix*"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+    "integration: opt-in end-to-end tests that require a real kind cluster (slow; run with --run-integration)",
+]
 norecursedirs = [
     "_blocked",
     "*.egg",

@@ -58,7 +58,7 @@ class FacadeController:
     Production wires this to k8s; tests use the in-memory routing table.
     """
 
-    def __init__(self, signer=None, verifier=None) -> None:
+    def __init__(self, signer=None, verifier=None, event_bus=None) -> None:
         self._lock = threading.RLock()
         self._states: dict[tuple[str, str], CutoverState] = {}
         self._signer = signer
@@ -69,6 +69,11 @@ class FacadeController:
         # deployment co-locates the writer as a sidecar in the same pod, so
         # in-process pub/sub is correct.
         self._writer_subscribers: list = []
+        # Optional cross-pod broadcast (Redis Streams or in-memory). When set,
+        # every authorized shift is published for the SSE endpoint to fan out
+        # to facade_writer_runner sidecars on other pods. None preserves the
+        # pre-existing single-process behavior used by most tests.
+        self._event_bus = event_bus
 
     def state(self, tenant_id: str, unit_id: str) -> CutoverState:
         with self._lock:
@@ -88,6 +93,7 @@ class FacadeController:
     ) -> CutoverEvent:
         if not 0 <= target_percentage <= 100:
             raise CutoverError("target_percentage out of range")
+        bus_payload: dict[str, Any] | None = None
         with self._lock:
             state = self.state(tenant_id, unit_id)
             previous = state.percentage
@@ -127,8 +133,24 @@ class FacadeController:
                 event.receipt_id = "rcpt-" + uuid.uuid4().hex
             state.percentage = target_percentage
             state.history.append(event)
-            self._notify_writers(event)
-            return event
+            # Notify in-process subscribers (sync, fast) under lock to keep
+            # ordering. Capture the bus payload here but publish after
+            # releasing the lock — a Redis stall must not block every
+            # other tenant/unit's controller mutation.
+            self._notify_in_process_writers(event)
+            if self._event_bus is not None and event.rejected_reason is None:
+                bus_payload = _event_to_bus_payload(event)
+            bus_event_id = event.event_id
+        # Lock released — safe to do network I/O.
+        if bus_payload is not None and self._event_bus is not None:
+            try:
+                self._event_bus.publish(bus_event_id, bus_payload)
+            except Exception:  # noqa: BLE001
+                import logging
+                logging.getLogger("omnix.facade_controller").exception(
+                    "event_bus.publish raised; swallowing (event already in audit history)"
+                )
+        return event
 
     def subscribe_writer(self, callback) -> None:
         """Register a callback invoked for every authorized shift event.
@@ -140,7 +162,7 @@ class FacadeController:
         with self._lock:
             self._writer_subscribers.append(callback)
 
-    def _notify_writers(self, event: CutoverEvent) -> None:
+    def _notify_in_process_writers(self, event: CutoverEvent) -> None:
         # Errors in subscribers must not roll back the shift; the controller's
         # contract is signed-receipt-authorized state mutation, and once a
         # signature exists the operator's audit trail is committed.
@@ -151,6 +173,24 @@ class FacadeController:
                 import logging
                 logging.getLogger("omnix.facade_controller").exception(
                     "writer subscriber raised; swallowing"
+                )
+
+    def _notify_writers(self, event: CutoverEvent) -> None:
+        """Backward-compat shim: the previous public API name.
+
+        Kept so any external test or harness that exercised the private
+        notify path still works. Internally request_shift now uses
+        _notify_in_process_writers + a post-lock bus.publish to avoid
+        holding the controller lock across network I/O.
+        """
+        self._notify_in_process_writers(event)
+        if self._event_bus is not None and event.rejected_reason is None:
+            try:
+                self._event_bus.publish(event.event_id, _event_to_bus_payload(event))
+            except Exception:  # noqa: BLE001
+                import logging
+                logging.getLogger("omnix.facade_controller").exception(
+                    "event_bus.publish raised; swallowing"
                 )
 
     def rollback(self, *, tenant_id: str, unit_id: str) -> CutoverEvent:
@@ -190,6 +230,27 @@ def real_signer():
         return sign_mod.sign_bytes(sk, msg, b"", None), pk
 
     return signer
+
+
+def _event_to_bus_payload(event: CutoverEvent) -> dict[str, Any]:
+    """Compact JSON-safe payload for the cross-pod event bus.
+
+    Only fields the data plane needs are included — signatures stay on the
+    audit side. Bytes are base64-encoded so the payload is plain JSON.
+    """
+    payload: dict[str, Any] = {
+        "event_id": event.event_id,
+        "tenant_id": event.tenant_id,
+        "unit_id": event.unit_id,
+        "previous_percentage": event.previous_percentage,
+        "target_percentage": event.target_percentage,
+        "verifier_summary": dict(event.verifier_summary),
+        "is_rollback": event.is_rollback,
+        "created_at": event.created_at,
+    }
+    if event.receipt_id is not None:
+        payload["receipt_id"] = event.receipt_id
+    return payload
 
 
 def event_to_dict(event: CutoverEvent) -> dict[str, Any]:

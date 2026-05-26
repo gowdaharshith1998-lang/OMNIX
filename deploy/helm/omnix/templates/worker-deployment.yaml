@@ -34,12 +34,25 @@ spec:
         - "-Q"
         - {{ join "," .Values.worker.queues | quote }}
         env:
+        {{- if .Values.postgres.external.dsn }}
+        - name: OMNIX_DATABASE_URL
+          value: {{ .Values.postgres.external.dsn | quote }}
+        {{- else if .Values.postgres.subchart.enabled }}
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "omnix.fullname" . }}-postgres-creds
+              key: password
+        - name: OMNIX_DATABASE_URL
+          value: {{ include "omnix.postgres.dsn" . | quote }}
+        {{- else }}
         - name: OMNIX_DATABASE_URL
           valueFrom:
             secretKeyRef: { name: omnix-db-dsn, key: async-url }
         - name: OMNIX_SYNC_DATABASE_URL
           valueFrom:
             secretKeyRef: { name: omnix-db-dsn, key: sync-url }
+        {{- end }}
         - name: OMNIX_REDIS_URL
           valueFrom:
             secretKeyRef: { name: omnix-redis-dsn, key: url }
