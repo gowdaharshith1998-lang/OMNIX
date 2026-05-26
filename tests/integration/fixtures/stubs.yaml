@@ -1,0 +1,63 @@
+# Legacy + candidate stubs for the integration suite.
+#
+# Two http-echo Deployments + matching Services. The facade's
+# weighted_cluster routes name them `legacy_test` and `candidate_test`
+# (FacadeWriter's default legacy_{unit} / candidate_{unit} pattern with
+# unit_id=test).
+#
+# Each pod returns "LEGACY" or "CANDIDATE" as its body so the integration
+# test can sample the facade Service and count which backend served each
+# request.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: legacy
+  labels: { app: legacy }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: legacy } }
+  template:
+    metadata: { labels: { app: legacy } }
+    spec:
+      containers:
+      - name: echo
+        image: hashicorp/http-echo:1.0
+        args: ["-text=LEGACY", "-listen=:5678"]
+        ports: [ { name: http, containerPort: 5678 } ]
+        readinessProbe:
+          httpGet: { path: /, port: http }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: legacy_test
+spec:
+  selector: { app: legacy }
+  ports: [ { port: 80, targetPort: http } ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: omnix-candidate-test
+  labels: { app: candidate, unit: test }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: candidate, unit: test } }
+  template:
+    metadata: { labels: { app: candidate, unit: test } }
+    spec:
+      containers:
+      - name: echo
+        image: hashicorp/http-echo:1.0
+        args: ["-text=CANDIDATE", "-listen=:5678"]
+        ports: [ { name: http, containerPort: 5678 } ]
+        readinessProbe:
+          httpGet: { path: /, port: http }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: candidate_test
+spec:
+  selector: { app: candidate, unit: test }
+  ports: [ { port: 80, targetPort: http } ]
