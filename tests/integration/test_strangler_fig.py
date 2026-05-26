@@ -101,10 +101,13 @@ def test_helm_test_smoke_pod_succeeds(omnix_cluster):
     assert "SMOKE OK" in out
 
 
-def test_cutover_shift_changes_routes_json(omnix_cluster):
-    """POST /v1/cutover/test/shift updates routes.json on the facade pod."""
+def test_cutover_shift_changes_routes_and_clusters_json(omnix_cluster):
+    """Issue #53 P5: POST shift rewrites BOTH routes.json AND clusters.json.
+
+    Each per-unit shift must produce matching legacy_{unit} + candidate_{unit}
+    Cluster entries in clusters.json — without this, Envoy 503s the route.
+    """
     namespace = omnix_cluster["namespace"]
-    # Apply stubs (legacy + candidate http-echo) — see fixtures/stubs.yaml.
     omnix_cluster["kubectl"]("apply", "-f", str(FIXTURES_DIR / "stubs.yaml"))
     omnix_cluster["kubectl"](
         "wait", "--for=condition=available", "--timeout=120s",
@@ -128,8 +131,8 @@ def test_cutover_shift_changes_routes_json(omnix_cluster):
         assert "receipt_id" in body
         assert body["status"] == "authorized"
 
-    # Allow the writer sidecar + Envoy filesystem RDS to pick up.
-    time.sleep(5)
+    # Allow the writer + Envoy filesystem CDS/RDS to pick up (~1s mtime + safety).
+    time.sleep(6)
 
     pods_json = omnix_cluster["kubectl"](
         "get", "pods", "-l", "component=facade", "-o", "json"
@@ -137,6 +140,8 @@ def test_cutover_shift_changes_routes_json(omnix_cluster):
     pods = json.loads(pods_json)["items"]
     assert pods, "no facade pods found"
     facade_pod = pods[0]["metadata"]["name"]
+
+    # 1) routes.json on disk
     routes_text = omnix_cluster["kubectl"](
         "exec", facade_pod, "-c", "envoy", "--",
         "cat", "/etc/envoy/routes/routes.json",
@@ -145,25 +150,84 @@ def test_cutover_shift_changes_routes_json(omnix_cluster):
     weighted = (routes["resources"][0]["virtual_hosts"][0]["routes"][0]
                 ["route"]["weighted_clusters"]["clusters"])
     by_name = {c["name"]: c["weight"] for c in weighted}
-    # candidate weight should reflect the 25% shift.
     assert by_name.get("candidate_test") == 25
     assert by_name.get("legacy_test") == 75
 
+    # 2) clusters.json on disk also contains the per-unit clusters
+    clusters_text = omnix_cluster["kubectl"](
+        "exec", facade_pod, "-c", "envoy", "--",
+        "cat", "/etc/envoy/clusters/clusters.json",
+    )
+    clusters_doc = json.loads(clusters_text)
+    cluster_names = {c["name"] for c in clusters_doc["resources"]}
+    assert {"legacy_test", "candidate_test"}.issubset(cluster_names), (
+        f"clusters.json missing per-unit clusters: got {cluster_names}"
+    )
 
-def test_traffic_shift_is_observed_through_facade(omnix_cluster):
-    """Sending traffic through facade's Service shows the binomial split."""
+    # 3) Envoy actually loaded the clusters from CDS (admin endpoint truth)
+    admin_text = omnix_cluster["kubectl"](
+        "exec", facade_pod, "-c", "envoy", "--",
+        "curl", "-fsS", "http://127.0.0.1:9901/clusters?format=json",
+    )
+    admin_doc = json.loads(admin_text)
+    envoy_clusters = {c["name"] for c in admin_doc["cluster_statuses"]}
+    assert "legacy_test" in envoy_clusters, f"envoy didn't load legacy_test from CDS: {envoy_clusters}"
+    assert "candidate_test" in envoy_clusters
+
+
+def test_traffic_shift_25pct_binomial_ci(omnix_cluster):
+    """For n=200 + p=0.25, observed candidate count must be in [34, 66] (99% CI).
+
+    This is the empirical close on #53. Before the fix, every request through
+    the facade returned "no healthy upstream" because the writer-generated
+    routes referenced clusters Envoy didn't have. After the fix, the writer
+    drives both routes AND clusters, so traffic actually splits.
+    """
     namespace = omnix_cluster["namespace"]
     with _port_forward(namespace, "omnix-int-omnix-facade", 8080) as facade_port:
         counts = _sample_facade(facade_port, 200)
-    # 25% of 200 = 50 with binomial noise ~ ±10
     candidate = counts.get("CANDIDATE", 0)
     legacy = counts.get("LEGACY", 0)
-    assert candidate + legacy >= 180, f"sample loss too high: {counts}"
-    assert 35 <= candidate <= 65, f"candidate share off binomial window: {counts}"
+    assert legacy + candidate >= 195, (
+        f"too many non-200/empty responses: legacy={legacy} candidate={candidate} "
+        f"total={legacy+candidate}/200 — {dict(counts)}"
+    )
+    # 99% binomial CI for n=200, p=0.25 ≈ [34, 66]
+    assert 34 <= candidate <= 66, (
+        f"25% shift expected candidate in [34, 66] but got {candidate} (legacy={legacy})"
+    )
 
 
-def test_rollback_restores_legacy_only(omnix_cluster):
-    """POST /v1/cutover/{unit}/rollback sets candidate weight to 0."""
+def test_traffic_shift_50pct_binomial_ci(omnix_cluster):
+    """For n=200 + p=0.50, observed candidate count must be in [81, 119]."""
+    namespace = omnix_cluster["namespace"]
+    with _port_forward(namespace, "omnix-int-omnix-api", 8080) as api_port:
+        import httpx
+        r = httpx.post(
+            f"http://127.0.0.1:{api_port}/v1/cutover/test/shift",
+            headers={"X-Tenant-Id": "int"},
+            json={"target_percentage": 50,
+                  "verifier_summary": {"scientist_mismatches": 0,
+                                        "diffy_mismatches": 0,
+                                        "daikon_violated": 0,
+                                        "hypothesis_passed": True}},
+            timeout=10.0,
+        )
+        assert r.status_code == 200
+    time.sleep(6)
+    with _port_forward(namespace, "omnix-int-omnix-facade", 8080) as facade_port:
+        counts = _sample_facade(facade_port, 200)
+    candidate = counts.get("CANDIDATE", 0)
+    # 99% binomial CI for n=200, p=0.50 ≈ [81, 119]
+    assert 81 <= candidate <= 119, (
+        f"50% shift expected candidate in [81, 119] but got {candidate}: {dict(counts)}"
+    )
+
+
+def test_rollback_returns_traffic_to_legacy_within_6_of_zero(omnix_cluster):
+    """POST rollback drops candidate weight to 0. For n=100 at p≈0, candidate
+    count should be ≤6 (allowing for one or two leaked Envoy-cached connections).
+    """
     namespace = omnix_cluster["namespace"]
     with _port_forward(namespace, "omnix-int-omnix-api", 8080) as api_port:
         import httpx
@@ -174,10 +238,13 @@ def test_rollback_restores_legacy_only(omnix_cluster):
         assert r.status_code == 200, r.text
         assert r.json()["status"] == "rolled_back"
 
-    time.sleep(5)
+    time.sleep(6)
     with _port_forward(namespace, "omnix-int-omnix-facade", 8080) as facade_port:
         counts = _sample_facade(facade_port, 100)
-    assert counts.get("LEGACY", 0) > 95, f"rollback didn't pin to legacy: {counts}"
+    candidate = counts.get("CANDIDATE", 0)
+    assert candidate <= 6, (
+        f"rollback didn't pin to legacy: candidate={candidate}, all={dict(counts)}"
+    )
 
 
 def test_inline_signed_receipt_verifies_offline(omnix_cluster):
