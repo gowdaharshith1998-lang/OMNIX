@@ -1,4 +1,10 @@
-{{- if and .Values.ebpf.tetragon.enabled .Values.observe.collector.enabled }}
+{{- /*
+The collector is fed by tetragon (eBPF), Debezium (CDC), and the mainframe
+bridges — any one of them is enough reason to render it. Gate purely on
+observe.collector.enabled so operators can run the collector without
+tetragon on kernels that lack the required modules.
+*/ -}}
+{{- if .Values.observe.collector.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

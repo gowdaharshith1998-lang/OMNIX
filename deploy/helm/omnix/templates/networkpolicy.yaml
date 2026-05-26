@@ -1,4 +1,5 @@
 {{- if .Values.networkPolicy.enabled }}
+{{- if .Values.networkPolicy.denyAll }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -9,6 +10,8 @@ spec:
   - Ingress
   - Egress
 ---
+{{- end }}
+{{- if or .Values.networkPolicy.denyAll .Values.networkPolicy.allowSameNamespace }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -29,14 +32,17 @@ spec:
         matchLabels:
           kubernetes.io/metadata.name: ingress-nginx
   egress:
+  # Same-namespace OMNIX pods (api ↔ redis ↔ postgres ↔ minio ↔ verifier).
   - to:
     - podSelector:
         matchLabels:
           app.kubernetes.io/name: {{ .Chart.Name }}
+  # DNS resolution is required even for in-cluster service-name lookups.
   - to: []
     ports:
     - protocol: TCP
       port: 53
     - protocol: UDP
       port: 53
+{{- end }}
 {{- end }}

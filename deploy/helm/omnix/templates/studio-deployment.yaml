@@ -1,0 +1,42 @@
+{{- if .Values.studio.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "omnix.fullname" . }}-studio
+  labels:
+    {{- include "omnix.labels" . | nindent 4 }}
+    component: studio
+spec:
+  replicas: {{ .Values.studio.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      component: studio
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        component: studio
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: studio
+        image: {{ include "omnix.studio.image" . }}
+        imagePullPolicy: {{ .Values.global.image.pullPolicy | default "IfNotPresent" }}
+        ports:
+        - { name: http, containerPort: 8080 }
+        readinessProbe:
+          httpGet: { path: /, port: http }
+          initialDelaySeconds: 3
+          periodSeconds: 10
+        livenessProbe:
+          httpGet: { path: /, port: http }
+          initialDelaySeconds: 15
+          periodSeconds: 30
+        resources:
+          requests: { cpu: 50m, memory: 64Mi }
+          limits:   { cpu: 250m, memory: 128Mi }
+{{- end }}

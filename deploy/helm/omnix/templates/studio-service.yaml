@@ -1,0 +1,18 @@
+{{- if .Values.studio.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "omnix.fullname" . }}-studio
+  labels:
+    {{- include "omnix.labels" . | nindent 4 }}
+    component: studio
+spec:
+  type: {{ .Values.studio.service.type | default "ClusterIP" }}
+  selector:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    component: studio
+  ports:
+  - name: http
+    port: {{ .Values.studio.service.port | default 8081 }}
+    targetPort: http
+{{- end }}

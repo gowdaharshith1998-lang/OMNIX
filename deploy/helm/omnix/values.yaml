@@ -28,7 +28,10 @@ api:
       memory: 4Gi
   env:
     OMNIX_DEBUG: "false"
-    OMNIX_STORAGE_BACKEND: s3
+    # Default to in-cluster MinIO so vanilla `helm install` reaches Ready
+    # without operator-supplied AWS credentials. Operators point production
+    # workloads at S3 by overriding this to "s3" and supplying credentials.
+    OMNIX_STORAGE_BACKEND: minio
   hpa:
     enabled: true
     minReplicas: 2
@@ -117,7 +120,15 @@ ingress:
 
 networkPolicy:
   enabled: true
-  denyAll: true
+  # Default-off ZTNA: when true, every pod is denied by default and only
+  # explicit allow rules pass traffic. Breaks vanilla `helm install` without
+  # the matching allow-profile so we default to false. Operators flip this
+  # on in production once the allow rules are validated for their cluster.
+  denyAll: false
+  # When true, pods in the release namespace can reach each other (api ↔
+  # redis ↔ postgres ↔ minio ↔ verifier ↔ worker) without explicit per-pod
+  # rules. The allow-internal NetworkPolicy still applies.
+  allowSameNamespace: true
 
 pdb:
   enabled: true
