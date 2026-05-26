@@ -68,6 +68,7 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 markers = [
     "integration: opt-in end-to-end tests that require a real kind cluster (slow; run with --run-integration)",
+    "integration_dm: opt-in OMNIX-DM end-to-end tests against live Oracle+PG (Petclinic corpus). Skipped by default; set OMNIX_DM_RUN_INTEGRATION=1 to enable.",
 ]
 norecursedirs = [
     "_blocked",
