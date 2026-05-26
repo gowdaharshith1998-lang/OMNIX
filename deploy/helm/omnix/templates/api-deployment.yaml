@@ -33,7 +33,11 @@ spec:
         - name: {{ $k }}
           value: {{ $v | quote }}
         {{- end }}
-        {{- if .Values.postgres.subchart.enabled }}
+        {{- if .Values.postgres.external.dsn }}
+        # External DSN wins regardless of subchart toggle.
+        - name: OMNIX_DATABASE_URL
+          value: {{ .Values.postgres.external.dsn | quote }}
+        {{- else if .Values.postgres.subchart.enabled }}
         # CloudNativePG subchart: use the helper-derived DSN and a password
         # injected from the auto-created creds secret.
         - name: POSTGRES_PASSWORD
@@ -43,9 +47,6 @@ spec:
               key: password
         - name: OMNIX_DATABASE_URL
           value: {{ include "omnix.postgres.dsn" . | quote }}
-        {{- else if .Values.postgres.external.dsn }}
-        - name: OMNIX_DATABASE_URL
-          value: {{ .Values.postgres.external.dsn | quote }}
         {{- else }}
         # Legacy: operator-supplied omnix-db-dsn secret.
         - name: OMNIX_DATABASE_URL

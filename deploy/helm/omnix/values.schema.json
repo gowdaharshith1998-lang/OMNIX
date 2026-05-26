@@ -116,6 +116,7 @@
         "replicas": {"type": "integer", "minimum": 1}
       },
       "if": {
+        "required": ["enabled"],
         "properties": {"enabled": {"const": true}}
       },
       "then": {

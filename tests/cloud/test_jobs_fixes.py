@@ -224,6 +224,24 @@ def test_start_job_inline_mode_dry_run_explicit_no_receipts():
     assert body.get("receipts") is None or body["receipts"] == []
 
 
+def test_inline_keypair_is_stable_across_requests():
+    """Review finding H3: a fresh keypair per request meant losing the
+    response = losing verifiability. The keypair is now stable per process,
+    so two consecutive inline requests return the same public_key_b64.
+    """
+    client = TestClient(_build_app())
+    pks = []
+    for _ in range(3):
+        r = client.post("/v1/jobs", json={
+            "source": {"workspace": "/tmp/x"},
+            "inline": True,
+            "mode": "production",
+        })
+        assert r.status_code == 202
+        pks.append(r.json()["receipts"][0]["public_key_b64"])
+    assert len(set(pks)) == 1, f"keypair should be stable, got {len(set(pks))} distinct keys"
+
+
 def test_start_job_unknown_mode_returns_400():
     client = TestClient(_build_app())
     r = client.post("/v1/jobs", json={

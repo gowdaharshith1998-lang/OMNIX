@@ -99,20 +99,57 @@ def _run_m1_subprocess(workspace: str, job_id: str, target_language: str) -> dic
         return {"ok": True, "stdout_raw": proc.stdout}
 
 
+_INLINE_KEYPAIR_LOCK = __import__("threading").Lock()
+_INLINE_KEYPAIR: tuple[bytes, bytes] | None = None
+
+
+def _inline_keypair() -> tuple[bytes, bytes]:
+    """Return a stable (pk, sk) keypair for the lifetime of this process.
+
+    The keypair is generated once on first use and cached. Reusing it across
+    requests means a client that misplaces a single response can still
+    verify a later inline receipt as long as it has the *current* public
+    key from any subsequent response — far weaker than fully-persistent
+    receipts, but stronger than a fresh-keypair-per-request design where
+    losing the response = losing verifiability forever.
+
+    Operators wiring a long-lived signing key from secret storage should
+    override this by passing their own signer to a future receipt service;
+    for now the API contract is documented in the response (alg = ML-DSA-65,
+    public_key_b64 returned alongside every signed receipt).
+    """
+    global _INLINE_KEYPAIR
+    with _INLINE_KEYPAIR_LOCK:
+        if _INLINE_KEYPAIR is None:
+            from omnix.receipts import keygen
+            pk, sk = keygen.keygen()
+            _INLINE_KEYPAIR = (pk, sk)
+        return _INLINE_KEYPAIR
+
+
 def _sign_completion_receipt(
     *, job_id: str, tenant_id: str | None, target_language: str,
     source_repo: str | None, source_sha: str | None, source_sha256: str | None,
 ) -> dict:
     """Produce a single ML-DSA-65-signed completion receipt for inline mode.
 
-    The async (worker) path collects per-gate receipts from .omnix/receipts/
-    after the M1 subprocess runs. Inline production mode cannot invoke M1
-    in the request handler, so we sign one self-contained completion receipt
-    over a JSON-canonical payload. Clients verify it the same way they verify
-    any other OMNIX receipt — same signing module, same public-key fetch.
+    Contract for the returned object:
+      - ``payload_canonical_b64`` carries the exact bytes that were signed
+        (json sort_keys=True, no whitespace).
+      - ``signature_b64`` is the ML-DSA-65 signature over payload_canonical
+        with empty context (FIPS 204 ``Sign(sk, msg, ctx=b"")``).
+      - ``public_key_b64`` is the verification key. The process holds it
+        stable across requests (see ``_inline_keypair``); operators wiring
+        a long-term signing identity should fetch it from any inline
+        response and persist alongside their evidence store.
+
+    The async (worker) path collects per-gate receipts from
+    ``.omnix/receipts/`` after the M1 subprocess runs. Inline production
+    mode can't invoke M1 in the request handler, so we sign one
+    self-contained completion receipt over a JSON-canonical payload.
     """
     import base64
-    from omnix.receipts import keygen, sign as sign_mod
+    from omnix.receipts import sign as sign_mod
 
     payload = {
         "kind": "pipeline.completion.inline",
@@ -125,7 +162,7 @@ def _sign_completion_receipt(
         "gates_completed": ["ingest", "parse", "spec", "generate", "verify"],
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    pk, sk = keygen.keygen()
+    pk, sk = _inline_keypair()
     sig = sign_mod.sign_bytes(sk, canonical, b"", None)
     return {
         "receipt_id": f"rcpt-inline-{job_id}",

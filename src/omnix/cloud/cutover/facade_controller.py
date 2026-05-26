@@ -93,6 +93,7 @@ class FacadeController:
     ) -> CutoverEvent:
         if not 0 <= target_percentage <= 100:
             raise CutoverError("target_percentage out of range")
+        bus_payload: dict[str, Any] | None = None
         with self._lock:
             state = self.state(tenant_id, unit_id)
             previous = state.percentage
@@ -132,8 +133,24 @@ class FacadeController:
                 event.receipt_id = "rcpt-" + uuid.uuid4().hex
             state.percentage = target_percentage
             state.history.append(event)
-            self._notify_writers(event)
-            return event
+            # Notify in-process subscribers (sync, fast) under lock to keep
+            # ordering. Capture the bus payload here but publish after
+            # releasing the lock — a Redis stall must not block every
+            # other tenant/unit's controller mutation.
+            self._notify_in_process_writers(event)
+            if self._event_bus is not None and event.rejected_reason is None:
+                bus_payload = _event_to_bus_payload(event)
+            bus_event_id = event.event_id
+        # Lock released — safe to do network I/O.
+        if bus_payload is not None and self._event_bus is not None:
+            try:
+                self._event_bus.publish(bus_event_id, bus_payload)
+            except Exception:  # noqa: BLE001
+                import logging
+                logging.getLogger("omnix.facade_controller").exception(
+                    "event_bus.publish raised; swallowing (event already in audit history)"
+                )
+        return event
 
     def subscribe_writer(self, callback) -> None:
         """Register a callback invoked for every authorized shift event.
@@ -145,7 +162,7 @@ class FacadeController:
         with self._lock:
             self._writer_subscribers.append(callback)
 
-    def _notify_writers(self, event: CutoverEvent) -> None:
+    def _notify_in_process_writers(self, event: CutoverEvent) -> None:
         # Errors in subscribers must not roll back the shift; the controller's
         # contract is signed-receipt-authorized state mutation, and once a
         # signature exists the operator's audit trail is committed.
@@ -157,8 +174,16 @@ class FacadeController:
                 logging.getLogger("omnix.facade_controller").exception(
                     "writer subscriber raised; swallowing"
                 )
-        # Cross-pod broadcast: only publish authorized shifts. Rejected events
-        # stay local (they are still appended to per-unit history for audit).
+
+    def _notify_writers(self, event: CutoverEvent) -> None:
+        """Backward-compat shim: the previous public API name.
+
+        Kept so any external test or harness that exercised the private
+        notify path still works. Internally request_shift now uses
+        _notify_in_process_writers + a post-lock bus.publish to avoid
+        holding the controller lock across network I/O.
+        """
+        self._notify_in_process_writers(event)
         if self._event_bus is not None and event.rejected_reason is None:
             try:
                 self._event_bus.publish(event.event_id, _event_to_bus_payload(event))

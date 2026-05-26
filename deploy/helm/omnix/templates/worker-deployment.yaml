@@ -34,7 +34,10 @@ spec:
         - "-Q"
         - {{ join "," .Values.worker.queues | quote }}
         env:
-        {{- if .Values.postgres.subchart.enabled }}
+        {{- if .Values.postgres.external.dsn }}
+        - name: OMNIX_DATABASE_URL
+          value: {{ .Values.postgres.external.dsn | quote }}
+        {{- else if .Values.postgres.subchart.enabled }}
         - name: POSTGRES_PASSWORD
           valueFrom:
             secretKeyRef:
@@ -42,9 +45,6 @@ spec:
               key: password
         - name: OMNIX_DATABASE_URL
           value: {{ include "omnix.postgres.dsn" . | quote }}
-        {{- else if .Values.postgres.external.dsn }}
-        - name: OMNIX_DATABASE_URL
-          value: {{ .Values.postgres.external.dsn | quote }}
         {{- else }}
         - name: OMNIX_DATABASE_URL
           valueFrom:

@@ -184,15 +184,20 @@ def test_postgres_dsn_helper_is_invoked_for_subchart_mode():
 
 
 def test_postgres_dsn_helper_external_wins_over_subchart():
-    """Even with subchart.enabled=true, an explicit external.dsn wins."""
+    """Even with subchart.enabled=true, an explicit external.dsn wins.
+
+    Review finding M2: when external.dsn is set the env must NOT also
+    inject POSTGRES_PASSWORD from the subchart secret (it's irrelevant
+    and the external DSN doesn't carry a $(POSTGRES_PASSWORD) variable).
+    """
     docs = _render(
         "postgres.external.dsn=postgres://override.example/db",
     )
-    # subchart still rendered (templates respect the flag independently) but
-    # the env injects the external DSN literally.
     api = _by_kind_and_name(docs, "Deployment", "tst-omnix-api")
     env = api["spec"]["template"]["spec"]["containers"][0]["env"]
     dsn_envs = [e for e in env if e["name"] == "OMNIX_DATABASE_URL"]
-    # With subchart.enabled=true we still get the helper output (which
-    # checks external.dsn first), so the value should be the external DSN.
     assert any(e.get("value") == "postgres://override.example/db" for e in dsn_envs)
+    # No POSTGRES_PASSWORD when external DSN is in play.
+    assert not any(e["name"] == "POSTGRES_PASSWORD" for e in env), (
+        "external.dsn must not co-inject POSTGRES_PASSWORD from subchart secret"
+    )

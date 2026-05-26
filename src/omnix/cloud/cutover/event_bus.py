@@ -95,17 +95,32 @@ class InMemoryCutoverBus:
 
         # Replay every entry that came AFTER last_event_id (the client has
         # already seen everything up to and including that id).
+        #
+        # Edge case (review finding H1): if last_event_id is supplied but
+        # the bus history has been rotated out (HISTORY_MAX exceeded, or a
+        # controller restart wiped in-memory state), we'd otherwise silently
+        # skip every event currently in history until the next publish.
+        # Treat "id not found in history" as "best-effort replay everything
+        # we have" so the writer sidecar catches up rather than starving.
         with self._lock:
             if last_event_id is not None:
-                seen = False
-                for ev_id, payload in self._history:
-                    if seen:
-                        try:
-                            q.put_nowait((ev_id, dict(payload)))
-                        except asyncio.QueueFull:
-                            break
-                    if ev_id == last_event_id:
-                        seen = True
+                history_list = list(self._history)
+                ids = [eid for eid, _ in history_list]
+                if last_event_id in ids:
+                    idx = ids.index(last_event_id) + 1
+                    replay = history_list[idx:]
+                else:
+                    log.warning(
+                        "Last-Event-ID %r not found in bus history "
+                        "(rotated out or controller restart); replaying %d entries",
+                        last_event_id, len(history_list),
+                    )
+                    replay = history_list
+                for ev_id, payload in replay:
+                    try:
+                        q.put_nowait((ev_id, dict(payload)))
+                    except asyncio.QueueFull:
+                        break
             self._subscribers.append((loop, q))
 
         try:
