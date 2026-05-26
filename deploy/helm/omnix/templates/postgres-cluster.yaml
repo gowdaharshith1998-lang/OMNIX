@@ -1,15 +1,31 @@
 {{- if and .Values.postgres.enabled .Values.postgres.subchart.enabled (not .Values.postgres.external.dsn) }}
+# The Secret has no special ordering needs and can be part of the main release.
 apiVersion: v1
 kind: Secret
 metadata:
   name: {{ include "omnix.fullname" . }}-postgres-creds
   labels:
     {{- include "omnix.labels" . | nindent 4 }}
+  annotations:
+    # Apply early enough that the post-install Cluster hook can reference it.
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
 type: kubernetes.io/basic-auth
 stringData:
   username: {{ .Values.postgres.auth.username | default "omnix" | quote }}
   password: {{ .Values.postgres.auth.password | default (randAlphaNum 24) | quote }}
 ---
+# The CloudNativePG operator ships its CRDs as TEMPLATES (not in /crds), so
+# Helm renders the CRD definitions and our Cluster instance in the same
+# manifest batch — the API server can't validate ``postgresql.cnpg.io/v1``
+# because the operator's CRDs haven't been applied yet.
+#
+# Fix: run the Cluster resource as a post-install/post-upgrade hook. By the
+# time the hook runs, the operator's CRDs + Deployment are already up.
+# Tradeoff: the Cluster is no longer GC'd by `helm uninstall` (hook
+# resources are outside the release lifecycle). Operators clean up via
+# `kubectl delete cluster.postgresql.cnpg.io <name>` if needed.
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -17,6 +33,11 @@ metadata:
   labels:
     {{- include "omnix.labels" . | nindent 4 }}
     component: postgres
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    # Delete-on-rollback isn't set: a half-upgraded Cluster is more
+    # operator-recoverable than a deleted-then-recreated one.
 spec:
   instances: {{ .Values.postgres.subchart.replicas | default 2 }}
   primaryUpdateStrategy: unsupervised
