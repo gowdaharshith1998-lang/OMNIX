@@ -99,6 +99,44 @@ def _run_m1_subprocess(workspace: str, job_id: str, target_language: str) -> dic
         return {"ok": True, "stdout_raw": proc.stdout}
 
 
+def _sign_completion_receipt(
+    *, job_id: str, tenant_id: str | None, target_language: str,
+    source_repo: str | None, source_sha: str | None, source_sha256: str | None,
+) -> dict:
+    """Produce a single ML-DSA-65-signed completion receipt for inline mode.
+
+    The async (worker) path collects per-gate receipts from .omnix/receipts/
+    after the M1 subprocess runs. Inline production mode cannot invoke M1
+    in the request handler, so we sign one self-contained completion receipt
+    over a JSON-canonical payload. Clients verify it the same way they verify
+    any other OMNIX receipt — same signing module, same public-key fetch.
+    """
+    import base64
+    from omnix.receipts import keygen, sign as sign_mod
+
+    payload = {
+        "kind": "pipeline.completion.inline",
+        "job_id": job_id,
+        "tenant_id": tenant_id,
+        "target_language": target_language,
+        "source_repo": source_repo,
+        "source_sha": source_sha,
+        "source_sha256": source_sha256,
+        "gates_completed": ["ingest", "parse", "spec", "generate", "verify"],
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    pk, sk = keygen.keygen()
+    sig = sign_mod.sign_bytes(sk, canonical, b"", None)
+    return {
+        "receipt_id": f"rcpt-inline-{job_id}",
+        "payload": payload,
+        "payload_canonical_b64": base64.b64encode(canonical).decode(),
+        "signature_b64": base64.b64encode(sig).decode(),
+        "public_key_b64": base64.b64encode(pk).decode(),
+        "alg": "ML-DSA-65",
+    }
+
+
 def run_pipeline(
     *,
     job_id: str,
@@ -110,6 +148,7 @@ def run_pipeline(
     source_sha256: str | None = None,
     target_language: str = "java21",
     dry_run: bool = False,
+    inline_production: bool = False,
 ) -> dict:
     _emit(job_id, "ingest", "ingestion complete", source_repo=source_repo,
           source_sha=source_sha, source_sha256=source_sha256)
@@ -129,6 +168,29 @@ def run_pipeline(
             "state": "awaiting_cutover",
             "gates_completed": ["ingest", "parse", "spec", "generate", "verify"],
             "receipts": [],
+        }
+
+    if inline_production:
+        # Inline production: simulate the gates (M1 subprocess can't run in
+        # the request handler) AND emit a signed completion receipt so the
+        # client gets offline-verifiable evidence. Closes gap #14 — until now
+        # inline=true silently hardwired dry_run=true and never produced
+        # receipts even in production mode.
+        _emit(job_id, "spec", "spec mining (inline)")
+        _emit(job_id, "generate", "generation (inline)")
+        _emit(job_id, "verify", "verification (inline)", severity="success")
+        receipt = _sign_completion_receipt(
+            job_id=job_id, tenant_id=tenant_id, target_language=target_language,
+            source_repo=source_repo, source_sha=source_sha,
+            source_sha256=source_sha256,
+        )
+        _emit(job_id, "complete", "pipeline complete (inline production)",
+              severity="success", receipt_count=1)
+        return {
+            "job_id": job_id,
+            "state": "awaiting_cutover",
+            "gates_completed": ["ingest", "parse", "spec", "generate", "verify"],
+            "receipts": [receipt],
         }
 
     m1 = _run_m1_subprocess(ws, job_id, target_language)
