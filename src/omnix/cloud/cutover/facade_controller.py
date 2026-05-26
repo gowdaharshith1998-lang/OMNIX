@@ -58,7 +58,7 @@ class FacadeController:
     Production wires this to k8s; tests use the in-memory routing table.
     """
 
-    def __init__(self, signer=None, verifier=None) -> None:
+    def __init__(self, signer=None, verifier=None, event_bus=None) -> None:
         self._lock = threading.RLock()
         self._states: dict[tuple[str, str], CutoverState] = {}
         self._signer = signer
@@ -69,6 +69,11 @@ class FacadeController:
         # deployment co-locates the writer as a sidecar in the same pod, so
         # in-process pub/sub is correct.
         self._writer_subscribers: list = []
+        # Optional cross-pod broadcast (Redis Streams or in-memory). When set,
+        # every authorized shift is published for the SSE endpoint to fan out
+        # to facade_writer_runner sidecars on other pods. None preserves the
+        # pre-existing single-process behavior used by most tests.
+        self._event_bus = event_bus
 
     def state(self, tenant_id: str, unit_id: str) -> CutoverState:
         with self._lock:
@@ -152,6 +157,16 @@ class FacadeController:
                 logging.getLogger("omnix.facade_controller").exception(
                     "writer subscriber raised; swallowing"
                 )
+        # Cross-pod broadcast: only publish authorized shifts. Rejected events
+        # stay local (they are still appended to per-unit history for audit).
+        if self._event_bus is not None and event.rejected_reason is None:
+            try:
+                self._event_bus.publish(event.event_id, _event_to_bus_payload(event))
+            except Exception:  # noqa: BLE001
+                import logging
+                logging.getLogger("omnix.facade_controller").exception(
+                    "event_bus.publish raised; swallowing"
+                )
 
     def rollback(self, *, tenant_id: str, unit_id: str) -> CutoverEvent:
         return self.request_shift(
@@ -190,6 +205,27 @@ def real_signer():
         return sign_mod.sign_bytes(sk, msg, b"", None), pk
 
     return signer
+
+
+def _event_to_bus_payload(event: CutoverEvent) -> dict[str, Any]:
+    """Compact JSON-safe payload for the cross-pod event bus.
+
+    Only fields the data plane needs are included — signatures stay on the
+    audit side. Bytes are base64-encoded so the payload is plain JSON.
+    """
+    payload: dict[str, Any] = {
+        "event_id": event.event_id,
+        "tenant_id": event.tenant_id,
+        "unit_id": event.unit_id,
+        "previous_percentage": event.previous_percentage,
+        "target_percentage": event.target_percentage,
+        "verifier_summary": dict(event.verifier_summary),
+        "is_rollback": event.is_rollback,
+        "created_at": event.created_at,
+    }
+    if event.receipt_id is not None:
+        payload["receipt_id"] = event.receipt_id
+    return payload
 
 
 def event_to_dict(event: CutoverEvent) -> dict[str, Any]:

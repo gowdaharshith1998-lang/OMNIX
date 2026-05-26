@@ -1,15 +1,20 @@
 """POST /v1/cutover/{unit}/shift     request a traffic-shift
 POST /v1/cutover/{unit}/rollback  emergency rollback (signed)
 GET  /v1/cutover/{unit}            current state + history
+GET  /v1/cutover/units             snapshot of every (tenant, unit) state
+GET  /v1/cutover/events            SSE stream of every authorized shift
 """
 
 from __future__ import annotations
 
+import json
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Header, HTTPException
+from fastapi import APIRouter, Body, Header, HTTPException, Request
 from pydantic import BaseModel, Field
+from sse_starlette.sse import EventSourceResponse
 
+from omnix.cloud.cutover.event_bus import InMemoryCutoverBus
 from omnix.cloud.cutover.facade_controller import (
     FacadeController,
     event_to_dict,
@@ -17,17 +22,28 @@ from omnix.cloud.cutover.facade_controller import (
 )
 
 router = APIRouter()
-_CONTROLLER = FacadeController(signer=real_signer())
+_BUS = InMemoryCutoverBus()
+_CONTROLLER = FacadeController(signer=real_signer(), event_bus=_BUS)
 
 
 def get_controller() -> FacadeController:
     return _CONTROLLER
 
 
+def get_bus() -> InMemoryCutoverBus:
+    return _BUS
+
+
 def set_controller(controller: FacadeController) -> None:
     """Test hook."""
     global _CONTROLLER
     _CONTROLLER = controller
+
+
+def set_bus(bus: InMemoryCutoverBus) -> None:
+    """Test hook."""
+    global _BUS
+    _BUS = bus
 
 
 class ShiftRequest(BaseModel):
@@ -63,6 +79,57 @@ async def rollback(
         raise HTTPException(status_code=400, detail="X-Tenant-Id required")
     event = get_controller().rollback(tenant_id=x_tenant_id, unit_id=unit_id)
     return event_to_dict(event) | {"status": "rolled_back"}
+
+
+@router.get("/units")
+async def list_units():
+    """Bootstrap snapshot of every (tenant, unit) → percentage.
+
+    Used by ``facade_writer_runner`` to seed routes.json before subscribing
+    to live events. No auth: this is read-only state derived from the
+    controller's in-memory routing table.
+    """
+    controller = get_controller()
+    out = []
+    with controller._lock:  # noqa: SLF001 — same-package introspection
+        for (tenant_id, unit_id), state in controller._states.items():
+            out.append({
+                "tenant_id": tenant_id,
+                "unit_id": unit_id,
+                "percentage": state.percentage,
+            })
+    return {"units": out}
+
+
+@router.get("/events")
+async def stream_events(
+    request: Request,
+    last_event_id: str | None = Header(None, alias="Last-Event-ID"),
+):
+    """SSE stream of every authorized shift the controller emits.
+
+    The facade_writer_runner sidecar consumes this. Each frame includes an
+    ``id`` so reconnecting clients can resume via ``Last-Event-ID``. A
+    keepalive event is sent every 15s so intermediaries don't drop the
+    long-lived connection.
+    """
+    bus = get_bus()
+
+    async def event_generator():
+        async for event_id, payload in bus.subscribe(last_event_id):
+            if await request.is_disconnected():
+                break
+            yield {
+                "id": event_id,
+                "event": "cutover-shift",
+                "data": json.dumps(payload),
+            }
+
+    return EventSourceResponse(
+        event_generator(),
+        ping=15,
+        ping_message_factory=lambda: {"event": "keepalive", "data": "{}"},
+    )
 
 
 @router.get("/{unit_id}")
