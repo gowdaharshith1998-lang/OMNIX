@@ -27,8 +27,13 @@ data:
       id: facade-{{ .Release.Name }}
       cluster: omnix-facade
     admin:
+      # 0.0.0.0 because the kubelet's readinessProbe HTTP GET hits the
+      # pod IP — binding to 127.0.0.1 makes the probe ECONNREFUSED.
+      # NetworkPolicy + the absence of a Service in front of 9901
+      # keeps the admin endpoint reachable only from the pod itself +
+      # the kubelet on the node.
       address:
-        socket_address: { address: 127.0.0.1, port_value: 9901 }
+        socket_address: { address: 0.0.0.0, port_value: 9901 }
     {{- if eq .Values.facade.mode "dynamic" }}
     dynamic_resources:
       cds_config:
