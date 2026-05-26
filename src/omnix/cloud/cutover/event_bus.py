@@ -157,23 +157,41 @@ class RedisStreamsCutoverBus:
     STREAM_KEY = "omnix:cutover:events"
     READ_BLOCK_MS = 15_000
     READ_COUNT = 16
+    # Hard cap on the sync publish round-trip so a slow / unreachable Redis
+    # turns into a fast log-and-drop instead of hanging the FastAPI worker
+    # until gunicorn's --timeout fires and SIGABRTs the request. Surfaced by
+    # the verify dispatch when network policy blocked the in-cluster Redis.
+    PUBLISH_SOCKET_TIMEOUT_S = 2.0
+    PUBLISH_CONNECT_TIMEOUT_S = 1.0
 
     def __init__(self, redis_url: str) -> None:
         import redis  # local import keeps redis optional
         import redis.asyncio as aioredis
 
         self._url = redis_url
-        self._sync = redis.from_url(redis_url, decode_responses=True)
+        self._sync = redis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_connect_timeout=self.PUBLISH_CONNECT_TIMEOUT_S,
+            socket_timeout=self.PUBLISH_SOCKET_TIMEOUT_S,
+        )
         self._async = aioredis.from_url(redis_url, decode_responses=True)
 
     def publish(self, event_id: str, payload: dict) -> None:
+        """Sync publish with a bounded socket timeout.
+
+        Failures (timeout, connect error, reset) are logged and dropped —
+        publish is fire-and-forget by contract. The writer sidecar reconnects
+        and replays via Last-Event-ID, and the receipt is already in the
+        controller's per-unit history regardless of broadcast outcome.
+        """
         try:
             self._sync.xadd(
                 self.STREAM_KEY,
                 {"event_id": event_id, "payload": json.dumps(payload)},
             )
         except Exception:  # noqa: BLE001
-            log.exception("RedisStreamsCutoverBus.publish failed")
+            log.exception("RedisStreamsCutoverBus.publish failed (event=%s)", event_id)
 
     async def subscribe(
         self, last_event_id: str | None = None
