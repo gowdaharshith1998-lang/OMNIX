@@ -79,7 +79,20 @@ verifier:
     port: 8090
 
 postgres:
-  enabled: true   # set false to use an external Aurora / cloud-managed PG
+  enabled: true   # set false to disable all postgres wiring (api falls back to sqlite)
+  # When true, the CloudNativePG subchart installs the operator and a
+  # 1-primary + 1-standby Cluster CRD reconciles into managed Pods. Set
+  # false to skip the operator and supply postgres.external.dsn instead.
+  subchart:
+    enabled: true
+    replicas: 2
+    storage:
+      size: 8Gi
+      className: ""
+  # When non-empty, the api/worker/verifier use this DSN directly and the
+  # subchart is skipped. Operators set this for Aurora / RDS / CloudSQL.
+  external:
+    dsn: ""
   image:
     repository: bitnami/postgresql
     tag: "16"
@@ -90,6 +103,24 @@ postgres:
   persistence:
     enabled: true
     size: 100Gi
+
+minio:
+  # Bitnami MinIO subchart. When enabled, standalone single-replica MinIO
+  # provides in-cluster S3-compatible storage. Operators set
+  # storage.backend=s3 + supply AWS credentials for production R2/S3/GCS.
+  subchart:
+    enabled: true
+  mode: standalone
+  defaultBuckets: "omnix-uploads"
+  auth:
+    rootUser: omnix
+    rootPassword: ""  # auto-generated when empty
+  persistence:
+    enabled: true
+    size: 8Gi
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 500m, memory: 1Gi }
 
 redis:
   enabled: true

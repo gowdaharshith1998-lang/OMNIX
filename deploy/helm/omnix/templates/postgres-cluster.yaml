@@ -1,0 +1,41 @@
+{{- if and .Values.postgres.enabled .Values.postgres.subchart.enabled (not .Values.postgres.external.dsn) }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "omnix.fullname" . }}-postgres-creds
+  labels:
+    {{- include "omnix.labels" . | nindent 4 }}
+type: kubernetes.io/basic-auth
+stringData:
+  username: {{ .Values.postgres.auth.username | default "omnix" | quote }}
+  password: {{ .Values.postgres.auth.password | default (randAlphaNum 24) | quote }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "omnix.fullname" . }}-postgres
+  labels:
+    {{- include "omnix.labels" . | nindent 4 }}
+    component: postgres
+spec:
+  instances: {{ .Values.postgres.subchart.replicas | default 2 }}
+  primaryUpdateStrategy: unsupervised
+  storage:
+    size: {{ .Values.postgres.subchart.storage.size | default "8Gi" }}
+    {{- with .Values.postgres.subchart.storage.className }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+  bootstrap:
+    initdb:
+      database: {{ .Values.postgres.auth.database | default "omnix" }}
+      owner: {{ .Values.postgres.auth.username | default "omnix" }}
+      secret:
+        name: {{ include "omnix.fullname" . }}-postgres-creds
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+{{- end }}

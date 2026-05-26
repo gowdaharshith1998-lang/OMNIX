@@ -22,6 +22,22 @@ dependencies:
     version: 0.1.0
     condition: mainframe.enabled
     repository: "file://charts/mainframe"
+  # CloudNativePG operator + opinionated Cluster CRD. Vanilla install
+  # bootstraps its own primary + standby; operators flip the condition
+  # off and supply postgres.external.dsn for production Aurora/RDS/CloudSQL.
+  - name: cloudnative-pg
+    version: "0.28.2"
+    condition: postgres.subchart.enabled
+    repository: "https://cloudnative-pg.github.io/charts"
+    alias: cnpg-operator
+  # Bitnami MinIO in standalone mode — single-replica S3-compatible
+  # storage for in-cluster development + verify. Operators flip the
+  # condition off and set storage.backend=s3 + AWS credentials for
+  # production workloads against R2 / S3 / GCS.
+  - name: minio
+    version: "17.0.21"
+    condition: minio.subchart.enabled
+    repository: "https://charts.bitnami.com/bitnami"
 annotations:
   category: DeveloperTools
   licenses: Proprietary
