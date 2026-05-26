@@ -58,6 +58,32 @@ OMNIX is built for the VP Eng who has to ship one production module without brea
 
 ---
 
+## OMNIX-DM — data migration layer (early)
+
+OMNIX-DM is the data-migration layer beneath the code replicator. **PR A**
+ships the first two phases:
+
+- **D1 — AI Schema Understanding** — dialect-aware DDL parsing (Postgres /
+  MySQL / Oracle / MongoDB), per-column semantic embeddings, Hungarian
+  optimal matching with confidence scores, ML-DSA-65 signed
+  `column-mapping.json`.
+- **D2 — AI Edge-Case Profiling** — expected-free-energy probe planner +
+  six probers (NULL distribution, encoding anomaly, orphan FK, timezone
+  drift, precision boundary, sentinel value), ML-DSA-65 signed
+  `edge-case-manifest.json` chained to D1.
+
+Built on the Wang/Dillig UT Austin trilogy (Mediator POPL 2018 / Migrator
+arXiv 1904.05498 / Dynamite PVLDB 2020). PR A is the AI proposal layer;
+the formal proof layer (Z3-discharged bisimulation over TRA) lands in
+PR E. We do not market the "100% perfect migration" claim as proven
+today — it is the destination of the trilogy productisation, not a
+current capability of PR A.
+
+See [`docs/dm/`](docs/dm/) for the full pipeline walkthrough, academic
+foundation, and runbook.
+
+---
+
 ## Two ways to run it
 
 OMNIX is both a tool and a team.

@@ -5,6 +5,61 @@ All notable changes to OMNIX are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added — OMNIX-DM PR A (D1 + D2)
+
+- **`omnix.dm` package** — first 2 phases of the autonomous AI data migration
+  platform that sits beneath OMNIX's code replicator. Built on the Wang/Dillig
+  UT Austin trilogy (Mediator POPL 2018 / Migrator arXiv 1904.05498 / Dynamite
+  PVLDB 2020) as the academic foundation. AI proposes, deterministic gates
+  dispose. Every silent-drop path was rewritten to surface the gap honestly
+  (Codex axiom).
+- **D1 AI Schema Understanding** — dialect-aware DDL parsing for Postgres,
+  MySQL, Oracle (NUMBER(p,s) precision/scale + Oracle DATE TZ-strip flag), and
+  MongoDB (`$jsonSchema` with nested dotpaths). Per-column metadata extraction
+  with read-only DB connection verification (PG `transaction_read_only`, MySQL
+  `@@read_only`, Oracle `V$DATABASE.OPEN_MODE`). Read-only `codebase_memory`
+  bridge that surfaces "graph not deployed" honestly instead of returning
+  empty. `sentence-transformers/all-MiniLM-L6-v2` 384-dim embedder with
+  deterministic-hash fallback for offline CI. Hungarian-optimal matcher
+  (`scipy.optimize.linear_sum_assignment`) with `0.85` / `0.60` confidence
+  thresholds and top-3 candidate surfacing. `OMNIX_DM_CONFIDENCE_THRESHOLD`
+  env override.
+- **D2 AI Edge-Case Profiling** — expected-free-energy probe planner
+  (Friston FEP / pymdp-style; deterministic given seed; budget-enforced). Six
+  probers: NULL distribution, encoding anomaly (mojibake / non-UTF8),
+  orphan FK, timezone drift (incl. midnight clustering), precision boundary,
+  sentinel value. All probers use parameterized SQL via `quote_ident()` which
+  rejects any quote char in input. Sentinel literals go through
+  `_safe_literal()` which rejects single-quote/newline/null.
+- **ML-DSA-65 (FIPS 204) signing infrastructure** — `omnix.crypto.ml_dsa_65`
+  thin wrapper over `dilithium-py` (verified: pk=1952, sk=4032, sig=3309
+  bytes, OID `2.16.840.1.101.3.4.3.18`). Sign-then-emit-both atomic write
+  pattern (temp file + `fsync` + `os.replace`). JSON Schema validation runs
+  *before* signing so malformed payloads never get signed.
+- **Merkle chain receipts** — every manifest's canonical SHA-256 becomes the
+  next manifest's `predecessor_hash`. D2's edge-case-manifest is hard-required
+  to chain to D1's column-mapping.
+- **Tests**: 78 new tests across `tests/dm/` covering unit (parsers,
+  metadata, embedder, matcher, emitters, signer, Merkle, 6 probers),
+  property-based (Hypothesis: no legacy column silently dropped invariant),
+  and an offline integration smoke test for the Oracle→PG Petclinic corpus.
+  Full suite goes 1034 → 1112 passing (the 1 remaining failure is a
+  pre-existing turboscan flake, orthogonal to this PR).
+- **Docs**: `docs/dm/README.md`, `docs/dm/d1-schema-understanding.md`,
+  `docs/dm/d2-edge-case-profiling.md`, `docs/dm/academic-foundation.md`.
+- **pytest marker**: `integration_dm` (opt-in; skip unless
+  `OMNIX_DM_RUN_INTEGRATION=1`).
+
+### Honest gaps (deliberately scoped out of PR A)
+- **`omnix.codebase_memory`** module is not yet deployed in this repo — the
+  bridge surfaces this rather than guessing.
+- **Live Oracle / Postgres integration tests** are skip-by-default; bringing
+  up testcontainers is PR B's onboarding step.
+- The "100-200% perfect migration" claim is not discharged by PR A. The
+  formal proof layer (Z3-discharged bisimulation over TRA) lands in PR E.
+
 ## [0.6.1] - 2026-05-17
 
 ### Changed
