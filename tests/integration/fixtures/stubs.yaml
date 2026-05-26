@@ -30,7 +30,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: legacy_test
+  name: legacy
 spec:
   selector: { app: legacy }
   ports: [ { port: 80, targetPort: http } ]
@@ -57,7 +57,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: candidate_test
+  name: omnix-candidate-test
 spec:
   selector: { app: candidate, unit: test }
   ports: [ { port: 80, targetPort: http } ]
