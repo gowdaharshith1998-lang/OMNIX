@@ -21,11 +21,16 @@ from omnix.cloud.cutover.facade_writer_runner import (
     SUBSCRIBE_PATH,
     RunnerConfig,
     apply_event_from_payload,
-    bootstrap,
     consume_stream,
     make_event,
     parse_sse_frame,
+    seed_initial_state,
 )
+
+# Issue #53 dispatch P3 renamed bootstrap → seed_initial_state.
+# Keep the old name as a local alias so the existing test names still
+# read correctly (test_bootstrap_*) until renamed.
+bootstrap = seed_initial_state
 
 
 # -------------------- parse_sse_frame --------------------
@@ -160,7 +165,13 @@ def _build_async_client(handler) -> httpx.AsyncClient:
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_handles_404_gracefully(tmp_path):
+async def test_bootstrap_handles_404_by_writing_empty_valid_files(tmp_path):
+    """Issue #53 P3: 404 on the bootstrap endpoint means the controller
+    predates the /v1/cutover/units API. The runner writes empty-but-valid
+    routes.json + clusters.json so Envoy boots cleanly (with zero clusters,
+    serving 503 for every request) instead of deadlocking on a missing CDS
+    file. The SSE loop picks up state when events flow.
+    """
     cfg = RunnerConfig.from_env({"OMNIX_CONTROLLER_URL": "http://ctl"})
     writer = _make_writer(tmp_path)
 
@@ -171,7 +182,10 @@ async def test_bootstrap_handles_404_gracefully(tmp_path):
     async with _build_async_client(handler) as client:
         seeded = await bootstrap(client, cfg, writer)
     assert seeded == 0
-    assert not (tmp_path / "routes.json").exists()
+    # Empty-but-valid files exist
+    assert (tmp_path / "routes.json").exists()
+    routes_doc = json.loads((tmp_path / "routes.json").read_text())
+    assert routes_doc["resources"][0]["virtual_hosts"] == []
 
 
 @pytest.mark.asyncio
@@ -199,15 +213,161 @@ async def test_bootstrap_seeds_units_from_controller(tmp_path):
 
 @pytest.mark.asyncio
 async def test_bootstrap_swallows_transport_errors(tmp_path):
+    """All retries fail → empty-but-valid files. With 1s/2s/4s backoffs,
+    we override to instant so the test runs fast.
+    """
     cfg = RunnerConfig.from_env({"OMNIX_CONTROLLER_URL": "http://ctl"})
     writer = _make_writer(tmp_path)
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("nope")
 
-    async with _build_async_client(handler) as client:
-        seeded = await bootstrap(client, cfg, writer)
+    import omnix.cloud.cutover.facade_writer_runner as runner_mod
+    original = runner_mod.SEED_RETRY_BACKOFFS
+    runner_mod.SEED_RETRY_BACKOFFS = [0, 0, 0]
+    try:
+        async with _build_async_client(handler) as client:
+            seeded = await bootstrap(client, cfg, writer)
+    finally:
+        runner_mod.SEED_RETRY_BACKOFFS = original
     assert seeded == 0
+    # Empty-but-valid files exist so Envoy boots without deadlock
+    assert (tmp_path / "routes.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_seed_dynamic_mode_writes_both_files(tmp_path):
+    """In dynamic mode the seed writes BOTH routes.json AND clusters.json."""
+    cfg = RunnerConfig.from_env({
+        "OMNIX_CONTROLLER_URL": "http://ctl",
+        "OMNIX_FACADE_MODE": "dynamic",
+        "OMNIX_FACADE_ROUTES_PATH": str(tmp_path / "routes.json"),
+        "OMNIX_FACADE_CLUSTERS_PATH": str(tmp_path / "clusters.json"),
+        "OMNIX_LEGACY_SERVICE": "legacy.svc:80",
+        "OMNIX_CANDIDATE_SERVICE_TEMPLATE": "cand-{unit}.svc:80",
+    })
+    from omnix.cloud.cutover.facade_writer import FacadeWriter
+    writer = FacadeWriter(controller=None, config=cfg.to_composition_config())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"units": [
+            {"unit_id": "calc", "percentage": 25},
+            {"unit_id": "pay", "percentage": 50},
+        ]})
+
+    async with _build_async_client(handler) as client:
+        seeded = await seed_initial_state(client, cfg, writer)
+    assert seeded == 2
+    # Both files written
+    assert (tmp_path / "routes.json").exists()
+    assert (tmp_path / "clusters.json").exists()
+    # Cluster names match the route references
+    clusters_doc = json.loads((tmp_path / "clusters.json").read_text())
+    cluster_names = {c["name"] for c in clusters_doc["resources"]}
+    assert cluster_names == {"legacy_calc", "candidate_calc", "legacy_pay", "candidate_pay"}
+
+
+@pytest.mark.asyncio
+async def test_seed_static_mode_does_not_write_clusters_file(tmp_path):
+    """In static mode the writer only writes routes.json — chart pre-renders clusters."""
+    cfg = RunnerConfig.from_env({
+        "OMNIX_CONTROLLER_URL": "http://ctl",
+        "OMNIX_FACADE_MODE": "static",
+        "OMNIX_FACADE_ROUTES_PATH": str(tmp_path / "routes.json"),
+    })
+    assert cfg.clusters_path is None
+    from omnix.cloud.cutover.facade_writer import FacadeWriter
+    writer = FacadeWriter(controller=None, config=cfg.to_composition_config())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"units": [{"unit_id": "calc", "percentage": 25}]})
+
+    async with _build_async_client(handler) as client:
+        await seed_initial_state(client, cfg, writer)
+    assert (tmp_path / "routes.json").exists()
+    assert not (tmp_path / "clusters.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_seed_succeeds_after_transient_failures(tmp_path):
+    """First 2 calls fail with 503; third succeeds. Confirms retry path."""
+    cfg = RunnerConfig.from_env({
+        "OMNIX_CONTROLLER_URL": "http://ctl",
+        "OMNIX_FACADE_ROUTES_PATH": str(tmp_path / "routes.json"),
+        "OMNIX_FACADE_CLUSTERS_PATH": str(tmp_path / "clusters.json"),
+        "OMNIX_LEGACY_SERVICE": "legacy.svc:80",
+        "OMNIX_CANDIDATE_SERVICE_TEMPLATE": "cand-{unit}.svc:80",
+    })
+    from omnix.cloud.cutover.facade_writer import FacadeWriter
+    writer = FacadeWriter(controller=None, config=cfg.to_composition_config())
+
+    call_count = [0]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        call_count[0] += 1
+        if call_count[0] <= 2:
+            return httpx.Response(503, json={"detail": "transient"})
+        return httpx.Response(200, json={"units": [{"unit_id": "calc", "percentage": 10}]})
+
+    import omnix.cloud.cutover.facade_writer_runner as runner_mod
+    original = runner_mod.SEED_RETRY_BACKOFFS
+    runner_mod.SEED_RETRY_BACKOFFS = [0, 0, 0]  # instant retries
+    try:
+        async with _build_async_client(handler) as client:
+            seeded = await seed_initial_state(client, cfg, writer)
+    finally:
+        runner_mod.SEED_RETRY_BACKOFFS = original
+    assert seeded == 1
+    assert call_count[0] == 3
+
+
+@pytest.mark.asyncio
+async def test_seed_writes_empty_clusters_when_controller_unreachable(tmp_path):
+    """All 3 retries fail → empty clusters.json written so Envoy boots clean."""
+    cfg = RunnerConfig.from_env({
+        "OMNIX_CONTROLLER_URL": "http://ctl",
+        "OMNIX_FACADE_ROUTES_PATH": str(tmp_path / "routes.json"),
+        "OMNIX_FACADE_CLUSTERS_PATH": str(tmp_path / "clusters.json"),
+        "OMNIX_LEGACY_SERVICE": "legacy.svc:80",
+        "OMNIX_CANDIDATE_SERVICE_TEMPLATE": "cand-{unit}.svc:80",
+    })
+    from omnix.cloud.cutover.facade_writer import FacadeWriter
+    writer = FacadeWriter(controller=None, config=cfg.to_composition_config())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("controller unreachable")
+
+    import omnix.cloud.cutover.facade_writer_runner as runner_mod
+    original = runner_mod.SEED_RETRY_BACKOFFS
+    runner_mod.SEED_RETRY_BACKOFFS = [0, 0, 0]
+    try:
+        async with _build_async_client(handler) as client:
+            await seed_initial_state(client, cfg, writer)
+    finally:
+        runner_mod.SEED_RETRY_BACKOFFS = original
+    assert (tmp_path / "clusters.json").exists()
+    clusters_doc = json.loads((tmp_path / "clusters.json").read_text())
+    assert clusters_doc["resources"] == []  # empty but valid
+
+
+def test_runner_config_from_env_dynamic_includes_clusters_path():
+    cfg = RunnerConfig.from_env({
+        "OMNIX_FACADE_MODE": "dynamic",
+        "OMNIX_FACADE_CLUSTERS_PATH": "/some/path/clusters.json",
+    })
+    assert cfg.mode == "dynamic"
+    assert cfg.clusters_path == Path("/some/path/clusters.json")
+
+
+def test_runner_config_from_env_static_skips_clusters_path():
+    cfg = RunnerConfig.from_env({"OMNIX_FACADE_MODE": "static"})
+    assert cfg.mode == "static"
+    assert cfg.clusters_path is None
+
+
+def test_runner_config_from_env_rejects_unknown_mode():
+    with pytest.raises(ValueError, match="OMNIX_FACADE_MODE"):
+        RunnerConfig.from_env({"OMNIX_FACADE_MODE": "turbo"})
 
 
 # -------------------- consume_stream (mocked SSE bytes) --------------------

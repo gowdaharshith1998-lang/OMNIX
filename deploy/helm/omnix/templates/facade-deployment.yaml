@@ -18,19 +18,92 @@ spec:
         app.kubernetes.io/name: {{ .Chart.Name }}
         component: facade
     spec:
+      volumes:
+      - name: envoy-config
+        configMap:
+          name: {{ include "omnix.fullname" . }}-facade-envoy
+          items:
+          - { key: envoy.yaml, path: envoy.yaml }
+      - name: envoy-routes
+        emptyDir: {}
+      {{- if eq .Values.facade.mode "dynamic" }}
+      - name: envoy-clusters
+        emptyDir: {}
+      {{- end }}
+
+      # The writer is a K8s 1.29+ native sidecar (initContainers entry with
+      # restartPolicy: Always; stable in 1.33, April 2025). Native sidecars:
+      #
+      #   1. start BEFORE the regular containers — guarantees the writer's
+      #      seed_initial_state has written valid routes.json + clusters.json
+      #      before Envoy boots and reads them via filesystem CDS/RDS.
+      #   2. keep running for the full pod lifetime (unlike classic init
+      #      containers which run-to-completion).
+      #   3. terminate after the regular containers — clean shutdown of the
+      #      SSE stream before Envoy exits.
+      #
+      # Without this ordering guarantee, Envoy could race and read missing /
+      # half-written files at bootstrap, deadlocking cluster_manager init.
       initContainers:
-      # Seed routes.json from the bootstrap ConfigMap into the shared emptyDir
-      # so Envoy boots with 100% legacy on a fresh install. The writer sidecar
-      # atomically replaces this file on every signed shift afterwards.
-      - name: seed-routes
-        image: busybox:1.36
-        command: ["sh", "-c", "cp /seed/routes.json /etc/envoy/routes/routes.json"]
+      - name: writer
+        image: {{ default (include "omnix.api.image" .) .Values.facade.writerImage }}
+        imagePullPolicy: {{ .Values.global.image.pullPolicy | default "IfNotPresent" }}
+        restartPolicy: Always   # makes this a native sidecar
+        command: ["python", "-m", "omnix.cloud.cutover.facade_writer_runner"]
+        env:
+        - name: OMNIX_CONTROLLER_URL
+          value: "http://{{ include "omnix.fullname" . }}-api:8080"
+        - name: OMNIX_FACADE_MODE
+          value: {{ .Values.facade.mode | quote }}
+        - name: OMNIX_FACADE_ROUTES_PATH
+          value: {{ .Values.facade.paths.routes | quote }}
+        {{- if eq .Values.facade.mode "dynamic" }}
+        - name: OMNIX_FACADE_CLUSTERS_PATH
+          value: {{ .Values.facade.paths.clusters | quote }}
+        {{- end }}
+        - name: OMNIX_LEGACY_SERVICE
+          value: {{ .Values.facade.legacyService | quote }}
+        - name: OMNIX_FACADE_CANDIDATE_TEMPLATE
+          value: {{ default "candidate_{unit}" .Values.facade.candidateServiceTemplate | quote }}
+        - name: OMNIX_CANDIDATE_SERVICE_TEMPLATE
+          value: {{ .Values.facade.candidateServiceTemplate | quote }}
+        resources:
+          requests: { cpu: 25m, memory: 64Mi }
+          limits:   { cpu: 200m, memory: 256Mi }
         volumeMounts:
-        - { name: routes-seed, mountPath: /seed, readOnly: true }
-        - { name: routes,      mountPath: /etc/envoy/routes }
+        - { name: envoy-routes, mountPath: /etc/envoy/routes }
+        {{- if eq .Values.facade.mode "dynamic" }}
+        - { name: envoy-clusters, mountPath: /etc/envoy/clusters }
+        {{- end }}
+        # startupProbe converts the K8s "Started=true" signal from "process
+        # exec'd" into "process exec'd AND seed_initial_state has produced
+        # valid filesystem state." Without this, the native-sidecar
+        # ordering guarantee (init before main) does not extend to "files
+        # exist before Envoy reads them" — Envoy could start, attempt
+        # filesystem CDS, and fail-fast on a missing /etc/envoy/clusters/
+        # clusters.json. The probe asserts the file is present and contains
+        # the expected "resources" key, which only the writer can produce.
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            {{- if eq .Values.facade.mode "dynamic" }}
+            - test -s {{ .Values.facade.paths.routes }} && test -s {{ .Values.facade.paths.clusters }} && grep -q resources {{ .Values.facade.paths.clusters }}
+            {{- else }}
+            - test -s {{ .Values.facade.paths.routes }}
+            {{- end }}
+          # 30 attempts × 1s = 30s window — fits the 3-retry seed (1+2+4=7s) +
+          # tolerates one transient controller hiccup before kubelet declares
+          # the writer "not started" and Envoy stays gated.
+          initialDelaySeconds: 1
+          periodSeconds: 1
+          failureThreshold: 30
+
       containers:
       - name: envoy
         image: {{ .Values.facade.envoyImage | quote }}
+        imagePullPolicy: IfNotPresent
         args:
         - "-c"
         - /etc/envoy/envoy.yaml
@@ -40,42 +113,19 @@ spec:
         - { name: http, containerPort: 8080 }
         - { name: admin, containerPort: 9901 }
         readinessProbe:
-          httpGet: { path: /ready, port: 9901 }
-          initialDelaySeconds: 5
-          periodSeconds: 10
+          httpGet: { path: /ready, port: admin }
+          initialDelaySeconds: 3
+          periodSeconds: 5
         livenessProbe:
-          httpGet: { path: /ready, port: 9901 }
+          httpGet: { path: /ready, port: admin }
           initialDelaySeconds: 30
           periodSeconds: 30
         resources:
           {{- toYaml .Values.facade.resources | nindent 10 }}
         volumeMounts:
         - { name: envoy-config, mountPath: /etc/envoy, readOnly: true }
-        - { name: routes, mountPath: /etc/envoy/routes }
-      - name: writer
-        image: {{ default (include "omnix.api.image" .) .Values.facade.writerImage }}
-        command: ["python", "-m", "omnix.cloud.cutover.facade_writer_runner"]
-        env:
-        - name: OMNIX_FACADE_ROUTES_PATH
-          value: /etc/envoy/routes/routes.json
-        - name: OMNIX_FACADE_CANDIDATE_TEMPLATE
-          value: {{ default "candidate_{unit}" .Values.facade.candidateServiceTemplate | quote }}
-        - name: OMNIX_CONTROLLER_URL
-          value: "http://{{ include "omnix.fullname" . }}-api:8080"
-        resources:
-          requests: { cpu: 50m, memory: 128Mi }
-          limits:   { cpu: 250m, memory: 256Mi }
-        volumeMounts:
-        - { name: routes, mountPath: /etc/envoy/routes }
-      volumes:
-      - name: envoy-config
-        configMap:
-          name: {{ include "omnix.fullname" . }}-facade-envoy
-          items:
-          - { key: envoy.yaml, path: envoy.yaml }
-      - name: routes
-        emptyDir: {}
-      - name: routes-seed
-        configMap:
-          name: {{ include "omnix.fullname" . }}-facade-routes
+        - { name: envoy-routes, mountPath: /etc/envoy/routes, readOnly: true }
+        {{- if eq .Values.facade.mode "dynamic" }}
+        - { name: envoy-clusters, mountPath: /etc/envoy/clusters, readOnly: true }
+        {{- end }}
 {{- end }}

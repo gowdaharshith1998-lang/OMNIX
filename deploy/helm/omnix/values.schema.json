@@ -107,25 +107,62 @@
       "additionalProperties": true,
       "properties": {
         "enabled": {"type": "boolean"},
+        "mode": {
+          "type": "string",
+          "enum": ["dynamic", "static"],
+          "default": "dynamic",
+          "description": "dynamic: writer drives CDS clusters.json + RDS routes.json. static: chart pre-renders per-unit clusters from facade.staticUnits; writer drives routes.json only."
+        },
+        "staticUnits": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+          "default": [],
+          "description": "Only consulted when mode=static. One legacy_{unit} + one candidate_{unit} Cluster rendered per entry."
+        },
         "legacyService": {"type": "string"},
         "candidateServiceTemplate": {
           "type": "string",
           "description": "Must contain the literal {unit} placeholder when facade.enabled=true."
         },
         "envoyImage": {"type": "string"},
-        "replicas": {"type": "integer", "minimum": 1}
-      },
-      "if": {
-        "required": ["enabled"],
-        "properties": {"enabled": {"const": true}}
-      },
-      "then": {
-        "required": ["legacyService", "candidateServiceTemplate"],
-        "properties": {
-          "legacyService": {"type": "string", "minLength": 1},
-          "candidateServiceTemplate": {"type": "string", "pattern": ".*\\{unit\\}.*"}
+        "replicas": {"type": "integer", "minimum": 1},
+        "paths": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "routes": {"type": "string"},
+            "clusters": {"type": "string"}
+          }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["enabled"],
+            "properties": {"enabled": {"const": true}}
+          },
+          "then": {
+            "required": ["legacyService", "candidateServiceTemplate"],
+            "properties": {
+              "legacyService": {"type": "string", "minLength": 1},
+              "candidateServiceTemplate": {"type": "string", "pattern": ".*\\{unit\\}.*"}
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["enabled", "mode"],
+            "properties": {
+              "enabled": {"const": true},
+              "mode": {"const": "static"}
+            }
+          },
+          "then": {
+            "required": ["staticUnits"],
+            "properties": {"staticUnits": {"minItems": 1}}
+          }
+        }
+      ]
     },
     "ebpf": {
       "type": "object",

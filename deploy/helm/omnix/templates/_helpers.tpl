@@ -62,6 +62,47 @@ http://{{ .Release.Name }}-minio:9000
 {{- end -}}
 {{- end -}}
 
+{{/* Static-mode facade cluster list — one legacy + one candidate per unit
+     in .Values.facade.staticUnits. Mode B fallback for air-gapped /
+     regulated environments where filesystem CDS is disallowed. */}}
+{{- define "omnix.facade.staticClusters" -}}
+{{- $legacyHost := .Values.facade.legacyService | splitList ":" | first -}}
+{{- $legacyPort := .Values.facade.legacyService | splitList ":" | last | atoi -}}
+{{- range $unit := .Values.facade.staticUnits }}
+- name: legacy_{{ $unit }}
+  type: STRICT_DNS
+  connect_timeout: 1s
+  lb_policy: ROUND_ROBIN
+  dns_lookup_family: V4_ONLY
+  load_assignment:
+    cluster_name: legacy_{{ $unit }}
+    endpoints:
+    - lb_endpoints:
+      - endpoint:
+          address:
+            socket_address:
+              address: {{ $legacyHost | quote }}
+              port_value: {{ $legacyPort }}
+{{- $candTarget := replace "{unit}" $unit $.Values.facade.candidateServiceTemplate -}}
+{{- $candHost := $candTarget | splitList ":" | first }}
+{{- $candPort := $candTarget | splitList ":" | last | atoi }}
+- name: candidate_{{ $unit }}
+  type: LOGICAL_DNS
+  connect_timeout: 1s
+  lb_policy: ROUND_ROBIN
+  dns_lookup_family: V4_ONLY
+  load_assignment:
+    cluster_name: candidate_{{ $unit }}
+    endpoints:
+    - lb_endpoints:
+      - endpoint:
+          address:
+            socket_address:
+              address: {{ $candHost | quote }}
+              port_value: {{ $candPort }}
+{{- end }}
+{{- end -}}
+
 {{/* Compose the Trillian MySQL URI for Rekor's logserver / logsigner sidecars. */}}
 {{- define "omnix.rekor.trillianMysqlUri" -}}
 {{- $cfg := .Values.rekor.trillian.externalMysql -}}
