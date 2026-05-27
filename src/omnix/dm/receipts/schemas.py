@@ -287,9 +287,199 @@ TRANSFORMER_HALT_SCHEMA = {
 }
 
 
+# ---------------------------------------------------------------------------
+# D4 + D5 (PR C) schemas — APPEND-ONLY.
+# ---------------------------------------------------------------------------
+
+
+BATCH_RECEIPT_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "required": [
+        "schema_version",
+        "migration_id",
+        "table",
+        "batch_no",
+        "batch_id",
+        "predecessor_hash",
+        "rows_read",
+        "rows_written",
+        "rows_quarantined",
+        "quarantine_offsets",
+        "transformer_spec_hashes",
+        "target_db_fingerprint",
+        "timestamp_start",
+        "timestamp_end",
+        "elapsed_seconds",
+        "signing_algorithm",
+        "public_key_fingerprint",
+    ],
+    "additionalProperties": False,
+    "properties": {
+        "schema_version": {"const": "omnix-dm/batch-receipt/v1"},
+        "migration_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+        "table": {"type": "string", "minLength": 1},
+        "batch_no": {"type": "integer", "minimum": 0},
+        "batch_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "predecessor_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "rows_read": {"type": "integer", "minimum": 0},
+        "rows_written": {"type": "integer", "minimum": 0},
+        "rows_quarantined": {"type": "integer", "minimum": 0},
+        "quarantine_offsets": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "transformer_spec_hashes": {"type": "array", "items": {"type": "string"}},
+        "target_db_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "timestamp_start": {"type": "string"},
+        "timestamp_end": {"type": "string"},
+        "elapsed_seconds": {"type": "number", "minimum": 0.0},
+        "signing_algorithm": {"const": "ML-DSA-65"},
+        "public_key_fingerprint": {"type": "string"},
+    },
+}
+
+
+QUARANTINE_MANIFEST_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "required": [
+        "schema_version",
+        "migration_id",
+        "phase",
+        "entries",
+        "signing_algorithm",
+        "public_key_fingerprint",
+    ],
+    "additionalProperties": False,
+    "properties": {
+        "schema_version": {"const": "omnix-dm/quarantine-manifest/v1"},
+        "migration_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+        "phase": {"enum": ["d4_bulk", "d5_cdc"]},
+        "entries": {"type": "array"},
+        "signing_algorithm": {"const": "ML-DSA-65"},
+        "public_key_fingerprint": {"type": "string"},
+    },
+}
+
+
+CDC_EVENT_RECEIPT_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "required": [
+        "schema_version",
+        "migration_id",
+        "event_lsn",
+        "relation_id",
+        "table",
+        "op",
+        "predecessor_hash",
+        "transformer_spec_hashes",
+        "applied_at_target_timestamp",
+        "legacy_to_target_lag_ms",
+        "signing_algorithm",
+        "public_key_fingerprint",
+    ],
+    "additionalProperties": False,
+    "properties": {
+        "schema_version": {"const": "omnix-dm/cdc-event-receipt/v1"},
+        "migration_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+        "event_lsn": {"type": "string", "minLength": 1},
+        "relation_id": {"type": "integer", "minimum": 0},
+        "table": {"type": "string", "minLength": 1},
+        "op": {"enum": ["I", "U", "D", "T"]},
+        "predecessor_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "transformer_spec_hashes": {"type": "array", "items": {"type": "string"}},
+        "applied_at_target_timestamp": {"type": "string"},
+        "legacy_to_target_lag_ms": {"type": "integer", "minimum": 0},
+        "signing_algorithm": {"const": "ML-DSA-65"},
+        "public_key_fingerprint": {"type": "string"},
+    },
+}
+
+
+LAG_REPORT_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "required": [
+        "schema_version",
+        "migration_id",
+        "timestamp",
+        "legacy_current_lsn",
+        "target_applied_lsn",
+        "legacy_unreachable",
+        "target_unreachable",
+        "lag_lsn_bytes",
+        "lag_estimated_seconds",
+        "events_replayed_last_interval",
+        "events_quarantined_last_interval",
+        "unhandled_event_types_seen",
+        "signing_algorithm",
+        "public_key_fingerprint",
+    ],
+    "additionalProperties": False,
+    "properties": {
+        "schema_version": {"const": "omnix-dm/lag-report/v1"},
+        "migration_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+        "timestamp": {"type": "string"},
+        "legacy_current_lsn": {"type": ["string", "null"]},
+        "target_applied_lsn": {"type": ["string", "null"]},
+        "legacy_unreachable": {"type": "boolean"},
+        "target_unreachable": {"type": "boolean"},
+        "lag_lsn_bytes": {"type": ["integer", "null"]},
+        "lag_estimated_seconds": {"type": ["number", "null"]},
+        "events_replayed_last_interval": {"type": "integer", "minimum": 0},
+        "events_quarantined_last_interval": {"type": "integer", "minimum": 0},
+        "unhandled_event_types_seen": {"type": "array", "items": {"type": "string"}},
+        "signing_algorithm": {"const": "ML-DSA-65"},
+        "public_key_fingerprint": {"type": "string"},
+    },
+}
+
+
+CUTOVER_PROPOSAL_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "required": [
+        "schema_version",
+        "migration_id",
+        "timestamp",
+        "predecessor_hash",
+        "sustained_window_seconds",
+        "measured_lag_seconds",
+        "parity_threshold",
+        "parity_metrics",
+        "parity_not_met",
+        "recommended_action",
+        "signing_algorithm",
+        "public_key_fingerprint",
+    ],
+    "additionalProperties": False,
+    "properties": {
+        "schema_version": {"const": "omnix-dm/cutover-proposal/v1"},
+        "migration_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+        "timestamp": {"type": "string"},
+        "predecessor_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "sustained_window_seconds": {"type": "integer", "minimum": 0},
+        "measured_lag_seconds": {"type": "number", "minimum": 0.0},
+        "parity_threshold": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "parity_metrics": {"type": "array"},
+        "parity_not_met": {"type": "boolean"},
+        "recommended_action": {
+            "enum": ["operator_sign", "wait_longer", "investigate_divergence"]
+        },
+        "operator_signoff": {"type": ["object", "null"]},
+        "signing_algorithm": {"const": "ML-DSA-65"},
+        "public_key_fingerprint": {"type": "string"},
+    },
+}
+
+
 __all__ = [
     "COLUMN_MAPPING_MANIFEST_SCHEMA",
     "EDGE_CASE_MANIFEST_SCHEMA",
     "TRANSFORMER_SPEC_SCHEMA",
     "TRANSFORMER_HALT_SCHEMA",
+    "BATCH_RECEIPT_SCHEMA",
+    "QUARANTINE_MANIFEST_SCHEMA",
+    "CDC_EVENT_RECEIPT_SCHEMA",
+    "LAG_REPORT_SCHEMA",
+    "CUTOVER_PROPOSAL_SCHEMA",
 ]

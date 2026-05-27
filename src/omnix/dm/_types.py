@@ -307,6 +307,204 @@ class ReflexionHalt:
     security_violation: Optional[SecurityViolation] = None
 
 
+# ---------- D4 Bulk Import types (PR C append-only) ----------
+
+
+@dataclass(frozen=True)
+class Row:
+    legacy_table: str
+    pk_value_repr: str
+    column_values: Tuple[Tuple[str, object], ...]
+
+
+@dataclass(frozen=True)
+class Batch:
+    migration_id: str
+    table: str
+    batch_no: int
+    batch_id: str
+    rows: Tuple[Row, ...]
+    snapshot_lsn: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class TransformedRow:
+    legacy_pk_value_repr: str
+    target_column_values: Tuple[Tuple[str, object], ...]
+
+
+@dataclass(frozen=True)
+class TransformedBatch:
+    migration_id: str
+    table: str
+    batch_no: int
+    batch_id: str
+    transformed_rows: Tuple[TransformedRow, ...]
+    quarantined_offsets: Tuple[int, ...] = ()
+
+
+RowFailureCategory = Literal[
+    "transform_error",
+    "transform_timeout",
+    "transform_oom",
+    "target_constraint_violation",
+    "target_connection_error",
+    "schema_mismatch",
+    "unmapped_column",
+    "security_violation",
+]
+
+
+@dataclass(frozen=True)
+class RowQuarantineEntry:
+    migration_id: str
+    batch_id: str
+    row_offset: int
+    legacy_table: str
+    legacy_pk_value_hash: str
+    failure_category: str  # one of RowFailureCategory
+    failure_detail: str
+    transformer_spec_hash: Optional[str]
+    retry_count: int
+    timestamp: str
+    raw_values_json: Optional[str] = None  # only when OMNIX_DM_QUARANTINE_INCLUDE_VALUES=1
+
+
+@dataclass(frozen=True)
+class BatchReceipt:
+    migration_id: str
+    table: str
+    batch_no: int
+    batch_id: str
+    predecessor_hash: str
+    rows_read: int
+    rows_written: int
+    rows_quarantined: int
+    quarantine_offsets: Tuple[int, ...]
+    transformer_spec_hashes: Tuple[str, ...]
+    target_db_fingerprint: str
+    timestamp_start: str
+    timestamp_end: str
+    elapsed_seconds: float
+
+
+BulkPhase = Literal["planning", "snapshot", "running", "complete", "halted"]
+
+
+@dataclass(frozen=True)
+class BulkResult:
+    migration_id: str
+    phase: str  # BulkPhase
+    tables_complete: Tuple[str, ...]
+    tables_halted: Tuple[str, ...]
+    unmapped_columns: Tuple[str, ...]
+    total_rows_written: int
+    total_rows_quarantined: int
+    partial: bool
+    snapshot_lsn: Optional[str]
+
+
+# ---------- D5 Change Data Capture types (PR C append-only) ----------
+
+ChangeOp = Literal["I", "U", "D", "T"]
+
+
+@dataclass(frozen=True)
+class RelationSchema:
+    relation_id: int
+    schema_name: str
+    table_name: str
+    columns: Tuple[Tuple[str, int, bool], ...]  # (name, type_oid, part_of_pkey)
+    replica_identity: Literal["default", "nothing", "full", "index"]
+
+
+@dataclass(frozen=True)
+class ChangeEvent:
+    op: str  # ChangeOp
+    relation_id: int
+    schema_name: str
+    table_name: str
+    lsn: str
+    xid: int
+    commit_timestamp: Optional[str]
+    before: Optional[Tuple[Tuple[str, object], ...]]
+    after: Optional[Tuple[Tuple[str, object], ...]]
+
+
+@dataclass(frozen=True)
+class CDCEventReceipt:
+    migration_id: str
+    event_lsn: str
+    relation_id: int
+    table: str
+    op: str
+    predecessor_hash: str
+    transformer_spec_hashes: Tuple[str, ...]
+    applied_at_target_timestamp: str
+    legacy_to_target_lag_ms: int
+
+
+CDCFailureCategory = Literal[
+    "transform_error",
+    "transform_timeout",
+    "transform_oom",
+    "target_constraint_violation",
+    "target_connection_error",
+    "unmapped_column",
+    "unknown_relation",
+    "schema_drift",
+]
+
+
+@dataclass(frozen=True)
+class CDCEventQuarantineEntry:
+    migration_id: str
+    event_lsn: str
+    relation_id: int
+    table: str
+    op: str
+    failure_category: str  # one of CDCFailureCategory
+    failure_detail: str
+    timestamp: str
+
+
+@dataclass(frozen=True)
+class LagReport:
+    migration_id: str
+    timestamp: str
+    legacy_current_lsn: Optional[str]
+    target_applied_lsn: Optional[str]
+    legacy_unreachable: bool
+    target_unreachable: bool
+    lag_lsn_bytes: Optional[int]
+    lag_estimated_seconds: Optional[float]
+    events_replayed_last_interval: int
+    events_quarantined_last_interval: int
+    unhandled_event_types_seen: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ParityMetric:
+    table: str
+    rows_compared: int
+    rows_diverged: int
+    divergence_rate: float
+
+
+@dataclass(frozen=True)
+class CutoverProposal:
+    migration_id: str
+    timestamp: str
+    predecessor_hash: str
+    sustained_window_seconds: int
+    measured_lag_seconds: float
+    parity_threshold: float
+    parity_metrics: Tuple[ParityMetric, ...]
+    parity_not_met: bool
+    recommended_action: Literal["operator_sign", "wait_longer", "investigate_divergence"]
+    operator_signoff: Optional[dict] = None
+
+
 __all__ = [
     "Dialect",
     "ProbeCategory",
@@ -342,4 +540,24 @@ __all__ = [
     "TransformerSpec",
     "ReflexionSuccess",
     "ReflexionHalt",
+    # D4 (PR C)
+    "Row",
+    "Batch",
+    "TransformedRow",
+    "TransformedBatch",
+    "RowFailureCategory",
+    "RowQuarantineEntry",
+    "BatchReceipt",
+    "BulkPhase",
+    "BulkResult",
+    # D5 (PR C)
+    "ChangeOp",
+    "RelationSchema",
+    "ChangeEvent",
+    "CDCEventReceipt",
+    "CDCFailureCategory",
+    "CDCEventQuarantineEntry",
+    "LagReport",
+    "ParityMetric",
+    "CutoverProposal",
 ]
