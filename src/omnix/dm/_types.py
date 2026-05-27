@@ -166,6 +166,147 @@ class ProbeResult:
     reason: Optional[str] = None
 
 
+# ---------- D3 transformer-synthesis types (PR B append-only) ----------
+
+TransformerTier = Literal["python", "sql", "datalog"]
+
+
+@dataclass(frozen=True)
+class PropertyDef:
+    name: str
+    hypothesis_strategy: str
+    assertion: str
+    derives_from_blocker: Optional[str]
+    rationale: str
+
+
+@dataclass(frozen=True)
+class PropertySet:
+    column_mapping_key: str
+    properties: Tuple[PropertyDef, ...]
+    coverage_complete: bool
+    missing_coverage_reasons: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SketchHint:
+    sketch_id: str
+    type_pair: Tuple[str, str]
+    template: str
+    applicable_blockers: Tuple[str, ...]
+    historical_pass_rate: float
+
+
+@dataclass(frozen=True)
+class SynthesizerResult:
+    python_source: str
+    properties_source: str
+    raw_response: str
+    prompt_tokens: int
+    completion_tokens: int
+    model_id: str
+
+
+@dataclass(frozen=True)
+class LLMParseFailure:
+    reason: str
+    raw_response_excerpt: str
+
+
+@dataclass(frozen=True)
+class APIFailure:
+    reason: str
+    error_type: str
+
+
+@dataclass(frozen=True)
+class SecurityViolation:
+    node_type: str
+    reason: str
+    source_excerpt: str
+
+
+@dataclass(frozen=True)
+class ExecutionTimeout:
+    input_value: str
+    timeout_ms: int
+
+
+@dataclass(frozen=True)
+class ExecutionOOM:
+    input_value: str
+    rss_bytes: int
+
+
+@dataclass(frozen=True)
+class ExecutionError:
+    input_value: str
+    error_type: str
+    error_message: str
+
+
+@dataclass(frozen=True)
+class MFI:
+    """Minimum Failing Input — concrete failing example from Hypothesis shrinking."""
+
+    property_name: str
+    input_value_repr: str
+    expected_output_repr: str
+    actual_output_repr: str
+    hint: str
+
+
+@dataclass(frozen=True)
+class TierFailure:
+    tier: str  # one of TransformerTier
+    reason: str
+    failing_mfi: Optional[MFI] = None
+
+
+@dataclass(frozen=True)
+class TransformerSpec:
+    column_mapping_key: str
+    python_source: str
+    sql_case: Optional[str]
+    datalog_rule: Optional[str]
+    properties_passed: Tuple[str, ...]
+    properties_failed: Tuple[str, ...]  # MUST be empty for a Success spec
+    mfi_history: Tuple[MFI, ...]
+    iterations_used: int
+    cegis_pruned_sketches: Tuple[str, ...]
+    tier_failures: Tuple[TierFailure, ...]
+    tier_chosen: str  # one of TransformerTier
+    confidence: float
+    requires_operator_review: bool
+    bisimulation_placeholder: dict
+
+
+@dataclass(frozen=True)
+class ReflexionSuccess:
+    transformer_spec: TransformerSpec
+    iterations_used: int
+    mfi_history: Tuple[MFI, ...]
+    pruned_sketches: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ReflexionHalt:
+    column_mapping_key: str
+    halt_reason: Literal[
+        "iteration_cap",
+        "security_violation",
+        "parse_failure",
+        "all_sketches_pruned",
+        "loop_walltime",
+        "api_failure",
+    ]
+    latest_python_source: str
+    failing_mfis: Tuple[MFI, ...]
+    last_critique: str
+    iterations_used: int
+    security_violation: Optional[SecurityViolation] = None
+
+
 __all__ = [
     "Dialect",
     "ProbeCategory",
@@ -184,4 +325,21 @@ __all__ = [
     "ProbePlan",
     "AnomalyFinding",
     "ProbeResult",
+    # D3 (PR B)
+    "TransformerTier",
+    "PropertyDef",
+    "PropertySet",
+    "SketchHint",
+    "SynthesizerResult",
+    "LLMParseFailure",
+    "APIFailure",
+    "SecurityViolation",
+    "ExecutionTimeout",
+    "ExecutionOOM",
+    "ExecutionError",
+    "MFI",
+    "TierFailure",
+    "TransformerSpec",
+    "ReflexionSuccess",
+    "ReflexionHalt",
 ]

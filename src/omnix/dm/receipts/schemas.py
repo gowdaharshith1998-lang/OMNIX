@@ -177,7 +177,119 @@ EDGE_CASE_MANIFEST_SCHEMA = {
 }
 
 
+# ---------------------------------------------------------------------------
+# D3 (PR B) schemas — APPEND-ONLY to keep PR A receipt verifiers untouched.
+# ---------------------------------------------------------------------------
+
+
+TRANSFORMER_SPEC_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "required": [
+        "schema_version",
+        "migration_id",
+        "timestamp",
+        "predecessor_hash",
+        "column_mapping_key",
+        "python_source",
+        "sql_case",
+        "datalog_rule",
+        "properties_passed",
+        "properties_failed",
+        "mfi_history",
+        "iterations_used",
+        "cegis_pruned_sketches",
+        "tier_failures",
+        "tier_chosen",
+        "confidence",
+        "requires_operator_review",
+        "bisimulation_placeholder",
+        "signing_algorithm",
+        "public_key_fingerprint",
+    ],
+    "additionalProperties": False,
+    "properties": {
+        "schema_version": {"const": "omnix-dm/transformer-spec/v1"},
+        "migration_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+        "timestamp": {"type": "string"},
+        "predecessor_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "column_mapping_key": {"type": "string", "minLength": 1},
+        "python_source": {"type": "string", "minLength": 1},
+        "sql_case": {"type": ["string", "null"]},
+        "datalog_rule": {"type": ["string", "null"]},
+        "properties_passed": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+        },
+        "properties_failed": {
+            "type": "array",
+            "items": {"type": "string"},
+            "maxItems": 0,
+        },
+        "mfi_history": {"type": "array"},
+        "iterations_used": {"type": "integer", "minimum": 1, "maximum": 5},
+        "cegis_pruned_sketches": {"type": "array", "items": {"type": "string"}},
+        "tier_failures": {"type": "array"},
+        "tier_chosen": {"enum": ["python", "sql", "datalog"]},
+        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "requires_operator_review": {"type": "boolean"},
+        "bisimulation_placeholder": {"type": "object"},
+        "signing_algorithm": {"const": "ML-DSA-65"},
+        "public_key_fingerprint": {"type": "string"},
+    },
+}
+
+
+TRANSFORMER_HALT_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "required": [
+        "schema_version",
+        "migration_id",
+        "timestamp",
+        "predecessor_hash",
+        "column_mapping_key",
+        "halt_reason",
+        "latest_python_source",
+        "failing_mfis",
+        "last_critique",
+        "iterations_used",
+        "security_violation",
+        "signing_algorithm",
+        "public_key_fingerprint",
+    ],
+    "additionalProperties": False,
+    "properties": {
+        "schema_version": {"const": "omnix-dm/transformer-halt/v1"},
+        "migration_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+        "timestamp": {"type": "string"},
+        "predecessor_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "column_mapping_key": {"type": "string", "minLength": 1},
+        "halt_reason": {
+            "enum": [
+                "iteration_cap",
+                "security_violation",
+                "parse_failure",
+                "all_sketches_pruned",
+                "loop_walltime",
+                "api_failure",
+            ]
+        },
+        "latest_python_source": {"type": "string"},
+        "failing_mfis": {"type": "array"},
+        "last_critique": {"type": "string"},
+        "iterations_used": {"type": "integer", "minimum": 0},
+        "security_violation": {"type": ["object", "null"]},
+        "signing_algorithm": {"const": "ML-DSA-65"},
+        "public_key_fingerprint": {"type": "string"},
+    },
+}
+
+
 __all__ = [
     "COLUMN_MAPPING_MANIFEST_SCHEMA",
     "EDGE_CASE_MANIFEST_SCHEMA",
+    "TRANSFORMER_SPEC_SCHEMA",
+    "TRANSFORMER_HALT_SCHEMA",
 ]
