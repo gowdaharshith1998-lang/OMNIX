@@ -7,6 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — OMNIX-DM PR C (D4 Bulk Import + D5 Change Data Capture)
+
+- **`omnix.dm.d4_bulk_import` package** — the application layer that consumes
+  PR B's signed `TransformerSpec` receipts and runs them at production scale.
+  Streams every row from legacy through per-column transformers in a fenced
+  subprocess pool (reuses PR B's RestrictedPython kernel verbatim — no new
+  code-execution attack surface), batch-writes to target via PG `COPY FROM
+  STDIN` or parameterized INSERT, captures every failure into a signed
+  quarantine manifest, emits one ML-DSA-65 signed `BatchReceipt` per
+  (table, batch_no), and persists a `checkpoint.json` so the operator can
+  resume after any crash. **Row conservation invariant** enforced by
+  property test: `rows_read == rows_written + rows_quarantined` per batch
+  — never silently drops a row.
+- **Per-dialect streaming legacy readers** for PostgreSQL (server-side
+  named cursor with `itersize`), MySQL (SSCursor), Oracle (`arraysize`),
+  and MongoDB (`find(batch_size=...)`). Memory-bounded regardless of source
+  size. Transient errors retry with reconnect; permanent errors surface as
+  `LegacyReadError` after retry exhaustion.
+- **FK topological order** via Kahn's algorithm with explicit
+  `CycleInFKGraphError`. Self-referential tables surface a
+  `DeferredConstraintWarning`; cross-table cycles require
+  `allow_deferred_cycles=True` and `SET CONSTRAINTS ALL DEFERRED` (PG).
+- **Idempotency contract**: `batch_id = sha256(migration_id || table ||
+  batch_no)` plus operator-supplied `__omnix_batch_id` column. Rerunning the
+  same `migration_id` is a no-op; rerun-after-crash resumes from the
+  per-table checkpoint.
+- **`omnix.dm.d5_change_data_capture` package** — Strangler-Fig data plane.
+  After D4 bulk completes from snapshot LSN `L0`, D5 captures every legacy
+  write from `L0` onwards via PostgreSQL logical replication (`pgoutput`
+  plugin), replays each event through the same `TransformerSpec` against
+  target, tracks lag, and emits a signed `CutoverProposal` when statistical
+  parity is sustained for `OMNIX_DM_CUTOVER_SUSTAINED_WINDOW_SEC` (default
+  15 min). The proposal is **never auto-actioned** — the operator signs;
+  PR F adds the signoff workflow.
+- **Pure-Python `pgoutput` binary parser** (~400 LOC) — replaces unmaintained
+  `pypgoutput` 2022 prototype. Parses Relation/Begin/Insert/Update/Delete/
+  Commit/Truncate messages, decodes 11 common PG OIDs to native Python types
+  (Decimal for NUMERIC, datetime+tzinfo for timestamptz, bytes for bytea),
+  handles all 4 tuple kinds (n/u/t/b including TOAST-unchanged sentinel).
+  Same pattern as PR B's pure-Python Datalog evaluator: replace unmaintained
+  prototype with auditable in-house code.
+- **Standby Status Update protocol** + heartbeat thread for slot
+  `confirmed_flush_lsn` advancement.
+- **Sampled `CDCEventReceipt` emission** at
+  `OMNIX_DM_CDC_EVENT_RECEIPT_SAMPLE_RATE` (default 1%) — every event still
+  lands on target + LSN watermark; sampled receipts are for audit. Set rate
+  to `1.0` for compliance pilots that need full receipt.
+- **Lag monitor with sustained-window state machine** + honest
+  `legacy_unreachable=True` when the legacy health-check fails (never
+  silently report 0 lag).
+- **Oracle (LogMiner) + MySQL (binlog) CDC adapter stubs** that raise
+  `NotYetImplementedInPRC` on `start()` with a message naming PR D as the
+  implementer. Codex honesty — never silently NOP.
+- **7 new Codex honesty surfaces**: `BulkResult.partial`,
+  `BulkResult.unmapped_columns`, `RowQuarantineEntry`,
+  `CDCResult.unhandled_event_types_seen`, `CDCEventQuarantineEntry`,
+  `LagReport.legacy_unreachable`, `CutoverProposal.parity_not_met` +
+  `recommended_action="investigate_divergence"`.
+- **5 new schema constants** (append-only): `BATCH_RECEIPT_SCHEMA`,
+  `QUARANTINE_MANIFEST_SCHEMA`, `CDC_EVENT_RECEIPT_SCHEMA`,
+  `LAG_REPORT_SCHEMA`, `CUTOVER_PROPOSAL_SCHEMA`.
+- **`psycopg2-binary>=2.9.10,<3.0`** runtime dep (verified 2.9.12 on Fedora 44).
+- **Tests**: +130 new (21 P1/P2 · 11 reader · 8 executor pool · 12 target
+  writer · 13 orchestrator + checkpoint · 16 quarantine + receipt emitter ·
+  9 D5 core/stubs · 27 pgoutput parser · 6 standby status · 6 PG connection ·
+  4 CDC quarantine · 12 CDC replayer · 6 lag monitor · 6 cutover proposal ·
+  5 integration · 5 invariants).
+
+Built on Migrator stage 3 (arXiv 1904.05498, Wang/Dillig); Strangler Fig
+(Fowler 2004 / AWS Prescriptive / Azure Architecture Center); TSB Bank 2018
+outage as cautionary anti-pattern (validation phase used a calendar exit
+criterion); EY 2025 banking modernisation data (parallel-run extensions of
+12-24 months when calendar exit criteria are used); LegacyLeap "Zero-Downtime
+Migration" April 2026; PostgreSQL 18.4 logical replication / pgoutput plugin
+docs (May 2026); AWS DMS + Google Cloud DMS bulk-to-CDC handoff semantics.
+
 ### Added — OMNIX-DM PR B (D3 AI Transformation Synthesis)
 
 - **`omnix.dm.d3_transformation_synthesis` package** — the AI proposal layer
