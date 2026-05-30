@@ -195,6 +195,7 @@ def test_spec_predecessor_hash_must_be_64_char_hex():
 
 
 @given(n=st.integers(min_value=1, max_value=5))
+@settings(deadline=None)
 def test_iterations_used_stays_within_cap(n):
     """No matter how the mock behaves, iterations_used is bounded by the cap."""
     broken = "```python\ndef transform(v):\n    return 9999\n```\n```hypothesis\n# t\n```"

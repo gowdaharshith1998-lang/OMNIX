@@ -95,14 +95,18 @@ describe('naming pivot (slice-19)', () => {
   });
 
   it('README opens with locked positioning (graph-native legacy modernization)', () => {
-    // The README was rewritten in commit 6ee9053 to drop the prior
-    // 'open-core company brain / code intelligence product' marketing and state
-    // OMNIX's actual scope. This test guards the new opening + the explicit
-    // no-overclaim disclaimer the positioning lock requires.
+    // 6ee9053 dropped the prior 'open-core company brain / code intelligence
+    // product' marketing. PRs #35/#36 then moved to a mechanism-first, dev-tool
+    // voice: 'graph-native pipeline' as the opener, and the value-prop split
+    // into 'verified equivalence' (gate output) + 'behavioral equivalence'
+    // (gate 6). This guards that current positioning + the no-overclaim
+    // disclaimer — kept in lockstep with tests/studio/test_naming_pivot.py.
     const t = readRoot('README.md');
-    // Positive: locked positioning is the opening sentence
-    expect(t).toContain('graph-native platform for migrating legacy systems');
-    expect(t).toContain('verified behavioral equivalence');
+    // Positive: current opener
+    expect(t).toContain('graph-native pipeline for migrating legacy systems');
+    // Positive: the value-prop, as the dev-tool voice splits it
+    expect(t).toContain('verified equivalence');
+    expect(t).toContain('behavioral equivalence');
     // Negative: prior marketing positionings must not return
     expect(t).not.toContain('open-core company brain');
     expect(t).not.toContain('open-core code intelligence product');

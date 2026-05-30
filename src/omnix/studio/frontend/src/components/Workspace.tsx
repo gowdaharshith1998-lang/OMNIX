@@ -70,6 +70,49 @@ import {
 import { installGlobalErrorTrap } from "@/lib/globalErrorTrap";
 import { pushWireEvent } from "@/lib/wireEventBuffer";
 import type { WireEventType } from "@/components/inspector/AgentTab";
+import type { ActionStatus, AgentActionTab } from "@/state/actionDispatchStore";
+
+/** Lightweight, render-list-friendly projection of an agent tab. */
+export type AgentTabSummary = {
+  id: string;
+  status: ActionStatus;
+  title: string;
+};
+
+// Cache keyed by tab id so summaries keep referential identity across selector
+// calls when nothing *visible* changed. Summaries derive only from stable
+// fields (id/status/title) and never from streamed `result` content, so while
+// an agent streams output the returned objects stay `Object.is`-stable and
+// zustand's `shallow` can short-circuit re-renders.
+const _agentTabSummaryCache = new Map<string, AgentTabSummary>();
+
+/**
+ * Project agent tabs to summaries, reusing cached summary objects whose visible
+ * fields are unchanged. This is what lets `shallow(before, after)` hold when a
+ * tab's `result` content changes but its identity/status/title do not.
+ */
+export function selectAgentTabSummaries(state: {
+  agentTabs: AgentActionTab[];
+}): AgentTabSummary[] {
+  const liveIds = new Set<string>();
+  const summaries = state.agentTabs.map((tab) => {
+    liveIds.add(tab.id);
+    const title = tab.descriptor.title;
+    const cached = _agentTabSummaryCache.get(tab.id);
+    if (cached && cached.status === tab.status && cached.title === title) {
+      return cached;
+    }
+    const summary: AgentTabSummary = { id: tab.id, status: tab.status, title };
+    _agentTabSummaryCache.set(tab.id, summary);
+    return summary;
+  });
+  // Evict summaries for tabs that no longer exist so the cache can't grow
+  // unboundedly over a long session.
+  for (const id of _agentTabSummaryCache.keys()) {
+    if (!liveIds.has(id)) _agentTabSummaryCache.delete(id);
+  }
+  return summaries;
+}
 
 type Props = {
   workspaceId: string;

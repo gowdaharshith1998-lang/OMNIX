@@ -15,7 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from omnix.cloud.verify.daikon_lite import InvariantSet, compare as compare_invariants
+from omnix.cloud.verify.daikon_lite import InvariantSet
+from omnix.cloud.verify.daikon_lite import compare as compare_invariants
 from omnix.cloud.verify.diffy import DiffyReport
 from omnix.cloud.verify.scientist import Mismatch
 

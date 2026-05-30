@@ -32,6 +32,8 @@ from omnix.dm._types import (
 from omnix.dm.d4_bulk_import._fk_topo import build_fk_topo_order
 from omnix.dm.d4_bulk_import.batch_receipt_emitter import (
     db_fingerprint as _db_fingerprint,
+)
+from omnix.dm.d4_bulk_import.batch_receipt_emitter import (
     emit as emit_batch_receipt,
 )
 from omnix.dm.d4_bulk_import.checkpoint import (

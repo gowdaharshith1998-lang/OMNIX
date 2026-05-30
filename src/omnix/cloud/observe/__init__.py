@@ -12,8 +12,8 @@ treats them uniformly.
 from __future__ import annotations
 
 from omnix.cloud.observe.envelope import (  # noqa: F401
+    InMemorySink,
     Observation,
     ObservationKind,
     ObservationSink,
-    InMemorySink,
 )
