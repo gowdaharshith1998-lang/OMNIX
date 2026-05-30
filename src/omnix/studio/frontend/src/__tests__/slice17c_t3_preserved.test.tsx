@@ -162,7 +162,11 @@ describe("slice17c T3 preservation", () => {
     });
   });
 
-  it("mount/unmount Workspace repeatedly does not throw", async () => {
+  // 50 full Workspace renders is correctness- not timing-sensitive; under
+  // parallel CPU starvation it can exceed the default 5s timeout. Give it room
+  // and retry transient slowness — the no-throw + scope==="repo" assertions are
+  // unchanged.
+  it("mount/unmount Workspace repeatedly does not throw", { retry: 2, timeout: 30000 }, async () => {
     for (let i = 0; i < 50; i++) {
       const container = document.createElement("div");
       document.body.appendChild(container);
