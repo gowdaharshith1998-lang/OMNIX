@@ -11,6 +11,7 @@ requires-python = ">=3.10"
 dependencies = [
     "cryptography>=42.0",
     "dilithium-py>=1.4,<2.0",
+    "jsonschema>=4.21",
     "click>=8.1",
     "fastapi>=0.110",
     "hypothesis>=6.100",
