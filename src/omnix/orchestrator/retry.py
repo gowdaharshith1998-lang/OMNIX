@@ -162,14 +162,33 @@ def _default_dispatch(prompt: str) -> str:
 
 
 def _default_gate_runner(spec: Spec, response_text: str, target_language: str) -> GateResult:
-    """Lazy adapter to `omnix.gates.runner.run`.
+    """Adapter from the orchestrator gate-runner contract to ``gates.runner.run``.
 
-    Phase 6 owns the runner module; we import it on first call so module load
-    here doesn't fail while that module is in flight.
+    The orchestrator gate-runner Callable is ``(spec, response_text,
+    target_language) -> GateResult``; ``gates.runner.run`` is
+    ``(rebuild_attempt, spec, source_code=None)``. We pass the candidate code as
+    ``source_code`` so the gates check exactly ``response_text`` against ``spec``,
+    and a RebuildAttempt carrying the context this adapter actually has
+    (node_fqn, spec_hash, response_text, prompt template version). ``run`` reads
+    the attempt only as a *fallback* for the code — which ``source_code``
+    overrides — and never embeds it in the returned GateResult, so no provenance
+    is fabricated into any receipt.
     """
+    del target_language  # gates infer language from the code/spec; unused here
+    from datetime import datetime, timezone
+
     from omnix.gates.runner import run as _run  # local import — avoid cycle
 
-    return _run(spec=spec, response_text=response_text, target_language=target_language)
+    attempt = RebuildAttempt(
+        node_fqn=spec.identity.fqn,
+        spec_hash=sha256_hex(spec.to_json()),
+        prompt_template_version=PROMPT_TEMPLATE_VERSION,
+        prompt_text_hash="",
+        response_text=response_text,
+        timestamp=datetime.now(timezone.utc),
+        model="",
+    )
+    return _run(attempt, spec, source_code=response_text)
 
 
 def _default_nodes_for(project_path: Path) -> Sequence[Spec]:

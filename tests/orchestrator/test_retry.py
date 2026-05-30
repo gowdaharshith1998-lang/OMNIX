@@ -20,6 +20,7 @@ from omnix.orchestrator.human_review import HumanReviewRecord, RetryRunReport
 from omnix.orchestrator.retry import (
     MAX_RETRIES_DEFAULT,
     PROMPT_TEMPLATE_VERSION,
+    _default_gate_runner,
     format_retry_context,
     run_with_retry,
 )
@@ -421,3 +422,24 @@ def test_max_retries_invalid_raises() -> None:
             gate_runner=lambda **_: make_pass_result(),
             max_retries=0,
         )
+
+
+def test_default_gate_runner_bridges_to_runner_and_returns_gate_result() -> None:
+    """The default gate runner adapts (spec, response_text, target_language) to
+    gates.runner.run and returns a populated GateResult — guards the bridge that
+    previously called run() with a stale signature (would raise TypeError)."""
+    spec = make_spec("com.x.Reverse.reverse")
+    result = _default_gate_runner(
+        spec,
+        response_text="public String reverse(String s) { return s; }",
+        target_language="java21",
+    )
+    assert isinstance(result, GateResult)
+    # All four gate verdicts are populated booleans (gates ran; nothing crashed).
+    for passed in (
+        result.gate1_passed,
+        result.gate2_passed,
+        result.gate3_passed,
+        result.gate4_passed,
+    ):
+        assert isinstance(passed, bool)
