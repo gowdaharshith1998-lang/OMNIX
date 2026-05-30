@@ -1,6 +1,8 @@
 # OMNIX
 
-A graph-native pipeline for migrating legacy systems to modern stacks. OMNIX parses your codebase into a typed program graph, rewrites it one structurally-bounded node at a time with an LLM as one of its passes, runs each rebuild through a six-gate verification pipeline, and emits a cryptographically signed receipt covering every transformation. No black-box rewrites, no opaque diffs, nothing you have to take on faith.
+**OMNIX is the graph-native platform for migrating legacy systems to modern stacks with verified behavioral equivalence and full data fidelity, running in parallel with the legacy system until the organization is ready to cut over.** OMNIX parses your codebase into a typed program graph, rewrites it one structurally-bounded node at a time with an LLM as one of its passes, runs each rebuild through a six-gate verification pipeline, and emits a cryptographically signed receipt covering every transformation. No black-box rewrites, no opaque diffs, nothing you have to take on faith.
+
+We say "verified equivalence with auditable evidence." We do not say "provable" or "100% accurate." The gates produce strong evidence; receipts produce a tamper-evident record; the bridge surfaces divergence in production. None of that is a mathematical proof, and we will not market it as one.
 
 ```bash
 pip install -r requirements.txt
