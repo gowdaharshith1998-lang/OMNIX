@@ -17,7 +17,6 @@ from fastapi.responses import JSONResponse
 
 from omnix.cloud.auth.jwt_session import Session, SessionError, verify
 
-
 _current_session: contextvars.ContextVar[Session | None] = contextvars.ContextVar(
     "omnix_current_session", default=None
 )

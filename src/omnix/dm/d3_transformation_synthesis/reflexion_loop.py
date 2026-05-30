@@ -26,12 +26,12 @@ from dataclasses import dataclass, replace
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 from omnix.dm._types import (
-    APIFailure,
+    MFI,
     AnomalyFinding,
+    APIFailure,
     ColumnMapping,
     ColumnSpec,
     LLMParseFailure,
-    MFI,
     PropertyDef,
     PropertySet,
     ReflexionHalt,
@@ -49,7 +49,6 @@ from omnix.dm.d3_transformation_synthesis.transformer_dsl import (
     compile_safe,
     execute,
 )
-
 
 # ---------------------------------------------------------------------------
 # Property checker — runs each PropertyDef against a small set of inputs

@@ -60,8 +60,8 @@ def _eager_import_adapters() -> None:
     """Trigger registration of the bundled adapters. Importing the modules
     has the side-effect of calling :func:`register_adapter`."""
     from omnix.dm.d5_change_data_capture import (  # noqa: F401
-        oracle_adapter,
         mysql_adapter,
+        oracle_adapter,
     )
     try:
         from omnix.dm.d5_change_data_capture.pg_adapter import (  # noqa: F401

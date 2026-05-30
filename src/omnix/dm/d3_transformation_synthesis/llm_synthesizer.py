@@ -25,17 +25,16 @@ from dataclasses import dataclass
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 from omnix.dm._types import (
-    APIFailure,
+    MFI,
     AnomalyFinding,
+    APIFailure,
     ColumnMapping,
     ColumnSpec,
     LLMParseFailure,
-    MFI,
     PropertySet,
     SketchHint,
     SynthesizerResult,
 )
-
 
 SYSTEM_PROMPT = """You are OMNIX-DM's transformation synthesizer. Your job: emit a Python function
 that transforms one value from a legacy column type to a target column type, AND

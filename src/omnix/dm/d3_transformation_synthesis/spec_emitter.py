@@ -22,7 +22,6 @@ from omnix.dm.receipts import merkle_chain
 from omnix.dm.receipts.ml_dsa_65_signer import sign_canonical
 from omnix.dm.receipts.schemas import TRANSFORMER_SPEC_SCHEMA
 
-
 _MID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 

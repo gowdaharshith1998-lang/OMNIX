@@ -19,7 +19,6 @@ from omnix.cloud.observe.envelope import (
     redact,
 )
 
-
 _OP_TO_KIND = {
     "c": ObservationKind.CDC_INSERT,
     "u": ObservationKind.CDC_UPDATE,

@@ -16,7 +16,6 @@ from typing import Any, Dict, Tuple
 
 from omnix.dm._types import Batch, Row, TransformedBatch, TransformedRow
 
-
 _MID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 

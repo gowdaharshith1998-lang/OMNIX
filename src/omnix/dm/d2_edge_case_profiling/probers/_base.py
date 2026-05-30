@@ -26,7 +26,6 @@ from omnix.dm._types import (
     ProbeResult,
 )
 
-
 DEFAULT_TIMEOUT_MS = 10_000
 
 

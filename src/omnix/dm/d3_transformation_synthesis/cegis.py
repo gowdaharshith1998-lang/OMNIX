@@ -29,7 +29,6 @@ from omnix.dm._types import (
 )
 from omnix.dm.d3_transformation_synthesis.reflexion_loop import LoopInputs, run
 
-
 SKETCHES: Tuple[SketchHint, ...] = (
     SketchHint(
         sketch_id="varchar_to_text_passthrough",

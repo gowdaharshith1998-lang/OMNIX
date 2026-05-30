@@ -11,10 +11,10 @@ import re
 from typing import Optional, Tuple, Union
 
 from omnix.dm._types import (
+    MFI,
     APIFailure,
     ColumnMapping,
     LLMParseFailure,
-    MFI,
     TierFailure,
 )
 from omnix.dm.d3_transformation_synthesis import llm_synthesizer

@@ -222,7 +222,8 @@ class FacadeController:
 
 def real_signer():
     """Return a (signer, pubkey) tuple bound to the real ML-DSA-65 module."""
-    from omnix.receipts import keygen, sign as sign_mod
+    from omnix.receipts import keygen
+    from omnix.receipts import sign as sign_mod
 
     pk, sk = keygen.keygen()
 

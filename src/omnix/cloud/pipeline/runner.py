@@ -149,6 +149,7 @@ def _sign_completion_receipt(
     self-contained completion receipt over a JSON-canonical payload.
     """
     import base64
+
     from omnix.receipts import sign as sign_mod
 
     payload = {

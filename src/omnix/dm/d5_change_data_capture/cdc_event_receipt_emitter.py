@@ -23,7 +23,6 @@ from omnix.dm._types import CDCEventReceipt
 from omnix.dm.receipts.ml_dsa_65_signer import sign_canonical
 from omnix.dm.receipts.schemas import CDC_EVENT_RECEIPT_SCHEMA
 
-
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
