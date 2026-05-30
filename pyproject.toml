@@ -13,6 +13,7 @@ dependencies = [
     "dilithium-py>=1.4,<2.0",
     "jsonschema>=4.21",
     "numpy>=1.26",
+    "sqlparse>=0.5",
     "click>=8.1",
     "fastapi>=0.110",
     "hypothesis>=6.100",
