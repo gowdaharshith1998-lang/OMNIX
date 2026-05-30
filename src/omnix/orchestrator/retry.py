@@ -173,13 +173,20 @@ def _default_gate_runner(spec: Spec, response_text: str, target_language: str) -
 
 
 def _default_nodes_for(project_path: Path) -> Sequence[Spec]:
-    """Lazy adapter to `omnix.orchestrator.topological.walk`.
+    """Resolve rebuild nodes when the caller did not inject ``nodes``.
 
-    Tests inject `nodes` directly; production walks the project.
+    Automatic project-walk discovery (parse -> semantic -> ``Spec`` in
+    dependency-topological order) is not implemented in this milestone — there
+    is no ``project_path -> Spec`` builder yet. Rather than fail with an opaque
+    ``ImportError`` on a helper that never existed, surface the gap honestly so
+    callers know to pass ``nodes=`` explicitly (as every current caller and
+    test already does).
     """
-    from omnix.orchestrator.topological import walk  # local import — avoid cycle
-
-    return tuple(walk(project_path))
+    raise NotImplementedError(
+        f"run_with_retry could not auto-discover rebuild nodes for {project_path!r}: "
+        "automatic project-walk node discovery is not implemented yet. "
+        "Pass nodes=<sequence of Spec> explicitly."
+    )
 
 
 # ---------- main entry point -------------------------------------------------
@@ -208,8 +215,9 @@ def run_with_retry(
     `dispatch_fn` and `gate_runner` are injectable. Production defaults lazy-
     import `omnix.fabric.dispatcher.dispatch` and `omnix.gates.runner.run`.
 
-    `nodes` is injectable for tests; if None, walks `project_path` via
-    `omnix.orchestrator.topological.walk`.
+    `nodes` is injectable and currently required in practice: automatic
+    project-walk discovery is not implemented, so `nodes=None` raises
+    `NotImplementedError` (see `_default_nodes_for`).
     """
     if max_retries < 1:
         raise ValueError(f"max_retries must be >= 1, got {max_retries}")
