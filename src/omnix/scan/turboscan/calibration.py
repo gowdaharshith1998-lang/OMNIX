@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import cProfile
+import inspect
 import json
 import logging
 import os
@@ -10,11 +11,33 @@ import pstats
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from random import Random
 from typing import Any
 
 from hypothesis.internal.conjecture.data import ConjectureData
 
 _LOG = logging.getLogger("omnix.scan.turboscan.calibration")
+
+
+def _new_conjecture_data(rnd: Random) -> ConjectureData:
+    """Construct a ConjectureData across Hypothesis versions.
+
+    The internal ConjectureData constructor signature has drifted: <6.119 took
+    ``max_length`` + ``prefix``; >=6.119 made them required positionals; later
+    releases (>=6.x) dropped ``max_length`` in favour of ``max_choices`` and
+    keep only ``random`` required. We introspect the live signature and pass
+    exactly the keyword arguments it accepts, so calibration keeps working as
+    Hypothesis evolves rather than pinning a single internal API.
+    """
+    params = inspect.signature(ConjectureData.__init__).parameters
+    kwargs: dict[str, Any] = {}
+    if "random" in params:
+        kwargs["random"] = rnd
+    if "max_length" in params:
+        kwargs["max_length"] = 8192  # historical BUFFER_SIZE default
+    if "prefix" in params:
+        kwargs["prefix"] = b""  # empty prefix: accepted by old and new signatures
+    return ConjectureData(**kwargs)
 
 
 def _strategy_file(repo_root: Path) -> Path:
@@ -42,15 +65,10 @@ class CalibrationReport:
 
 def _bench_draws(name: str, strategy: Any, iterations: int, rng_seed: int = 0) -> None:
     del name  # used only as profiler label via caller module globals
-    from random import Random
-
     rnd = Random(rng_seed)
-    # Hypothesis >=6.119 made max_length + prefix required positionals on
-    # ConjectureData.__init__ (previously defaulted). 8192 matches the
-    # historical BUFFER_SIZE default and is plenty for calibration draws.
     for i in range(iterations):
         rnd.seed(rng_seed + i)
-        strategy.do_draw(ConjectureData(max_length=8192, prefix=b"", random=rnd))
+        strategy.do_draw(_new_conjecture_data(rnd))
 
 
 def _run_benchmark_profile(
