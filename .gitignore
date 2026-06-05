@@ -68,6 +68,7 @@ GRAPH_REPORT.md
 .gitnexus
 
 # AI agent tooling (local, per-developer)
+.scratch/
 .claude/
 .cursor/mcp.json
 src/axiom/omnix.db-shm
