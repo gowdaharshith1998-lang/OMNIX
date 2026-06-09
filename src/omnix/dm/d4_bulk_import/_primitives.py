@@ -12,9 +12,9 @@ import decimal
 import hashlib
 import json
 import re
-from typing import Any, Dict, Tuple
+from typing import Any, Dict
 
-from omnix.dm._types import Batch, Row, TransformedBatch, TransformedRow
+from omnix.dm._types import Batch, Row
 
 _MID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 

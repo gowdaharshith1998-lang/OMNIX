@@ -17,9 +17,7 @@ from typing import Optional, Tuple, Union
 
 from omnix.dm._types import (
     MFI,
-    APIFailure,
     ColumnMapping,
-    LLMParseFailure,
     PropertySet,
     TierFailure,
 )

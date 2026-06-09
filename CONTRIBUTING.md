@@ -19,3 +19,8 @@ code outside evaluation.
 Keep changes focused, include tests for behavior changes, and call out
 security-sensitive paths. Do not include secrets, customer code, generated
 credentials, or proprietary third-party artifacts.
+
+## Conduct
+
+Use the professional conduct expectations in `CODE_OF_CONDUCT.md` when opening
+issues, comments, and pull requests.

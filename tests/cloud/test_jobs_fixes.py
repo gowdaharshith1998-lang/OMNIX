@@ -83,16 +83,18 @@ def _write_tus_metadata(tus_dir: Path, upload_id: str, *,
 
 
 def test_resolve_tus_source_404_for_missing_upload_id():
-    from omnix.cloud.api.jobs import _resolve_tus_source
     from fastapi import HTTPException
+
+    from omnix.cloud.api.jobs import _resolve_tus_source
     with pytest.raises(HTTPException) as exc:
         _resolve_tus_source({"type": "tus", "upload_id": "does-not-exist"}, "acme")
     assert exc.value.status_code == 404
 
 
 def test_resolve_tus_source_400_when_upload_id_missing():
-    from omnix.cloud.api.jobs import _resolve_tus_source
     from fastapi import HTTPException
+
+    from omnix.cloud.api.jobs import _resolve_tus_source
     with pytest.raises(HTTPException) as exc:
         _resolve_tus_source({"type": "tus"}, "acme")
     assert exc.value.status_code == 400
@@ -105,8 +107,9 @@ def test_resolve_tus_source_409_for_incomplete_upload(tmp_path, monkeypatch):
     _write_tus_metadata(tmp_path, "u-incomplete",
                         committed=False, storage_key=None,
                         offset=50, length=100)
-    from omnix.cloud.api.jobs import _resolve_tus_source
     from fastapi import HTTPException
+
+    from omnix.cloud.api.jobs import _resolve_tus_source
     with pytest.raises(HTTPException) as exc:
         _resolve_tus_source({"type": "tus", "upload_id": "u-incomplete"}, "acme")
     assert exc.value.status_code == 409
@@ -164,8 +167,9 @@ def test_validated_mode_explicit_overrides_default():
 
 
 def test_validated_mode_unknown_value_raises_400():
-    from omnix.cloud.api.jobs import _validated_mode
     from fastapi import HTTPException
+
+    from omnix.cloud.api.jobs import _validated_mode
     with pytest.raises(HTTPException) as exc:
         _validated_mode("yolo", inline=True)
     assert exc.value.status_code == 400

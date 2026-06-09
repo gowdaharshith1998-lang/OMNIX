@@ -26,7 +26,7 @@ from omnix.receipts.cli import axiom_group
 @click.group()
 @click.version_option(version=_OMNIX_VERSION, prog_name="omnix")
 def main() -> None:
-    """OMNIX — knowledge intelligence and AXIOM provenance."""
+    """OMNIX - knowledge intelligence and AXIOM provenance."""
 
 
 def _ensure_src_on_syspath() -> None:
@@ -60,13 +60,13 @@ def analyze(path: str, port: int, no_open: bool) -> None:
     from omnix.studio.server import run as studio_run
 
     url = f"http://127.0.0.1:{port}/"
-    print(f"🌐 OMNIX running at {url}")
+    print(f"OMNIX running at {url}")
     if not no_open:
         threading.Timer(0.4, lambda: webbrowser.open(url)).start()
     try:
         studio_run(project_path=target, port=port)
     except KeyboardInterrupt:
-        print("\n✨ OMNIX stopped")
+        print("\nOMNIX stopped")
 
 
 @click.command("rebuild", context_settings={"help_option_names": ["-h", "--help"]})
@@ -97,7 +97,7 @@ def rebuild_cmd(
     node_filter: str | None,
     model: str,
 ) -> None:
-    """Rebuild Java methods → target_language; emit signed RebuildReceipts.
+    """Rebuild Java methods to target_language; emit signed RebuildReceipts.
 
     Walks <project>/.omnix/omnix.db, dispatches one LLM call per matched
     node, runs gates 1-4 mechanically, signs the result with the project
@@ -123,7 +123,7 @@ def rebuild_cmd(
         model=model,
     )
     for o in outputs:
-        click.echo(f"✓ {o.node_fqn} → {o.receipt_path}")
+        click.echo(f"ok {o.node_fqn} -> {o.receipt_path}")
     click.echo(f"\n{len(outputs)} receipt(s) written.")
 
 

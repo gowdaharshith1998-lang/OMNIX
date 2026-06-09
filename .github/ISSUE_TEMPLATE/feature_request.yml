@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest an OMNIX improvement or new capability.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user, operator, reviewer, or auditor problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the desired behavior, CLI/API surface, or documentation change.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Local CLI / Studio
+        - Signed receipts / AXIOM
+        - Verification gates
+        - OMNIX-DM
+        - Cloud / GitHub App / deployment
+        - Documentation
+        - Other
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing tools, workarounds, or smaller versions of the request.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, CLI output, links, or constraints.

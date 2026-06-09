@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import secrets
 import uuid
 from base64 import b64decode, b64encode
@@ -32,8 +31,8 @@ from pathlib import Path
 from fastapi import APIRouter, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
-from omnix.cloud.config import get_settings
 from omnix.cloud.auth.tenancy import require_session_tenant
+from omnix.cloud.config import get_settings
 from omnix.cloud.ingest.storage import get_storage
 
 TUS_VERSION = "1.0.0"

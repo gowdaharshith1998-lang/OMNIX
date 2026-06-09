@@ -35,10 +35,11 @@ from omnix.dm.d4_bulk_import.orchestrator import TargetDBInfo, run_bulk_import
 from omnix.dm.d5_change_data_capture.cdc_replayer import run_cdc_replay
 from omnix.dm.d5_change_data_capture.cutover_proposal_emitter import (
     CutoverState,
+)
+from omnix.dm.d5_change_data_capture.cutover_proposal_emitter import (
     evaluate as evaluate_cutover,
 )
 from omnix.dm.d5_change_data_capture.lag_monitor import LagMonitor
-
 
 # ---------------------------------------------------------------------------
 # Petclinic fixture

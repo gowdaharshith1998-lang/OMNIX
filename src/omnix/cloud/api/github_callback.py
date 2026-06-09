@@ -14,7 +14,6 @@ import hashlib
 import hmac
 import json
 import os
-from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from typing import Any
 

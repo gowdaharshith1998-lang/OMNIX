@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
-from .ast import Aggregate, ArithConstraint, Atom, Program, Rule, Term
+from .ast import ArithConstraint, Atom, Program, Rule, Term
 from .parser import DatalogSyntaxError, parse_program
 from .stratification import StratificationError, stratify
 

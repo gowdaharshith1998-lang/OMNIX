@@ -152,7 +152,7 @@ def cli_init(*, rekor_url: str, secret_name: str, namespace: Optional[str]) -> i
     print("# kubectl apply -f - <<EOF")
     print(render_secret_manifest(name=secret_name, namespace=namespace, signing_key=key))
     print("# EOF")
-    print(f"# Then set rekor.enabled=true and re-run helm upgrade.")
+    print("# Then set rekor.enabled=true and re-run helm upgrade.")
     return 0
 
 

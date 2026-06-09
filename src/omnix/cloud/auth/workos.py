@@ -10,8 +10,8 @@ This module wraps a small Python SDK surface so tests can substitute a fake.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 from typing import Protocol
 
 from omnix.cloud.config import get_settings

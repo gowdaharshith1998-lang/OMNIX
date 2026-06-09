@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import ast
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 from omnix.dm._types import (
@@ -36,7 +36,6 @@ from omnix.dm._types import (
     PropertySet,
     ReflexionHalt,
     ReflexionSuccess,
-    SecurityViolation,
     SketchHint,
     SynthesizerResult,
     TierFailure,

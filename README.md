@@ -203,6 +203,9 @@ The project is intentionally scoped around milestones, not dates.
 | **M4** | Shadow bridge. Runs rebuilt code against production traffic without serving the response, signed receipt per request, divergence alerting. |
 | **M5** | Executive dashboard and regulator-facing audit explorer with PDF export. |
 
+See [`docs/PHASES.md`](docs/PHASES.md) for the full completed/current/planned
+phase map.
+
 A standalone `omnix-verify` binary (Go or Rust, ~5MB, no Python required) ships alongside M1 so an auditor can verify a receipt offline on day one.
 
 ---

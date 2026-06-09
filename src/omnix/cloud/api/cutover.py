@@ -12,10 +12,11 @@ import logging
 import os
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Header, HTTPException, Request
+from fastapi import APIRouter, Body, Header, Request
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
+from omnix.cloud.auth.tenancy import require_session_tenant
 from omnix.cloud.cutover.event_bus import (
     InMemoryCutoverBus,
     RedisStreamsCutoverBus,
@@ -25,7 +26,6 @@ from omnix.cloud.cutover.facade_controller import (
     event_to_dict,
     real_signer,
 )
-from omnix.cloud.auth.tenancy import require_session_tenant
 
 log = logging.getLogger("omnix.cloud.api.cutover")
 

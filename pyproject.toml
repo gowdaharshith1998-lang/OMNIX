@@ -15,6 +15,13 @@ dependencies = [
     "numpy>=1.26",
     "scipy>=1.11",
     "sqlparse>=0.5",
+    "tree-sitter>=0.23.0",
+    "tree-sitter-python>=0.23.0",
+    "tree-sitter-typescript>=0.23.0",
+    "tree-sitter-java>=0.23.0",
+    "tree-sitter-go>=0.25.0",
+    "tree-sitter-ruby>=0.23.0",
+    "tree-sitter-rust>=0.24.0",
     "click>=8.1",
     "fastapi>=0.110",
     "hypothesis>=6.100",
@@ -129,11 +136,14 @@ warn_unused_ignores = false
 [[tool.mypy.overrides]]
 module = [
     "omnix.agents.*",
+    "omnix.cloud.*",
+    "omnix.dm.*",
     "omnix.fabric.*",
     "omnix.find_bugs.*",
     "omnix.graph.exporter",
     "omnix.parser.*",
     "omnix.scan.turboscan.*",
     "omnix.studio.*",
+    "omnix.verify.runners.*",
 ]
 ignore_errors = true

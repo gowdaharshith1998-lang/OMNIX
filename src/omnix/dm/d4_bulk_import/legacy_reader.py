@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any, Callable, Iterable, Iterator, List, Optional
+from typing import Any, Callable, Iterator, List, Optional
 
 from omnix.dm._types import Batch, ColumnSpec, Dialect
 from omnix.dm.d4_bulk_import._primitives import make_batch_id, normalize_row

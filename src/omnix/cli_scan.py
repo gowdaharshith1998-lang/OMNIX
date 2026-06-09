@@ -325,7 +325,7 @@ def scan_cmd(
             git_resp = _git_clone_remote(client, base, headers, target, ref, git_token)
             if "job_id" in git_resp:
                 job = git_resp
-                click.echo(f"  * git clone path returned job_id inline")
+                click.echo("  * git clone path returned job_id inline")
             else:
                 source: dict[str, Any] = {
                     "type": "git",

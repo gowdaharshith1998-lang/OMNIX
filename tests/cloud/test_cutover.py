@@ -8,11 +8,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from omnix.cloud.api.main import create_app
+from omnix.cloud.auth.jwt_session import issue
 from omnix.cloud.cutover.facade_controller import (
     FacadeController,
     real_signer,
 )
-from omnix.cloud.auth.jwt_session import issue
 
 
 @pytest.fixture

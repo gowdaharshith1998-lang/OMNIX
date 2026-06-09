@@ -15,7 +15,8 @@ import json
 from pathlib import Path
 
 import pytest
-from hypothesis import HealthCheck, given, settings, strategies as st
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from omnix.crypto import ml_dsa_65
 from omnix.dm._types import (

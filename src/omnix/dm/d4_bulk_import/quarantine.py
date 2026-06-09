@@ -7,8 +7,6 @@ re-enables them for pilots that explicitly opt in.
 
 from __future__ import annotations
 
-import dataclasses
-import json
 import os
 from pathlib import Path
 from typing import List, Optional

@@ -16,8 +16,8 @@ from omnix.dm._types import (
     SchemaSpec,
     TableSpec,
 )
-from omnix.dm.d1_schema_understanding.mapping_emitter import emit as emit_d1
 from omnix.dm.d1_schema_understanding.mapping_emitter import _atomic_write
+from omnix.dm.d1_schema_understanding.mapping_emitter import emit as emit_d1
 from omnix.dm.d2_edge_case_profiling.manifest_emitter import build_manifest, emit
 from omnix.dm.receipts.ml_dsa_65_signer import verify_canonical
 

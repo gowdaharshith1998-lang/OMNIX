@@ -26,7 +26,7 @@ over budget are deferred and surfaced in ``ProbePlan.excluded``.
 
 from __future__ import annotations
 
-from typing import Iterable, List, Tuple
+from typing import List, Tuple
 
 import numpy as np
 

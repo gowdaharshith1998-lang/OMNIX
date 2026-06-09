@@ -12,16 +12,15 @@ import pytest
 
 from omnix.receipts.rebuild_receipt import (
     GATE_NAMES,
-    GateResult,
     M2_DEFERRED_GATES,
-    RebuildReceipt,
     SCHEMA_VERSION,
+    GateResult,
+    RebuildReceipt,
     default_m2_deferred_gate_results,
     sha256_hex_text,
     sign_rebuild,
     verify_rebuild,
 )
-
 
 _VALID_TS = "2026-05-17T10:00:00.000Z"
 _HEX64 = "a" * 64

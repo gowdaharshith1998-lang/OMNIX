@@ -22,7 +22,7 @@ from jsonschema import Draft202012Validator
 from omnix.crypto import ml_dsa_65
 from omnix.dm._types import ColumnMapping, SchemaSpec
 from omnix.dm.receipts import merkle_chain
-from omnix.dm.receipts.ml_dsa_65_signer import canonicalize, sign_canonical
+from omnix.dm.receipts.ml_dsa_65_signer import sign_canonical
 from omnix.dm.receipts.schemas import COLUMN_MAPPING_MANIFEST_SCHEMA
 
 

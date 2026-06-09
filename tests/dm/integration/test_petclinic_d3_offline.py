@@ -31,7 +31,6 @@ from omnix.dm.d3_transformation_synthesis import (
 from omnix.dm.d3_transformation_synthesis.consumer import findings_for, load_manifests
 from omnix.dm.receipts.ml_dsa_65_signer import sign_canonical
 
-
 # ---------------------------------------------------------------------------
 # Petclinic fixtures — 16 columns, one engineered failure
 # ---------------------------------------------------------------------------

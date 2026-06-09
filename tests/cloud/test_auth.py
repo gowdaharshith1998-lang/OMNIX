@@ -95,12 +95,12 @@ def test_protected_route_rejects_bad_token(client):
 
 
 def test_cross_tenant_enforcement_blocks_access():
+    from omnix.cloud.auth.jwt_session import Session
     from omnix.cloud.auth.tenancy import (
         CrossTenantAccessError,
         _current_session,
         enforce_tenant,
     )
-    from omnix.cloud.auth.jwt_session import Session
 
     sess = Session(user_id="u", tenant_id="tenant-A", tier="smb",
                    email="x@y", scopes=(), issued_at=int(time.time()),

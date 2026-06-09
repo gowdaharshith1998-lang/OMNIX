@@ -13,9 +13,9 @@ import pytest
 from omnix.cloud.ingest.git_clone import (
     GitIngestionError,
     _embed_credentials,
-    git_executable,
     _redact,
     clone_repository,
+    git_executable,
     validate_repo_url,
     workspace_manifest_sha256,
 )

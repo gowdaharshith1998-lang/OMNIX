@@ -8,8 +8,6 @@ stream. The default uses psycopg2's ``read_message`` API.
 
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Optional
 
 from omnix.dm._types import ChangeEvent

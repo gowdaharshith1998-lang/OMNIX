@@ -19,8 +19,6 @@ import time
 from typing import Any, Callable, Optional, Protocol
 
 from omnix.dm._types import (
-    AnomalyFinding,
-    ColumnSpec,
     Dialect,
     ProbeRequest,
     ProbeResult,

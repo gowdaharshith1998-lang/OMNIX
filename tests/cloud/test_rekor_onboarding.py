@@ -19,9 +19,9 @@ from omnix.cloud.sigstore.onboarding import (
 from omnix.cloud.sigstore.rekor_client import (
     FakeRekor,
     embed_inclusion,
-    upload_and_embed,
     get_rekor,
     set_rekor,
+    upload_and_embed,
 )
 
 

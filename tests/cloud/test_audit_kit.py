@@ -101,7 +101,8 @@ def test_offline_verifier_catches_tampered_payload(real_signed_evidence, tmp_pat
 
 
 def test_kit_manifest_is_signed(real_signed_evidence, tmp_path):
-    from omnix.receipts import keygen, sign as sign_mod
+    from omnix.receipts import keygen
+    from omnix.receipts import sign as sign_mod
 
     pk, sk = keygen.keygen()
 

@@ -7,11 +7,11 @@ import json
 import pytest
 
 from omnix.dm._types import (
+    MFI,
     APIFailure,
     ColumnMapping,
     ColumnSpec,
     LLMParseFailure,
-    MFI,
     PropertySet,
     SynthesizerResult,
 )

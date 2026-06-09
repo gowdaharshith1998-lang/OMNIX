@@ -18,11 +18,10 @@ Storage convention (this adapter's contract with `populate_from_semantic_nodes`)
 
 from __future__ import annotations
 
-import json
 from typing import Iterable
 
 from omnix.graph.store import GraphStore
-from omnix.semantic.node import DependencyEdge, SemanticNode, SourceLocation
+from omnix.semantic.node import SemanticNode, SourceLocation
 
 
 class GraphStoreAdapter:

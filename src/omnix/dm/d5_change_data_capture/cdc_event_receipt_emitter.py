@@ -9,8 +9,6 @@ the rate to ``1.0`` for compliance pilots that require full receipt.
 
 from __future__ import annotations
 
-import datetime
-import hashlib
 import os
 import random
 import re

@@ -34,7 +34,6 @@ from omnix.cloud.cutover.facade_controller import (
     real_signer,
 )
 
-
 # -------------------- InMemoryCutoverBus --------------------
 
 

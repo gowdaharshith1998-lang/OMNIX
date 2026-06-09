@@ -20,7 +20,7 @@ import io
 import os
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, List, Optional, Sequence
 
 from omnix.dm._types import (
     Dialect,

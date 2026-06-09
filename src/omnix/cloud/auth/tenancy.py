@@ -10,10 +10,8 @@ injects the tenant_id into a contextvar; data-access helpers read from it.
 from __future__ import annotations
 
 import contextvars
-from collections.abc import Awaitable, Callable
 
 from fastapi import HTTPException, Request
-from fastapi.responses import JSONResponse
 
 from omnix.cloud.auth.jwt_session import Session, SessionError, verify
 

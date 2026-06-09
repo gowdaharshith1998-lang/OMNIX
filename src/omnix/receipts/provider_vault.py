@@ -8,8 +8,6 @@ import os
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-
-from omnix.receipts.finding_keys import omnix_home
 from typing import Any, Literal
 
 from cryptography.hazmat.primitives import hashes, serialization
@@ -17,7 +15,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-from omnix.receipts.finding_keys import ensure_project_key, project_privkey_path
+from omnix.receipts.finding_keys import ensure_project_key, omnix_home, project_privkey_path
 from omnix.receipts.finding_receipt import compute_project_id
 
 Scope = Literal["global", "project"]

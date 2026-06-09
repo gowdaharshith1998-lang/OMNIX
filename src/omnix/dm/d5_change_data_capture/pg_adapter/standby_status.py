@@ -17,7 +17,6 @@ from __future__ import annotations
 import datetime
 import struct
 import threading
-import time
 from typing import Any, Callable
 
 _PG_EPOCH = datetime.datetime(2000, 1, 1, tzinfo=datetime.timezone.utc)

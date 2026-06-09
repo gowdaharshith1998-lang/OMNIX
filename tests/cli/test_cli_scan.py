@@ -10,7 +10,6 @@ from click.testing import CliRunner
 
 from omnix.cli_scan import _classify, scan_cmd
 
-
 # ----- classification -----
 
 

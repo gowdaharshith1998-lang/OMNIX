@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime as _dt
 import os
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Tuple
 
 from jsonschema import Draft202012Validator
 

@@ -12,9 +12,9 @@ import datetime
 import os
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import Optional, Sequence
 
 from jsonschema import Draft202012Validator
 

@@ -13,7 +13,6 @@ Callers above (the DM receipt emitters) own canonicalization and atomic writes.
 
 from __future__ import annotations
 
-import os
 from typing import Optional, Tuple
 
 from dilithium_py.ml_dsa import ML_DSA_65 as _ML_DSA_65

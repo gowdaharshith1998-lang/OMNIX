@@ -15,13 +15,12 @@ import hashlib
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from omnix.dm._types import (
     CDCEventQuarantineEntry,
     CDCEventReceipt,
     ChangeEvent,
-    TransformedRow,
 )
 from omnix.dm.d3_transformation_synthesis.transformer_dsl import (
     ExecutionSuccess,

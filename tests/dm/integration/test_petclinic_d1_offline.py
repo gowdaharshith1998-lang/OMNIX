@@ -29,7 +29,6 @@ from omnix.dm.d2_edge_case_profiling import probe_planner
 from omnix.dm.d2_edge_case_profiling.manifest_emitter import emit as emit_d2
 from omnix.dm.receipts.ml_dsa_65_signer import verify_canonical
 
-
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 
 

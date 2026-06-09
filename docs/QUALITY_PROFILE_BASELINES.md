@@ -8,7 +8,9 @@ This document records **observed** per-grammar **mean quality** (aggregate `q` =
 
 - OMNIX repo: path to this checkout; `OMNIX_INGEST_WORKERS=1` (matches typical single-thread apply path for apples-to-apples).
 - Shallow clone: `git clone --depth 1 <url> /tmp/calib-…/<name>`; remove `/tmp/calib-*` between automation batches if disk is tight.
-- **Java:** `pip install tree-sitter-java` (optional; not pinned in `pyproject.toml` today) — without it, `.java` is skipped and no `java` row is accumulated.
+- **Java:** `tree-sitter-java` is part of the runtime install. Without that
+  grammar wheel in a custom environment, `.java` is skipped and no `java` row is
+  accumulated.
 - **tree-sitter-c:** not required for 14b-2; C-only samples that fail to load the grammar are omitted from this document.
 - **Generic profile:** `expected_range` in `generic.json` is populated from **Ruby** projects (scoring still uses `generic.json`; the evolution aggregate key in SQLite is `grammar_name='ruby'`, not `'generic'`.
 

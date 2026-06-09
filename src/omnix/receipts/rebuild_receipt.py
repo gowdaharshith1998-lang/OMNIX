@@ -24,7 +24,6 @@ from typing import Any
 from cryptography.exceptions import InvalidSignature
 
 from omnix.receipts.finding_keys import (
-    InvalidFindingPublicKeyError,
     _load_private_key,
     _load_public_key,
     project_privkey_path,
