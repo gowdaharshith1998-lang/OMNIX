@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import os
+import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -108,7 +110,8 @@ def test_ensure_project_key_creates_when_missing(
     assert created is True
     assert priv.name == f"{compute_project_id(proj)}.pem"
     assert priv.is_file()
-    assert (priv.stat().st_mode & 0o777) == 0o600
+    if os.name != "nt":
+        assert (priv.stat().st_mode & 0o777) == 0o600
     assert pub == project_pubkey_path(proj)
     assert pub.is_file()
 
@@ -215,7 +218,7 @@ def test_verify_raises_filenotfound_on_missing_pubkey(
     sig = sign_finding(payload, pid)
     pub = project_pubkey_path(proj)
     pub.unlink()
-    with pytest.raises(FileNotFoundError, match=str(pub)):
+    with pytest.raises(FileNotFoundError, match=re.escape(str(pub))):
         verify_finding(payload, sig, pub)
 
 

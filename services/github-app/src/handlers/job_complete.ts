@@ -34,6 +34,7 @@ export function registerJobCompleteRoute(fastify: FastifyInstance, probot: Probo
         return reply.code(401).send({ detail: "invalid signature" });
       }
       const payload = JSON.parse(raw.toString()) as JobCompleteWebhook;
+      validateJobCompletePayload(payload);
       const ok = await openReplicationPr(probot, payload);
       return reply.send({ ok });
     },
@@ -45,11 +46,11 @@ async function openReplicationPr(
   payload: JobCompleteWebhook,
 ): Promise<boolean> {
   const auth = await probot.auth(payload.installation_id);
-  const [owner, repo] = payload.repo.split("/", 2);
+  const [owner, repo] = splitRepo(payload.repo);
 
   const baseRef = await auth.repos.get({ owner, repo });
   const headSha = baseRef.data.default_branch;
-  const branchName = `omnix/replicate/${payload.job_id}`;
+  const branchName = sanitizeReplicationBranchName(payload.job_id);
 
   const baseRefData = await auth.git.getRef({
     owner,
@@ -67,7 +68,7 @@ async function openReplicationPr(
     await auth.repos.createOrUpdateFileContents({
       owner,
       repo,
-      path: unit.target_path,
+      path: validateTargetPath(unit.target_path),
       branch: branchName,
       message: `OMNIX: replicate ${unit.unit_id} -> ${unit.target_language}`,
       content: Buffer.from(unit.generated_code, "utf-8").toString("base64"),
@@ -98,6 +99,49 @@ async function openReplicationPr(
   });
 
   return true;
+}
+
+function splitRepo(repoFullName: string): [string, string] {
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repoFullName)) {
+    throw new Error("invalid repository name");
+  }
+  return repoFullName.split("/", 2) as [string, string];
+}
+
+export function sanitizeReplicationBranchName(jobId: string): string {
+  const suffix = jobId.replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 80);
+  return `omnix/replicate/${suffix || "job"}`;
+}
+
+export function validateTargetPath(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  const parts = normalized.split("/").filter((part) => part.length > 0);
+  if (
+    !normalized
+    || normalized.startsWith("/")
+    || /^[A-Za-z]:\//.test(normalized)
+    || parts.length === 0
+    || parts.includes("..")
+    || parts.includes(".git")
+  ) {
+    throw new Error(`invalid target path: ${path}`);
+  }
+  const candidate = parts.join("/");
+  const lower = candidate.toLowerCase();
+  if (lower === ".github/workflows" || lower.startsWith(".github/workflows/")) {
+    throw new Error("workflow file writes are not allowed");
+  }
+  return candidate;
+}
+
+export function validateJobCompletePayload(payload: JobCompleteWebhook): void {
+  if (!Number.isInteger(payload.installation_id) || payload.installation_id <= 0) {
+    throw new Error("invalid installation id");
+  }
+  splitRepo(payload.repo);
+  for (const unit of payload.units) {
+    validateTargetPath(unit.target_path);
+  }
 }
 
 function summarizeUnits(units: ReplicatedUnit[]): string {

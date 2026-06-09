@@ -24,8 +24,15 @@ class InvalidFindingPublicKeyError(ValueError):
     """PEM at ``pubkey_path`` is missing, corrupted, or not an Ed25519 public key."""
 
 
+def omnix_home() -> Path:
+    raw = os.environ.get("OMNIX_HOME") or os.environ.get("HOME")
+    if raw:
+        return Path(raw).expanduser()
+    return Path.home()
+
+
 def global_keys_dir() -> Path:
-    return Path.home() / ".omnix" / "keys"
+    return omnix_home() / ".omnix" / "keys"
 
 
 def project_pubkey_path(project_root: Path) -> Path:

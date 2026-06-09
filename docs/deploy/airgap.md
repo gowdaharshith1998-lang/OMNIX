@@ -1,7 +1,14 @@
-# OMNIX air-gapped deployment guide (Shape B)
+# OMNIX air-gapped deployment guide
 
 This guide installs OMNIX into a customer-controlled Kubernetes cluster with no
 internet egress.
+
+## Status
+
+This is an enterprise/operator deployment path. It requires a prepared OMNIX
+air-gap bundle, customer infrastructure, and environment-specific validation.
+The receipts and private transparency-log options support audit review; they do
+not by themselves certify regulatory compliance.
 
 ## Prerequisites
 
@@ -19,11 +26,11 @@ internet egress.
 
 ```bash
 sha256sum -c omnix-airgap-<version>.airgap.sha256
-omnix verify --bundle omnix-airgap-<version>.airgap
 ```
 
-The bundle signature is ML-DSA-65 (FIPS 204). The verifier runs entirely
-offline using the public key shipped inside the bundle's signed manifest.
+Before loading images into the registry, verify
+`omnix-airgap-<version>.airgap.sig` with the release public key supplied by the
+OMNIX release process.
 
 ## Load images into your registry
 
@@ -82,28 +89,28 @@ ships a single-binary installer that brings up k0s and OMNIX in one step:
 ./omnix-installer  # ~30 minutes from clean VM to ready
 ```
 
-## Compliance mapping
+## Audit evidence mapping
 
-- **DORA Article 6** — every replication action emits an ML-DSA-65 signed
-  receipt; the optional private Rekor instance provides 5-year immutable
+- **DORA evidence support** — replication actions can emit ML-DSA-65 signed
+  receipts; the optional private Rekor instance can provide immutable
   retention.
-- **EU AI Act Article 12** — automatic, tamper-resistant logging of
-  high-risk-AI events (every gate transition is signed and persisted).
-- **EU AI Act Article 26(6)** — 6-month minimum log retention enforced by
-  the Receipt + JobEvent table retention policy.
-- **NIST PQC 2030** — ML-DSA-65 satisfies FIPS 204.
-- **CNSA 2.0 (2035)** — same algorithm satisfies CNSA 2.0.
-- **SOC 2 CC7.2 + CC4.1** — Drata integration auto-pushes evidence.
+- **EU AI Act Article 12 support** — gate transitions and receipt events create
+  structured logging evidence for review.
+- **EU AI Act Article 26(6) support** — retention policy is implemented through
+  the Receipt and JobEvent tables when configured by the operator.
+- **PQC-readiness planning** — OMNIX receipts use ML-DSA-65 / FIPS 204.
+- **Security/compliance programs** — external evidence systems can ingest the
+  signed artifacts when configured for the customer environment.
 
-See `docs/compliance/` (Phase B4) for the full mapping.
+This guide does not replace the buyer's legal, compliance, or control review.
 
-## Private Rekor (Phase B v2)
+## Private Rekor
 
 Customers under regulated regimes (DORA Art 6, EU AI Act Art 12/26(6), CMMC
 2.0, CNSA 2.0) cannot use the public sigstore.dev Rekor log — its FOUO/CUI
 posture is unsuitable and the log lives outside the customer's
-jurisdiction. Phase B v2 ships a private Rekor v2 StatefulSet that runs
-in-cluster, alongside the air-gapped OMNIX install.
+jurisdiction. The enterprise chart can deploy a private Rekor v2 StatefulSet
+that runs in-cluster, alongside the air-gapped OMNIX install.
 
 ### When to enable
 
@@ -152,13 +159,13 @@ tampering of the kit itself.
 
 ### HA upgrade path
 
-The default Phase B v2 chart deploys 1× Rekor StatefulSet + 1× Trillian
-sidecars + 1× in-cluster MySQL. For HA:
+The current chart deploys one Rekor StatefulSet replica and one in-cluster
+MySQL StatefulSet replica. HA requires a chart change before documenting a
+multi-replica `rekor` value.
 
-1. Provision external MySQL (Aurora multi-AZ, RDS, or on-prem cluster).
-2. Set `rekor.trillian.externalMysql.host` — the in-cluster MySQL
-   StatefulSet is omitted automatically.
-3. Bump `rekor.replicas` to 3.
+For production planning, provision external MySQL (Aurora multi-AZ, RDS, or an
+on-prem cluster) and set `rekor.trillian.externalMysql.host`; the in-cluster
+MySQL StatefulSet is omitted automatically.
 
 Schema migration between Rekor versions is handled by Trillian's standard
 upgrade path; consult the Sigstore Rekor docs before any major upgrade.

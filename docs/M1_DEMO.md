@@ -3,8 +3,8 @@
 The OMNIX M1 rebuild pipeline turns a Java 6 method into idiomatic Java 21
 and emits a cryptographically signed receipt that anyone can verify
 offline against the project's public key. This page describes what the
-demo shows, how to reproduce it locally, what the receipt proves, and —
-critically — what it does **not** prove.
+demo shows, how to reproduce it locally, what the receipt records, and —
+critically — what it does **not** establish.
 
 ## What the demo shows
 
@@ -32,7 +32,7 @@ A single terminal run, end-to-end, ~60-90 seconds wall-clock:
    `verified: true` + a `gates_summary` showing the breakdown by status.
 4. `cat <rebuilt source>` — displays the LLM's Java 21 output verbatim.
 
-## What the receipt proves
+## What the receipt records
 
 Strongly, with the project's Ed25519 public key:
 
@@ -42,12 +42,12 @@ Strongly, with the project's Ed25519 public key:
   confirm it's what the rebuild was performed against.
 - Gates 1-3 (syntactic, type-check, signature) ran mechanically and
   passed. Their status is in the receipt's `gate_results` array.
-- A specific model (e.g. `claude-opus-4.7`) produced the rebuild on a
-  specific UTC timestamp under a specific prompt-template version.
+- The receipt records the requested model ID, UTC timestamp, and
+  prompt-template version.
 - The receipt's canonical JSON is deterministic — two receipts built
   from the same logical inputs sign-equal.
 
-## What the receipt does NOT prove (deferred to M2)
+## What the receipt does NOT establish (deferred to M2)
 
 This distinction is load-bearing for OMNIX's positioning. The receipt
 **explicitly** marks these gates `deferred_m2`, never `passed`:
@@ -105,8 +105,8 @@ The script:
 - Runs `omnix axiom verify-rebuild` on the resulting receipt.
 - Cats the rebuilt Java 21 source.
 
-Expected wall-clock: ~60-90 seconds depending on LLM latency. Cost:
-~$0.05-$0.50 at Opus 4.7 pricing per run. The script does NOT cache LLM
+Expected wall-clock: ~60-90 seconds depending on LLM latency. Cost depends on
+the selected model and current provider pricing. The script does NOT cache LLM
 responses — every run is a fresh API call. Caching would defeat the
 demo's epistemic value.
 
@@ -128,7 +128,7 @@ asciinema rec docs/m1_demo.cast \
     --command "bash docs/m1_demo_rehearsal.sh"
 ```
 
-Constraints (the dispatch's hard rules):
+Recording constraints:
 - Do NOT record at >1x speed.
 - Do NOT edit / splice / cut the cast.
 - Do NOT include `cd ~/demo-scratch && rm -rf ...` setup commands in the
@@ -137,9 +137,8 @@ Constraints (the dispatch's hard rules):
   in the cast.
 - Target ≤95 seconds total runtime.
 
-If a take has a glitch, re-record from scratch. Splicing destroys
-verifiability — the value of an asciinema cast over a YouTube clip is
-that every keystroke is text and replayable. Edits ruin that property.
+For public provenance, record an unedited asciinema session. If a take fails,
+re-record rather than editing.
 
 ## Provenance
 

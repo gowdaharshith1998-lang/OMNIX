@@ -8,6 +8,8 @@ import os
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+from omnix.receipts.finding_keys import omnix_home
 from typing import Any, Literal
 
 from cryptography.hazmat.primitives import hashes, serialization
@@ -48,7 +50,7 @@ def _now() -> str:
 
 
 def _providers_dir() -> Path:
-    return Path.home() / ".omnix" / "providers"
+    return omnix_home() / ".omnix" / "providers"
 
 
 def _index_path() -> Path:

@@ -108,7 +108,7 @@ def _load_json_profile(path: Path, grammar: str) -> QualityProfile:
     pmod: str | None
     if formula == "custom_python":
         pmod = str(
-            data.get("python_module") or path.with_suffix(".py").as_posix()
+            data.get("python_module") or path.with_suffix(".py")
         )
     else:
         pmod = None
@@ -177,7 +177,7 @@ def load_profile(
             weights={},
             required_minimums={},
             formula="custom_python",
-            python_module=p_py.as_posix(),
+            python_module=str(p_py),
             profile_version=1,
         )
     if p_json.is_file():

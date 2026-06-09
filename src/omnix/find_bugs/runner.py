@@ -6,8 +6,6 @@ import getpass
 import json
 import logging
 import os
-import pwd
-import resource
 import shlex
 import shutil
 import signal
@@ -34,6 +32,16 @@ from .entry_points import (
 )
 from .severity import compute_severity, rank_findings
 from .walker import scan_codebase_sources
+
+try:  # Unix-only; Windows still imports this module for route/test collection.
+    import pwd
+except ModuleNotFoundError:  # pragma: no cover - platform branch
+    pwd = None  # type: ignore[assignment]
+
+try:  # Unix-only; subprocess RSS limits are best-effort.
+    import resource
+except ModuleNotFoundError:  # pragma: no cover - platform branch
+    resource = None  # type: ignore[assignment]
 
 VERIFY_TIMEOUT_S = 30.0  # legacy default; workers pass this if run_args omit per_fn_timeout_s
 DEFAULT_PER_FN_TIMEOUT_S = 30.0
@@ -70,7 +78,7 @@ def _max_rss_per_verify() -> int:
 
 def _set_subprocess_limits_for_cap(cap_bytes: int) -> None:
     """Apply RLIMIT_AS in child / preexec (Unix)."""
-    if sys.platform == "win32":
+    if sys.platform == "win32" or resource is None:
         return
     try:
         resource.setrlimit(resource.RLIMIT_AS, (cap_bytes, cap_bytes))
@@ -118,23 +126,30 @@ def _omnix_root() -> Path:
 def _real_home_dir() -> str:
     """Home directory independent of $HOME (needed for subprocess site-packages)."""
     try:
-        return pwd.getpwuid(os.getuid()).pw_dir
+        if pwd is not None:
+            return pwd.getpwuid(os.getuid()).pw_dir
     except Exception:
-        u = (
-            os.environ.get("SUDO_USER")
-            or os.environ.get("USER")
-            or os.environ.get("LOGNAME")
-            or ""
-        )
-        if not u:
-            try:
-                u = getpass.getuser()
-            except Exception:
-                u = ""
-        cand = Path("/home") / u if u else None
-        if cand and cand.is_dir():
-            return str(cand)
-        return "/"
+        pass
+    u = (
+        os.environ.get("SUDO_USER")
+        or os.environ.get("USER")
+        or os.environ.get("LOGNAME")
+        or ""
+    )
+    if not u:
+        try:
+            u = getpass.getuser()
+        except Exception:
+            u = ""
+    if sys.platform == "win32":
+        try:
+            return str(Path.home())
+        except Exception:
+            return os.path.expanduser("~")
+    cand = Path("/home") / u if u else None
+    if cand and cand.is_dir():
+        return str(cand)
+    return "/"
 
 
 def ensure_find_bugs_graph_db(

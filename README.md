@@ -11,6 +11,24 @@ That's the full bootstrap. It parses the codebase, builds the graph, and starts 
 
 ---
 
+## Project status
+
+OMNIX is active source-visible commercial software at `v0.6.1`. The local
+code-intelligence and signed-receipt surfaces are the most mature parts of the
+repo. Rebuild orchestration, hosted cloud scanning, GitHub App automation, and
+enterprise deployment are present as implementation tracks, demos, or
+private-pilot surfaces.
+
+| Surface | Current status |
+|---|---|
+| Local graph analysis, grammar visibility, bug scanning, signed finding receipts, and audit export | Available in the local CLI / Studio path |
+| Single-node Java rebuild demo | Available as an M1 demo flow; see `docs/M1_DEMO.md` |
+| Full multi-node rebuild orchestration | In progress |
+| OMNIX-DM data migration phases D1-D5 | Implemented and documented in stages; see `docs/dm/` |
+| Hosted cloud scanning, GitHub App, and Helm/airgap deployment | Private-pilot or enterprise deployment surfaces, not a public self-serve service from this repo alone |
+
+---
+
 ## What it actually does
 
 OMNIX is not an autonomous agent. It is closer to a compiler with an LLM as one of its passes, and hard verification gates between every step.
@@ -18,9 +36,9 @@ OMNIX is not an autonomous agent. It is closer to a compiler with an LLM as one 
 ```
 parse → typed program graph                       [shipped]
 topo-sort                                         [shipped]
-generate per-node rebuild spec                    [M1, in progress]
-LLM dispatch with spec + dependency context       [M1, in progress]
-6-gate verification                               [gates 1–4 shipped, 5–6 in progress]
+generate per-node rebuild spec                    [M1 demo / in progress]
+LLM dispatch with spec + dependency context       [M1 demo / in progress]
+6-gate verification                               [gates 1–4 in M1 demo, 5–6 in progress]
   ├─ 1. syntactic parse        deterministic
   ├─ 2. type check             deterministic
   ├─ 3. signature check        deterministic
@@ -58,39 +76,46 @@ OMNIX is built for the VP Eng who has to ship one production module without brea
 
 ---
 
-## OMNIX-DM — data migration layer (early)
+## OMNIX-DM — data migration layer
 
-OMNIX-DM is the data-migration layer beneath the code replicator. **PR A**
-ships the first two phases:
+OMNIX-DM is the data-migration layer beneath the code replicator. Its outputs
+are signed, inspectable migration artifacts, not a claim of automatic or
+mathematically proven migration correctness.
 
-- **D1 — AI Schema Understanding** — dialect-aware DDL parsing (Postgres /
-  MySQL / Oracle / MongoDB), per-column semantic embeddings, Hungarian
-  optimal matching with confidence scores, ML-DSA-65 signed
-  `column-mapping.json`.
-- **D2 — AI Edge-Case Profiling** — expected-free-energy probe planner +
-  six probers (NULL distribution, encoding anomaly, orphan FK, timezone
-  drift, precision boundary, sentinel value), ML-DSA-65 signed
-  `edge-case-manifest.json` chained to D1.
+Current status by phase:
+
+| Phase | Status | Artifact |
+|---|---|---|
+| D1 Schema Understanding | Available in the DM library surface | signed `column-mapping.json` |
+| D2 Edge-Case Profiling | Available in the DM library surface | signed `edge-case-manifest.json` |
+| D3 Transformation Synthesis | Present in the current tree; treat as unreleased until packaged | signed `TransformerSpec` or halt receipt |
+| D4 Bulk Import | Present in the current tree; operator-run and preconditioned | signed batch and quarantine receipts |
+| D5 Change Data Capture | Present for PostgreSQL CDC; Oracle/MySQL adapters are explicit stubs | sampled CDC receipts, lag reports, cutover proposal |
 
 Built on the Wang/Dillig UT Austin trilogy (Mediator POPL 2018 / Migrator
-arXiv 1904.05498 / Dynamite PVLDB 2020). PR A is the AI proposal layer;
-the formal proof layer (Z3-discharged bisimulation over TRA) lands in
-PR E. We do not market the "100% perfect migration" claim as proven
-today — it is the destination of the trilogy productisation, not a
-current capability of PR A.
+arXiv 1904.05498 / Dynamite PVLDB 2020). The current product surfaces signed
+evidence, explicit gaps, and operator-review points. A Z3-backed formal
+verification layer remains future work and should not be marketed as a current
+capability.
 
 See [`docs/dm/`](docs/dm/) for the full pipeline walkthrough, academic
 foundation, and runbook.
 
 ---
 
-## Two ways to run it
+## Ways to run it
 
 OMNIX is both a tool and a team.
 
-**Run it yourself.** Install the CLI, point it at your codebase, drive the migration in-house. Everything runs on your infrastructure — code, graph, receipts, keys. Nothing leaves your perimeter unless you wire it to a hosted LLM yourself. Everything in **What works today** below is what your engineers get.
+**Run the local evaluation path yourself.** Install the CLI, point it at your
+codebase, and inspect the graph, findings, receipts, and local Studio.
+Everything runs on your infrastructure unless you configure a hosted LLM
+yourself. Everything in **What works today** below is the self-serve surface.
 
-**Have us run it.** If your team doesn't have the bandwidth or the modernization reps — most don't, this is a once-per-career project — we take the whole thing end-to-end. Spec definition for your domain. LLM dispatch. Gate triage. The engineer-review workspace. Shadow-bridge deployment against production traffic. Cutover plan and rollback rehearsal. And the signed audit bundle you hand to a regulator at the end. Your engineers can review every step or stay out of it; the receipts are the same either way.
+**Run a private pilot or enterprise deployment.** Hosted scanning, the GitHub
+App, Helm/airgap deployment, and shadow-bridge cutover are private-pilot or
+enterprise surfaces. They require project scoping, tenant configuration, and
+deployment decisions outside this repository.
 
 We charge per engagement, scoped by codebase size, target language, and how deep into the pipeline you want us. Most VP Engs take the service tier for the first migrated module, then move the rest in-house once their team has reps. Some keep us on the shadow-bridge side through cutover.
 
@@ -114,7 +139,7 @@ If you are already running Amazon Q or OpenRewrite, the right shape is to let th
 
 ---
 
-## What works today (v0.6)
+## What works today (v0.6.1)
 
 ```bash
 # Parse a codebase into the OMNIX graph
@@ -137,7 +162,7 @@ omnix axiom verify-scan /path/to/receipts/dir \
 omnix axiom export-vault /path/to/project --out audit.zip
 ```
 
-In v0.6 specifically:
+In v0.6.1 specifically:
 
 - **Universal Tree-sitter parser** producing the semantic graph. Six grammars active today (Python, TypeScript, Java, Go, Ruby, Rust); run `omnix grammar list` to see them. Python and TypeScript additionally have specialist passes for richer symbol resolution. Files Tree-sitter cannot parse drop to an LLM fallback.
 - **Property-based testing** with signed finding receipts. Ed25519 per finding, ML-DSA-65 over a Merkle root per scan.
@@ -145,7 +170,9 @@ In v0.6 specifically:
 - **Read-only localhost API** with a React studio for inspection.
 - **Audit export bundle** — an offline zip your auditor's auditor can verify without installing the full Python stack.
 
-Built but not yet exposed as polished CLI verbs (lands in M1–M2): the spec generator, the LLM orchestrator, the dual-runtime equivalence runner.
+Available as demo or active implementation work, but not yet a polished general
+CLI surface: the spec generator, the LLM orchestrator, and the dual-runtime
+equivalence runner.
 
 ---
 

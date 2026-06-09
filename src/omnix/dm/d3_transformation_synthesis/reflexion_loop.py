@@ -325,7 +325,7 @@ def run(
     start = time.monotonic()
 
     for iteration in range(1, max_iterations + 1):
-        if time.monotonic() - start > loop_walltime_sec:
+        if loop_walltime_sec <= 0 or time.monotonic() - start >= loop_walltime_sec:
             return ReflexionHalt(
                 column_mapping_key=key,
                 halt_reason="loop_walltime",

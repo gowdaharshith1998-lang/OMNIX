@@ -65,6 +65,8 @@ def test_flush_writes_signed_manifest(keys, tmp_path):
 
 
 def test_file_mode_0600(keys, tmp_path):
+    if os.name == "nt":
+        pytest.skip("Windows stat mode bits do not preserve POSIX 0600 semantics")
     pk, sk = keys
     log = QuarantineLog(
         migration_id="m1",

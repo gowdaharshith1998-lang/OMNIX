@@ -19,7 +19,11 @@ _LOG = logging.getLogger("omnix.scan.filesystem_hygiene")
 def _stat_triple(p: Path) -> tuple[str, int, int] | None:
     try:
         st = p.stat()
-        return (str(p.resolve()), int(st.st_size), int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))))
+        return (
+            str(p),
+            int(st.st_size),
+            int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))),
+        )
     except OSError as e:
         _LOG.debug("stat failed for %s: %s", p, e)
         return None

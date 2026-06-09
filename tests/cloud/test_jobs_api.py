@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from omnix.cloud import events
 from omnix.cloud.api.main import create_app
+from omnix.cloud.auth.jwt_session import issue
 
 
 @pytest.fixture(autouse=True)
@@ -25,10 +26,17 @@ def client():
     return TestClient(create_app())
 
 
-def test_start_job_inline_dry_run(client):
+@pytest.fixture
+def auth_headers():
+    token = issue("u-1", "tenant-1", "smb", "u@example.com")
+    return {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tenant-1"}
+
+
+def test_start_job_inline_dry_run(client, auth_headers):
     resp = client.post(
         "/v1/jobs",
         json={"source": {"workspace": "/tmp/example"}, "inline": True},
+        headers=auth_headers,
     )
     assert resp.status_code == 202
     body = resp.json()
@@ -48,10 +56,29 @@ def test_job_status_404_on_unknown_id(client):
     assert resp.status_code == 404
 
 
-def test_list_events_since_seq(client):
+def test_start_job_requires_session(client):
+    resp = client.post(
+        "/v1/jobs",
+        json={"source": {"workspace": "/tmp/example"}, "inline": True},
+    )
+    assert resp.status_code == 401
+
+
+def test_start_job_rejects_spoofed_tenant_header(client):
+    token = issue("u-1", "tenant-1", "smb", "u@example.com")
+    resp = client.post(
+        "/v1/jobs",
+        json={"source": {"workspace": "/tmp/example"}, "inline": True},
+        headers={"Authorization": f"Bearer {token}", "X-Tenant-Id": "tenant-2"},
+    )
+    assert resp.status_code == 403
+
+
+def test_list_events_since_seq(client, auth_headers):
     resp = client.post(
         "/v1/jobs",
         json={"source": {"workspace": "/tmp/x"}, "inline": True},
+        headers=auth_headers,
     )
     job_id = resp.json()["job_id"]
     all_events = client.get(f"/v1/jobs/{job_id}/events").json()
@@ -64,10 +91,11 @@ def test_list_events_since_seq(client):
     assert all(ev["seq"] > half["seq"] for ev in tail)
 
 
-def test_websocket_streams_replayed_events(client):
+def test_websocket_streams_replayed_events(client, auth_headers):
     resp = client.post(
         "/v1/jobs",
         json={"source": {"workspace": "/tmp/y"}, "inline": True},
+        headers=auth_headers,
     )
     job_id = resp.json()["job_id"]
 

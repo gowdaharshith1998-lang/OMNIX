@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import resource
 import signal
 import subprocess
 import sys
@@ -20,10 +19,17 @@ from omnix.verify import fuzz_fabric
 
 from .base import Layer6Result
 
+try:  # Unix-only; Windows still runs these tests without RLIMIT_AS.
+    import resource
+except ModuleNotFoundError:  # pragma: no cover - platform branch
+    resource = None  # type: ignore[assignment]
+
 MAX_ADDRESS_SPACE = 512 * 1024 * 1024  # 512 MB — same order as find_bugs #6.2
 
 
 def _set_rlimit_as() -> None:
+    if resource is None:
+        return
     try:
         resource.setrlimit(
             resource.RLIMIT_AS, (MAX_ADDRESS_SPACE, MAX_ADDRESS_SPACE)
@@ -33,7 +39,8 @@ def _set_rlimit_as() -> None:
 
 
 def _mk_sandbox() -> Path:
-    d = tempfile.mkdtemp(prefix="omnix_fuzz_", dir="/tmp")
+    tmp_root = Path("/tmp") if Path("/tmp").is_dir() else Path(tempfile.gettempdir())
+    d = tempfile.mkdtemp(prefix="omnix_fuzz_", dir=str(tmp_root))
     return Path(d)
 
 
@@ -70,7 +77,7 @@ def run_target_command_limited(
         stderr=subprocess.PIPE,
         text=True,
         env=venv,
-        preexec_fn=_set_rlimit_as,
+        preexec_fn=_set_rlimit_as if sys.platform != "win32" else None,
         start_new_session=True,
     )
     to = False

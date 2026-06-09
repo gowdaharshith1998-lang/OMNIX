@@ -13,6 +13,28 @@ from pathlib import Path
 _LOG = logging.getLogger("omnix.find_bugs.sandbox")
 
 
+def _allowed_tmp_roots() -> tuple[Path, ...]:
+    roots: list[Path] = []
+    for raw in (Path("/tmp"), Path(tempfile.gettempdir())):
+        try:
+            root = raw.resolve()
+        except OSError:
+            continue
+        if root not in roots:
+            roots.append(root)
+    return tuple(roots)
+
+
+def _is_under_allowed_tmp(path: Path) -> bool:
+    for root in _allowed_tmp_roots():
+        try:
+            path.relative_to(root)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
 def create_fix_sandbox() -> Path:
     """``tempfile.mkdtemp(prefix='omnix_fix_', dir='/tmp')`` — P26."""
     d = tempfile.mkdtemp(prefix="omnix_fix_", dir="/tmp")
@@ -31,8 +53,8 @@ def cleanup_sandbox(sandbox: Path | str) -> bool:
     except OSError as e:  # pragma: no cover
         _LOG.warning("cleanup: resolve %s: %s", sandbox, e)
         return False
-    if not str(rp).startswith("/tmp/") and str(rp) != "/tmp":  # noqa: SIM108, SIM114
-        # Refuse to remove paths outside /tmp (safety)
+    if not _is_under_allowed_tmp(rp):
+        # Refuse to remove paths outside the platform temp roots (safety).
         _LOG.warning("cleanup: refuse non-tmp path %s", rp)
         return False
     try:
@@ -129,6 +151,5 @@ def assert_write_allowed(path: Path) -> None:
         r = path.resolve()
     except OSError as e:  # pragma: no cover
         raise ValueError("bad path") from e
-    s = str(r)
-    if not s.startswith("/tmp/") and s != "/tmp":
-        raise ValueError(f"P26: write outside /tmp rejected: {s}")
+    if not _is_under_allowed_tmp(r):
+        raise ValueError(f"P26: write outside temp root rejected: {r}")

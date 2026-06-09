@@ -1,12 +1,17 @@
-# D3 — AI Transformation Synthesis (PR B)
+# D3 — AI Transformation Synthesis
 
 > Pipeline walkthrough + security model + grounded Reflexion explainer for
 > `omnix.dm.d3_transformation_synthesis`.
 
+## Status
+
+D3 is present in the current tree as the transformation-synthesis phase. Treat
+it as unreleased until it is packaged and verified in the target deployment.
+
 ## What D3 delivers
 
-For every `ColumnMapping` produced by D1 (PR A), augmented with every blocker
-`AnomalyFinding` produced by D2 (PR A), D3 emits a signed `TransformerSpec`
+For every `ColumnMapping` produced by D1, augmented with every blocker
+`AnomalyFinding` produced by D2, D3 emits a signed `TransformerSpec`
 receipt containing:
 
 * A Python `def transform(v: SourceType) -> TargetType` source string, verified
@@ -23,7 +28,7 @@ schema enforces `properties_failed: maxItems: 0`.
 ## Pipeline
 
 ```
-PR A signed manifests                D3 pipeline                    PR B signed receipts
+D1/D2 signed manifests               D3 pipeline                    D3 signed receipts
 ─────────────────────                ───────────                    ─────────────────────
 column-mapping.json   ┐                                              transformer-spec-<key>.json
                       ├── consumer.py ──┐                                 + .sig + .chainhash
@@ -58,10 +63,8 @@ edge-case-manifest.json                 │
 
 ## Grounded Reflexion (post Huang ICLR 2024)
 
-Reflexion (Shinn et al., NeurIPS 2023) showed 91% pass@1 on HumanEval with
-verbal self-critique. But Huang et al. ICLR 2024 demonstrated that pure
-*intrinsic* self-correction is fragile: the model invents plausible-sounding
-wrong critiques and degrades correct answers.
+Prior work motivates grounding model refinement in executable feedback instead
+of relying only on model self-critique.
 
 D3's escape: **the critique is never LLM-generated**. It is the Hypothesis
 *minimum failing input* — a concrete value the transformer produced wrong
@@ -75,20 +78,19 @@ EXPECTED:     datetime(1900, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 HINT: target column is TIMESTAMP WITH TIME ZONE; you must preserve tzinfo.
 ```
 
-This is the Property-Generated Solver (arXiv 2506.18315) pattern that
-measured 23.1–37.3% pass@1 over standard TDD.
+This follows the property-generated solver pattern: concrete failing examples
+drive the next synthesis attempt.
 
 **Safeguards on top of grounding:**
 
 1. **Monotone MFI history.** Each iteration appends; nothing ever drops.
-2. **BACE-style anchor** (GECCO 2026). The D2 blocker manifest is the
-   immutable "anchor" — tests are derived from blockers, not LLM-generated.
+2. **External blocker-manifest anchor.** The D2 blocker manifest is the
+   immutable anchor; tests are derived from blockers, not LLM-generated.
 
 ## Security model — three concentric defenses
 
-LLM-emitted Python is **hostile input**. The CVE-2026-40217 (LiteLLM, May
-2026) lesson: custom regex sandboxes are bypassable; AST-level rewriting is
-the floor.
+LLM-emitted Python is **hostile input**. The security model assumes regex-only
+sandboxes are bypassable; AST validation is the first enforcement layer.
 
 | Layer | Mechanism | What it blocks |
 | --- | --- | --- |
@@ -96,7 +98,7 @@ the floor.
 | 2 | RestrictedPython 8.1 `compile_restricted` | `a.b` rewritten to `_getattr_(a, "b")` which refuses dunders at runtime; safe builtins dict; no `open`/`eval`/`exec`/`__import__` |
 | 3 | Subprocess fence via `sandbox_runner.py` | `RLIMIT_CPU=5s` (SIGXCPU → ExecutionTimeout), `RLIMIT_AS=256MB` (SIGKILL → ExecutionOOM), `RLIMIT_NOFILE=8`. New process group so the parent can kill the entire subtree on timeout. |
 
-**Pen-tested escape patterns** (10+ in `test_transformer_dsl.py`):
+**Regression-tested escape patterns** (10+ in `test_transformer_dsl.py`):
 
 * `__import__('os').system(...)` — blocked at AST allowlist
 * `().__class__.__bases__[0].__subclasses__()` — dunder attribute access blocked
@@ -150,17 +152,17 @@ which failed.
 | `tier_chosen` | enum | `python` / `sql` / `datalog`. |
 | `confidence` | number | `[0.0, 1.0]`. Degraded if low_confidence mapping or partial tier coverage. |
 | `requires_operator_review` | boolean | True for `low_confidence`/`ambiguous` mappings. |
-| `bisimulation_placeholder` | object | Reserved for PR E (Z3 TRA proof). |
+| `bisimulation_placeholder` | object | Reserved for the later Z3-backed formal verification layer. |
 
 ## Honest gaps deferred
 
 * **Live Claude API not hit in CI.** Mocked by default; operator runs with
   `OMNIX_DM_RUN_INTEGRATION=1` + `ANTHROPIC_API_KEY` for the live variant.
-* **No bulk import / no CDC.** D3 emits transformer *specifications*. PR C
-  applies them.
-* **No exhaustive row diff.** PR D's `D4` will hit every row.
-* **No formal bisimulation proof.** PR E's `D5` will discharge the bounded
-  proof and fill `bisimulation_placeholder`.
+* **No bulk import / no CDC.** D3 emits transformer *specifications*. D4 and
+  D5 apply them in later phases.
+* **No exhaustive row diff.** A later row-diff gate must verify every row.
+* **No formal bisimulation verification.** The later Z3-backed layer will fill
+  `bisimulation_placeholder`.
 * **SQL tier verification skipped without a transient PG container.** When
   the verifier cannot reach a database, `TierFailure(reason="infrastructure_unavailable")`
   is recorded honestly — no false success.

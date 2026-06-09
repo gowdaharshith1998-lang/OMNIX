@@ -29,6 +29,8 @@ def evaluate(
     ``target``. ``program`` may be a parsed :class:`Program` or raw Datalog
     source. Raises :class:`DatalogTimeout` on wallclock overrun.
     """
+    if timeout_ms <= 0:
+        raise DatalogTimeout(f"fixpoint not reached within {timeout_ms}ms")
     if isinstance(program, str):
         program = parse_program(program)
     rule_strata = stratify(program)

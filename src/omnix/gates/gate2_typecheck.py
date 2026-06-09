@@ -15,6 +15,7 @@ Gap with real parser (recorded for M1 Phase 6 dispatch):
 from __future__ import annotations
 
 import re
+import shutil
 from pathlib import Path
 
 from omnix.gates.errors import GateCrashError
@@ -59,7 +60,7 @@ def check(source_code: str, classpath: list[Path] | None = None) -> GateError | 
         from omnix.semantic.java import parser as java_parser  # noqa: PLC0415
 
         jar = getattr(java_parser, "JAR_PATH", None)
-        jar_present = jar is not None and Path(jar).exists()
+        jar_present = jar is not None and Path(jar).exists() and shutil.which("java") is not None
     except ImportError:
         jar_present = False
 

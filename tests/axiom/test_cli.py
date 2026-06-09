@@ -29,7 +29,8 @@ def test_keygen_creates_pem_and_mode() -> None:
         pub = t / "public.pem"
         sec = t / "secret.pem"
         assert pub.is_file() and sec.is_file()
-        assert (os.stat(sec).st_mode & 0o777) == 0o600
+        if os.name != "nt":
+            assert (os.stat(sec).st_mode & 0o777) == 0o600
 
 
 def test_keygen_project_ed25519_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -51,6 +52,8 @@ def test_keygen_project_ed25519_idempotent(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_keygen_fails_unwritable() -> None:
+    if os.name == "nt":
+        pytest.skip("Windows ACLs do not make this POSIX unwritable-path check reliable")
     runner = CliRunner()
     r = runner.invoke(main, ["axiom", "keygen", "--out", "/nonexistent_root_omnix_x/w"])
     assert r.exit_code == 1

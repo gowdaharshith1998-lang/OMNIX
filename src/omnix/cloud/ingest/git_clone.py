@@ -19,8 +19,10 @@ to a sparse-clone probe.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -32,6 +34,72 @@ from omnix.cloud.config import get_settings
 
 class GitIngestionError(RuntimeError):
     pass
+
+
+def git_executable() -> str:
+    configured = os.environ.get("OMNIX_GIT_BINARY")
+    if configured:
+        return configured
+    bundled = shutil.which("git")
+    if bundled:
+        return bundled
+    windows_default = Path("C:/Program Files/Git/cmd/git.exe")
+    if windows_default.exists():
+        return str(windows_default)
+    return "git"
+
+
+def _rmtree(path: Path) -> None:
+    def _onexc(func, target, _exc_info):
+        os.chmod(target, stat.S_IWRITE)
+        func(target)
+
+    shutil.rmtree(path, onexc=_onexc)
+
+
+def _allowed_git_hosts() -> set[str]:
+    raw = os.environ.get("OMNIX_GIT_ALLOWED_HOSTS", "github.com")
+    return {h.strip().lower() for h in raw.split(",") if h.strip()}
+
+
+def _host_is_private_or_local(host: str) -> bool:
+    lowered = host.strip("[]").lower()
+    if lowered in {"localhost", "localhost.localdomain"} or lowered.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(lowered)
+    except ValueError:
+        return False
+    return (
+        ip.is_loopback
+        or ip.is_private
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_unspecified
+        or ip.is_reserved
+    )
+
+
+def validate_repo_url(repo_url: str) -> str:
+    """Validate clone targets before any git/network operation."""
+    parts = urlparse(repo_url)
+    if parts.scheme == "file":
+        if os.environ.get("OMNIX_GIT_ALLOW_FILE_URLS") == "1":
+            return repo_url
+        raise GitIngestionError("file:// repositories are disabled")
+    if parts.scheme != "https":
+        raise GitIngestionError("only https repository URLs are allowed")
+    if parts.username or parts.password:
+        raise GitIngestionError("credentials must be supplied via token, not the repo URL")
+    if not parts.hostname:
+        raise GitIngestionError("repository URL must include a host")
+    host = parts.hostname.lower()
+    if _host_is_private_or_local(host):
+        raise GitIngestionError("repository host resolves to a private or local target")
+    allowed = _allowed_git_hosts()
+    if allowed and host not in allowed:
+        raise GitIngestionError(f"repository host not allowed: {host}")
+    return repo_url
 
 
 @dataclass(frozen=True)
@@ -101,6 +169,7 @@ def clone_repository(
     workspace_root: str | None = None,
 ) -> GitCloneResult:
     """Shallow blobless clone with strict size preflight."""
+    repo_url = validate_repo_url(repo_url)
     settings = get_settings()
     estimate = fetch_size_estimate(repo_url, token)
     if estimate is not None and estimate > settings.git_clone_max_bytes:
@@ -112,12 +181,12 @@ def clone_repository(
     workspace_root = workspace_root or tempfile.mkdtemp(prefix="omnix-git-")
     target = Path(workspace_root) / "repo"
     if target.exists():
-        shutil.rmtree(target)
+        _rmtree(target)
     target.mkdir(parents=True)
 
     url_with_creds = _embed_credentials(repo_url, token)
     cmd = [
-        "git",
+        git_executable(),
         "clone",
         "--filter=blob:none",
         "--depth=1",
@@ -147,14 +216,14 @@ def clone_repository(
         raise GitIngestionError("git clone timed out after 30 minutes") from exc
 
     sha = subprocess.check_output(
-        ["git", "-C", str(target), "rev-parse", "HEAD"], text=True
+        [git_executable(), "-C", str(target), "rev-parse", "HEAD"], text=True
     ).strip()
 
     size = sum(
         p.stat().st_size for p in target.rglob("*") if p.is_file()
     )
     if size > settings.git_clone_max_bytes:
-        shutil.rmtree(target)
+        _rmtree(target)
         raise GitIngestionError(
             f"post-clone size {size} bytes exceeds {settings.git_clone_max_bytes}"
         )

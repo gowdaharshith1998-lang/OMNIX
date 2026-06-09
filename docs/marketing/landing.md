@@ -7,8 +7,8 @@
 
 **The behavioral replicator for legacy modernization.**
 
-Java 6 → Java 21. COBOL → Java/Go/Rust. With cryptographically signed proof
-of equivalence. No translation. No black-box rewrites.
+Java 6 → Java 21. COBOL → Java/Go/Rust. With cryptographically signed
+evidence for behavioral review. No translation. No black-box rewrites.
 
 [ Try it now → ]  [ Install GitHub App → ]
 
@@ -19,14 +19,14 @@ of equivalence. No translation. No black-box rewrites.
 | | OMNIX | Translation tools | Translation services |
 |---|---|---|---|
 | Approach | Observes legacy, generates from-scratch in target | AST-walking transpiler | LLM rewrite + manual review |
-| Equivalence proof | ML-DSA-65 signed receipt per unit | None | None |
-| Post-quantum compliant | ✓ FIPS 204 (NIST PQC 2030 / CNSA 2.0 2035) | – | – |
-| EU AI Act Article 12 logging | ✓ Automatic | – | – |
-| DORA Article 6 evidence | ✓ Signed, 5-year retention via Rekor | – | – |
+| Behavioral evidence | ML-DSA-65 signed receipt per unit | Usually absent | Usually manual |
+| PQC-ready signing primitive | ML-DSA-65 / FIPS 204 | Varies | Varies |
+| EU AI Act Article 12 support | Structured logs and receipt trail | Varies | Manual |
+| DORA evidence support | Signed artifacts and optional retention via Rekor | Varies | Manual |
 | Behavior verifiers | Hypothesis + Scientist + Diffy + Daikon | – | Manual |
 | Public verifier page | ✓ WASM, client-side | – | – |
 
-## The cryptographic guarantee
+## The signed evidence trail
 
 Every replicated unit produces a signed receipt:
 
@@ -68,5 +68,7 @@ investment.
 - **NIST PQC migration** — 2030
 - **CNSA 2.0 quantum-resistant crypto** — 2035
 
-ML-DSA-65 satisfies all four. OMNIX is the only modernization platform that
-ships compliant-by-default for the 2030–2035 horizon.
+ML-DSA-65 is the signing primitive OMNIX uses for receipt integrity. It can
+support PQC migration planning and audit evidence programs, but compliance
+depends on the buyer's deployment, controls, retention policy, and legal
+review.

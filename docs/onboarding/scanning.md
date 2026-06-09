@@ -8,14 +8,23 @@
 This guide covers the four ways your team can point OMNIX at a codebase and
 what to expect at each step.
 
+## Availability labels
+
+| Label | Meaning |
+|---|---|
+| Local available | Works from the local CLI or localhost Studio in this repository. |
+| Cloud deployment required | Requires an OMNIX cloud/API deployment and tenant provisioning. |
+| App/deployment surface | Code exists for this path, but marketplace publication and tenant setup are deployment-specific. |
+| Enterprise/operator path | Requires customer infrastructure, operator setup, and environment-specific validation. |
+
 ## TL;DR — which path is for me?
 
-| If you are... | Use path | Why |
-|---|---|---|
-| Evaluating OMNIX without a contract | A (tus upload) | Air-gapped, no repo access, no DNS changes. Tarball in, receipts out. |
-| Running a pilot on a private GitHub/GitLab repo | B (git clone via PAT) | Read-only PAT, OMNIX clones with `--filter=blob:none --depth=1`. No write access to your repo, ever. |
-| Adopting OMNIX across multiple repos | C (GitHub App) | Install once, scan-on-push or `/omnix replicate` slash command. Each scan opens a PR with the rebuild + signed receipts. |
-| Regulated industry / mainframe / air-gapped | D (Helm install + live observation) | Self-hosted, your perimeter, eBPF + CDC observation, signed-receipt-gated traffic shift via the strangler-fig facade. |
+| If you are... | Use path | Availability | Why |
+|---|---|---|---|
+| Evaluating OMNIX without a contract | A (tus upload) | Cloud deployment required | Tarball in, receipts out when a tenant API is provisioned. |
+| Running a pilot on a private GitHub/GitLab repo | B (git clone via PAT) | Cloud deployment required | Read-only clone flow; no repo write access. |
+| Adopting OMNIX across multiple repos | C (GitHub App) | App/deployment surface | Install-once workflow when the GitHub App and cloud backend are deployed. |
+| Regulated industry / mainframe / air-gapped | D (Helm install + live observation) | Enterprise/operator path | Self-hosted observation and signed evidence bundle, validated per environment. |
 
 ## Path A — Tarball upload (tus 1.0.0)
 
@@ -134,7 +143,7 @@ No access to issues, no access to projects, no access to other repos in your org
 
 ## Path D — Helm install with live observation
 
-The full Shape B v2 deployment. For regulated industries, mainframe shops, and
+The full Helm deployment with live observation. For regulated industries, mainframe shops, and
 teams that need behavioral verification against real production traffic before
 cutting over.
 
@@ -201,9 +210,10 @@ Each receipt covers:
 - `signature` — ML-DSA-65 (FIPS 204) signature over a canonical JSON encoding
 - `pubkey_fingerprint` — cosign-compatible
 
-For DORA / EU AI Act Article 12 / CMMC 2.0 / CNSA 2.0 customers, receipts are
-additionally uploaded to your private Rekor v2 instance and an inclusion proof
-is embedded in the receipt bundle.
+For customers mapping evidence to DORA, EU AI Act Article 12, CMMC, or CNSA
+programs, receipts can be uploaded to a private transparency log and included
+in the audit bundle. That supports traceability review; it is not a
+certification or blanket compliance claim.
 
 ## What OMNIX is not
 

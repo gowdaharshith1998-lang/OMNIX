@@ -19,6 +19,7 @@ from fastapi import APIRouter, Body, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from omnix.cloud import events
+from omnix.cloud.auth.tenancy import require_session_tenant
 
 router = APIRouter()
 
@@ -53,7 +54,7 @@ class StartJobResponse(BaseModel):
     receipts: list[dict] | None = None
 
 
-def _resolve_tus_source(source: dict[str, Any]) -> dict[str, Any]:
+def _resolve_tus_source(source: dict[str, Any], tenant_id: str) -> dict[str, Any]:
     """If source carries an upload_id, resolve it to a storage_key + sha256.
 
     Returns a new dict with storage_key / sha256 populated. Raises HTTP
@@ -71,6 +72,8 @@ def _resolve_tus_source(source: dict[str, Any]) -> dict[str, Any]:
     desc = get_upload_metadata(upload_id)
     if desc is None:
         raise HTTPException(status_code=404, detail=f"upload not found: {upload_id}")
+    if desc.tenant_id != tenant_id:
+        raise HTTPException(status_code=403, detail="upload belongs to another tenant")
     if not desc.committed:
         raise HTTPException(
             status_code=409,
@@ -111,7 +114,8 @@ async def start_job(
     x_tenant_id: str | None = Header(None, alias="X-Tenant-Id"),
 ):
     job_id = uuid.uuid4().hex
-    source = _resolve_tus_source(payload.source)
+    tenant_id = require_session_tenant(x_tenant_id)
+    source = _resolve_tus_source(payload.source, tenant_id)
     mode = _validated_mode(payload.mode, payload.inline)
 
     events.publish(job_id, "ingest", "job created",
@@ -125,7 +129,7 @@ async def start_job(
             job_id=job_id,
             workspace=source.get("workspace"),
             artifact_storage_key=source.get("storage_key"),
-            tenant_id=x_tenant_id,
+            tenant_id=tenant_id,
             source_repo=source.get("repo"),
             source_sha=source.get("sha"),
             source_sha256=source.get("sha256"),
@@ -151,7 +155,7 @@ async def start_job(
             job_id=job_id,
             workspace=source.get("workspace"),
             artifact_storage_key=source.get("storage_key"),
-            tenant_id=x_tenant_id,
+            tenant_id=tenant_id,
             source_repo=source.get("repo"),
             source_sha=source.get("sha"),
             source_sha256=source.get("sha256"),

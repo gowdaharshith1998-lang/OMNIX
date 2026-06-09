@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import textwrap
+import sys
 from pathlib import Path
 
 import pytest
 
 pytest.importorskip("hypothesis", reason="hypothesis required")
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="resource memory caps are unavailable on Windows",
+)
 
 from omnix.find_bugs import runner
 

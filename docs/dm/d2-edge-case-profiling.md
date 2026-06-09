@@ -1,5 +1,11 @@
 # D2 — AI Edge-Case Profiling (Implementation Notes)
 
+## Status
+
+D2 is available as a DM library surface. It consumes the D1 mapping manifest,
+plans explicit probes, and emits a signed `edge-case-manifest.json` chained to
+D1.
+
 ## EARS contract
 
 > **When** D1 has emitted a valid `column-mapping.json`, the system **shall**
@@ -29,8 +35,8 @@ EFE(a) = - epistemic_value(a) - pragmatic_value(a)
 
 The implementation is deterministic given a seed and computes EFE
 directly per (mapping × probe-category) pair — a full pymdp `Agent` is
-overkill for the 3-state space. Every mapping is either probed or
-explicitly excluded with reason (Codex honesty invariant).
+unnecessary for this three-state space. Every mapping is either probed or
+explicitly excluded with recorded rationale.
 
 ## Six probers
 
@@ -50,8 +56,8 @@ Each prober:
   go through `_safe_literal()` which rejects single-quote/newline/null.
 * Has a 10-second wall-clock + statement-timeout budget. Timeouts and
   errors are surfaced as `status='timeout'/'error'` — never swallowed.
-* Has a non-empty `remediation_hint` on every finding so D3 (PR B)
-  knows what to do.
+* Has a non-empty `remediation_hint` on every finding so the D3 transformation
+  synthesis phase knows what to do.
 
 ## Manifest emit
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 import secrets
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
@@ -51,15 +51,20 @@ class CallbackResponse(BaseModel):
 async def callback(
     code: str = Query(...),
     state: str | None = Query(None),
+    omnix_state: str | None = Cookie(None),
     tenant_id_hint: str | None = Header(None, alias="X-Tenant-Id-Hint"),
 ):
+    if not state or not omnix_state or not secrets.compare_digest(state, omnix_state):
+        raise HTTPException(status_code=400, detail="invalid auth state")
     provider = get_provider()
     try:
         profile = provider.exchange_code(code)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=401, detail=f"code exchange failed: {exc}") from exc
 
-    tenant_id = tenant_id_hint or profile.workos_org_id or "default"
+    if tenant_id_hint and profile.workos_org_id and tenant_id_hint != profile.workos_org_id:
+        raise HTTPException(status_code=403, detail="tenant hint does not match identity")
+    tenant_id = profile.workos_org_id or "default"
     tier = "smb"
     if profile.workos_org_id and profile.workos_org_id.startswith("org-bank-"):
         tier = "banking"

@@ -1,8 +1,10 @@
-# OMNIX-DM PR A — Operator Runbook
+# OMNIX-DM D1-D2 Operator Runbook
 
-> PR A is library-only — no CLI verbs are wired in this commit. The runbook
-> below is the **Python invocation pattern** an operator follows from a
-> driver script or notebook. CLI wrappers land in PR B.
+> Status: this runbook documents operator Python invocation patterns for D1-D2.
+> It is not a single supported `omnix dm migrate` CLI flow. D3-D5 have separate
+> package-level docs and should be labeled by release status before customer use.
+> Signed manifests provide receipt integrity, traceability, and review evidence;
+> they are not a mathematical proof of correctness.
 
 ## D1 — Schema understanding
 
@@ -106,7 +108,10 @@ jq '.findings[] | select(.severity == "blocker")' \
   .omnix/receipts/dm/pra-d1-d2/acme-corp-2026-05-26/edge-case-manifest.json
 ```
 
-## Verifying a receipt
+## Verifying receipt integrity
+
+This verifies canonical bytes and signature integrity. It does not by itself
+certify that a migration is correct or compliant.
 
 ```python
 import json

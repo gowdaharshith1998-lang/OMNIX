@@ -12,6 +12,7 @@ from omnix.cloud.cutover.facade_controller import (
     FacadeController,
     real_signer,
 )
+from omnix.cloud.auth.jwt_session import issue
 
 
 @pytest.fixture
@@ -111,7 +112,8 @@ def test_target_percentage_validation(controller):
 
 def test_cutover_api_round_trip():
     client = TestClient(create_app())
-    headers = {"X-Tenant-Id": "tenant-A"}
+    token = issue("u-1", "tenant-A", "smb", "u@example.com")
+    headers = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tenant-A"}
     body = {
         "target_percentage": 10,
         "verifier_summary": {
@@ -132,3 +134,12 @@ def test_cutover_api_round_trip():
     assert rb.json()["status"] == "rolled_back"
     state2 = client.get("/v1/cutover/payment-svc", headers=headers).json()
     assert state2["percentage"] == 0
+
+
+def test_cutover_api_rejects_spoofed_tenant_header():
+    client = TestClient(create_app())
+    token = issue("u-1", "tenant-A", "smb", "u@example.com")
+    headers = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tenant-B"}
+    body = {"target_percentage": 10, "verifier_summary": {}}
+    resp = client.post("/v1/cutover/payment-svc/shift", json=body, headers=headers)
+    assert resp.status_code == 403

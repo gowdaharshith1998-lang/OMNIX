@@ -65,6 +65,7 @@ from omnix.receipts.finding_receipt import compute_project_id
 from omnix.studio.bugs_scan import run_scan_for_workspace
 from omnix.studio.parser_bridge import ParserBridge, broadcast_to_workspace
 from omnix.studio.recent import add_recent, list_recent
+from omnix.studio.security import safe_workspace_file_path
 from omnix.studio.watcher import ProjectWatcher, is_studio_ignored
 from omnix.studio.workspace import (
     MANAGER,
@@ -500,13 +501,13 @@ def api_grammar_verify_receipt(
 ) -> Any:
     _require_localhost_starlette(request)
     raw = body.receipt_path.strip()
-    if not raw.startswith("/"):
+    receipt = Path(raw).expanduser()
+    if not receipt.is_absolute():
         raise HTTPException(
             status_code=400,
             detail="receipt_path must be an absolute path under ~/.omnix/receipts/ "
             "or <project>/.omnix/receipts/",
         )
-    receipt = Path(raw)
     try:
         resolved = receipt.resolve()
     except OSError as e:
@@ -853,11 +854,13 @@ def _iter_receipts(
 
 @app.get("/api/workspace/{workspace_id}/receipts")
 def api_workspace_receipts(
+    request: Request,
     workspace_id: str,
     since: str | None = None,
     until: str | None = None,
     limit: int = 100,
 ) -> dict[str, list[dict[str, Any]]]:
+    _require_localhost_starlette(request)
     w = MANAGER.get(workspace_id)
     if w is None:
         raise HTTPException(404, "unknown workspace_id")
@@ -873,9 +876,11 @@ def api_workspace_receipts(
 
 @app.get("/api/workspace/{workspace_id}/receipts/{receipt_id}")
 def api_workspace_receipt_by_id(
+    request: Request,
     workspace_id: str,
     receipt_id: str,
 ) -> dict[str, Any]:
+    _require_localhost_starlette(request)
     w = MANAGER.get(workspace_id)
     if w is None:
         raise HTTPException(404, "unknown workspace_id")
@@ -974,7 +979,8 @@ async def _run_bootstrap(websocket: WebSocket, w: Workspace) -> None:
 
 
 @app.post("/api/workspace/open")
-async def api_workspace_open(body: OpenBody) -> dict[str, Any]:
+async def api_workspace_open(request: Request, body: OpenBody) -> dict[str, Any]:
+    _require_localhost_starlette(request)
     try:
         w, stats0 = open_workspace(body.path)
     except ValueError as e:
@@ -996,7 +1002,8 @@ async def api_workspace_open(body: OpenBody) -> dict[str, Any]:
 
 
 @app.post("/api/workspace/close")
-async def api_workspace_close(body: CloseBody) -> dict[str, bool]:  # noqa: D103
+async def api_workspace_close(request: Request, body: CloseBody) -> dict[str, bool]:  # noqa: D103
+    _require_localhost_starlette(request)
     w = MANAGER.get(body.workspace_id)
     if w is None:
         raise HTTPException(404, "unknown workspace_id")
@@ -1139,10 +1146,12 @@ def _build_file_tree(root: Path, *, max_depth: int = 6) -> dict[str, Any]:
 
 @app.get("/api/workspace/{workspace_id}/files")
 def api_list_files(  # noqa: D103
+    request: Request,
     workspace_id: str,
     prefix: str = "",
     limit: int = 100,
 ) -> dict[str, list[dict[str, Any]]]:  # noqa: E501
+    _require_localhost_starlette(request)
     w = MANAGER.get(workspace_id)  # noqa: E501
     if w is None:
         raise HTTPException(404, "unknown workspace_id")
@@ -1157,7 +1166,8 @@ def api_list_files(  # noqa: D103
 
 
 @app.get("/api/workspace/{workspace_id}/files/tree")
-def api_files_tree(workspace_id: str) -> dict[str, dict[str, Any]]:
+def api_files_tree(request: Request, workspace_id: str) -> dict[str, dict[str, Any]]:
+    _require_localhost_starlette(request)
     w = MANAGER.get(workspace_id)
     if w is None:
         raise HTTPException(404, "unknown workspace_id")
@@ -1166,14 +1176,15 @@ def api_files_tree(workspace_id: str) -> dict[str, dict[str, Any]]:
 
 @app.post("/api/workspace/{workspace_id}/file")
 async def api_create_file(  # noqa: D103
+    request: Request,
     workspace_id: str,
     body: FileWriteBody,
 ) -> dict[str, Any]:  # noqa: E501
+    _require_localhost_starlette(request)
     w = MANAGER.get(workspace_id)  # noqa: E501
     if w is None:
         raise HTTPException(404, "unknown workspace_id")
-    rel = body.path.replace("\\", "/").lstrip("/")
-    p = w.root / rel
+    p, rel = safe_workspace_file_path(w.root, body.path)
     p.parent.mkdir(parents=True, exist_ok=True)  # noqa: E501
     p.write_text(body.content, encoding="utf-8", newline="")  # noqa: E501, WPS
     return {"created": True, "path": rel}  # noqa: E501
@@ -1181,15 +1192,17 @@ async def api_create_file(  # noqa: D103
 
 @app.get("/api/workspace/{workspace_id}/file")
 def api_get_file(  # noqa: D103
+    request: Request,
     workspace_id: str,
     path: str = Query(""),
 ) -> dict[str, Any]:  # noqa: E501
+    _require_localhost_starlette(request)
     w = MANAGER.get(workspace_id)  # noqa: E501
     if w is None:
         raise HTTPException(404, "unknown workspace_id")
     if not path:
         raise HTTPException(400, "path required")
-    p = w.root / path
+    p, rel = safe_workspace_file_path(w.root, path)
     if not p.is_file():
         raise HTTPException(404, "file not found")
     raw = p.read_text(encoding="utf-8", errors="replace")
@@ -1199,7 +1212,7 @@ def api_get_file(  # noqa: D103
     d = detect_for_path(p)
     lang = (d.grammar_name or d.inferred_lang or "text") or "text"  # noqa: E501
     return {  # noqa: E501
-        "path": path,
+        "path": rel,
         "content": raw,
         "last_modified": mtime,
         "language": str(lang),  # noqa: E501
@@ -1214,14 +1227,15 @@ def _mtime_mismatch(
 
 @app.put("/api/workspace/{workspace_id}/file")
 async def api_put_file(  # noqa: D103
+    request: Request,
     workspace_id: str,
     body: FilePutBody,
 ) -> dict[str, Any]:
+    _require_localhost_starlette(request)
     w = MANAGER.get(workspace_id)  # noqa: E501
     if w is None:
         raise HTTPException(404, "unknown workspace_id")
-    rel = body.path.replace("\\", "/").lstrip("/")
-    p = w.root / rel
+    p, rel = safe_workspace_file_path(w.root, body.path)
     if not p.is_file():
         raise HTTPException(404, "file not found")
     try:  # noqa: E501, SIM, E501

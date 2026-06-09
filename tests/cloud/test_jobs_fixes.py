@@ -26,15 +26,26 @@ from fastapi.testclient import TestClient
 
 def _build_app() -> FastAPI:
     from omnix.cloud.api import jobs as jobs_router
+    from omnix.cloud.auth.tenancy import TenancyMiddleware
+
     app = FastAPI()
+    app.add_middleware(TenancyMiddleware)
     app.include_router(jobs_router.router, prefix="/v1/jobs")
     return app
+
+
+def _auth_headers(tenant_id: str = "acme") -> dict[str, str]:
+    from omnix.cloud.auth.jwt_session import issue
+
+    token = issue("u-test", tenant_id, "smb", "test@example.com")
+    return {"Authorization": f"Bearer {token}", "X-Tenant-Id": tenant_id}
 
 
 def _build_tus_app() -> tuple[FastAPI, Path]:
     """App with both /v1/upload and /v1/jobs routers + isolated tus dir."""
     from omnix.cloud import config
     from omnix.cloud.api import jobs as jobs_router
+    from omnix.cloud.auth.tenancy import TenancyMiddleware
     from omnix.cloud.ingest import tus_handler
 
     # Override the tus data dir to a fresh tmp so tests don't leak state.
@@ -45,6 +56,7 @@ def _build_tus_app() -> tuple[FastAPI, Path]:
     config.get_settings.cache_clear()  # type: ignore[attr-defined]
 
     app = FastAPI()
+    app.add_middleware(TenancyMiddleware)
     app.include_router(tus_handler.router, prefix="/v1/upload")
     app.include_router(jobs_router.router, prefix="/v1/jobs")
     return app, tmp
@@ -74,7 +86,7 @@ def test_resolve_tus_source_404_for_missing_upload_id():
     from omnix.cloud.api.jobs import _resolve_tus_source
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as exc:
-        _resolve_tus_source({"type": "tus", "upload_id": "does-not-exist"})
+        _resolve_tus_source({"type": "tus", "upload_id": "does-not-exist"}, "acme")
     assert exc.value.status_code == 404
 
 
@@ -82,7 +94,7 @@ def test_resolve_tus_source_400_when_upload_id_missing():
     from omnix.cloud.api.jobs import _resolve_tus_source
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as exc:
-        _resolve_tus_source({"type": "tus"})
+        _resolve_tus_source({"type": "tus"}, "acme")
     assert exc.value.status_code == 400
 
 
@@ -96,7 +108,7 @@ def test_resolve_tus_source_409_for_incomplete_upload(tmp_path, monkeypatch):
     from omnix.cloud.api.jobs import _resolve_tus_source
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as exc:
-        _resolve_tus_source({"type": "tus", "upload_id": "u-incomplete"})
+        _resolve_tus_source({"type": "tus", "upload_id": "u-incomplete"}, "acme")
     assert exc.value.status_code == 409
     assert "50/100" in exc.value.detail
 
@@ -110,7 +122,7 @@ def test_resolve_tus_source_returns_storage_key_for_committed(tmp_path, monkeypa
                         storage_key="uploads/acme/u-done/bundle.tar",
                         sha256="abc123")
     from omnix.cloud.api.jobs import _resolve_tus_source
-    out = _resolve_tus_source({"type": "tus", "upload_id": "u-done"})
+    out = _resolve_tus_source({"type": "tus", "upload_id": "u-done"}, "acme")
     assert out["storage_key"] == "uploads/acme/u-done/bundle.tar"
     assert out["sha256"] == "abc123"
 
@@ -118,7 +130,7 @@ def test_resolve_tus_source_returns_storage_key_for_committed(tmp_path, monkeypa
 def test_resolve_tus_source_passes_through_non_tus_source():
     from omnix.cloud.api.jobs import _resolve_tus_source
     src = {"type": "git", "repo": "https://example.com/x.git", "ref": "main"}
-    assert _resolve_tus_source(src) == src
+    assert _resolve_tus_source(src, "acme") == src
 
 
 def test_resolve_tus_source_passes_through_direct_storage_key(tmp_path, monkeypatch):
@@ -129,7 +141,7 @@ def test_resolve_tus_source_passes_through_direct_storage_key(tmp_path, monkeypa
     # Even when payload carries a storage_key directly (no tus indirection),
     # the resolver returns it unchanged. Useful for tests + admin tooling.
     src = {"workspace": "/tmp/x", "type": "direct", "storage_key": "k"}
-    assert _resolve_tus_source(src) == src  # type != tus, returned as-is
+    assert _resolve_tus_source(src, "acme") == src  # type != tus, returned as-is
 
 
 # -------------------- Gap #14: inline + production → signed receipts ---------
@@ -162,7 +174,11 @@ def test_validated_mode_unknown_value_raises_400():
 def test_start_job_inline_legacy_no_receipts():
     """Backward compat: inline=true without mode → dry-run, no receipts."""
     client = TestClient(_build_app())
-    r = client.post("/v1/jobs", json={"source": {"workspace": "/tmp/x"}, "inline": True})
+    r = client.post(
+        "/v1/jobs",
+        json={"source": {"workspace": "/tmp/x"}, "inline": True},
+        headers=_auth_headers(),
+    )
     assert r.status_code == 202
     body = r.json()
     assert body["state"] == "awaiting_cutover"
@@ -176,7 +192,7 @@ def test_start_job_inline_mode_production_emits_signed_receipt():
         "source": {"workspace": "/tmp/x"},
         "inline": True,
         "mode": "production",
-    })
+    }, headers=_auth_headers())
     assert r.status_code == 202
     body = r.json()
     assert body["state"] == "awaiting_cutover"
@@ -201,7 +217,7 @@ def test_inline_production_receipt_verifies_with_returned_public_key():
         "source": {"workspace": "/tmp/x"},
         "inline": True,
         "mode": "production",
-    })
+    }, headers=_auth_headers())
     assert r.status_code == 202
     receipt = r.json()["receipts"][0]
     pk = base64.b64decode(receipt["public_key_b64"])
@@ -218,7 +234,7 @@ def test_start_job_inline_mode_dry_run_explicit_no_receipts():
         "source": {"workspace": "/tmp/x"},
         "inline": True,
         "mode": "dry-run",
-    })
+    }, headers=_auth_headers())
     assert r.status_code == 202
     body = r.json()
     assert body.get("receipts") is None or body["receipts"] == []
@@ -236,7 +252,7 @@ def test_inline_keypair_is_stable_across_requests():
             "source": {"workspace": "/tmp/x"},
             "inline": True,
             "mode": "production",
-        })
+        }, headers=_auth_headers())
         assert r.status_code == 202
         pks.append(r.json()["receipts"][0]["public_key_b64"])
     assert len(set(pks)) == 1, f"keypair should be stable, got {len(set(pks))} distinct keys"
@@ -248,7 +264,7 @@ def test_start_job_unknown_mode_returns_400():
         "source": {"workspace": "/tmp/x"},
         "inline": True,
         "mode": "turbo",
-    })
+    }, headers=_auth_headers())
     assert r.status_code == 400
 
 
@@ -274,7 +290,7 @@ def test_start_job_async_broker_timeout_returns_503():
             r = client.post("/v1/jobs", json={
                 "source": {"workspace": "/tmp/x"},
                 "inline": False,
-            })
+            }, headers=_auth_headers())
             assert r.status_code == 503, r.json()
             assert "timed out" in r.json()["detail"].lower()
     finally:
@@ -291,7 +307,7 @@ def test_start_job_async_broker_connection_error_returns_503():
         r = client.post("/v1/jobs", json={
             "source": {"workspace": "/tmp/x"},
             "inline": False,
-        })
+        }, headers=_auth_headers())
         assert r.status_code == 503
         assert "connection" in r.json()["detail"].lower() or "refused" in r.json()["detail"].lower()
 
@@ -310,7 +326,7 @@ def test_start_job_async_other_dispatch_failure_stays_queued():
         r = client.post("/v1/jobs", json={
             "source": {"workspace": "/tmp/x"},
             "inline": False,
-        })
+        }, headers=_auth_headers())
         assert r.status_code == 202
         assert r.json()["state"] == "queued"
 
@@ -331,7 +347,7 @@ def test_post_jobs_with_tus_upload_id_resolves_storage_key(tmp_path, monkeypatch
         "source": {"type": "tus", "upload_id": "u-int", "workspace": "/tmp/x"},
         "inline": True,
         "mode": "production",
-    })
+    }, headers=_auth_headers())
     assert r.status_code == 202, r.text
     body = r.json()
     # The receipt embeds the source, so we can confirm storage_key was
@@ -352,5 +368,5 @@ def test_post_jobs_with_tus_incomplete_returns_409(tmp_path, monkeypatch):
     r = client.post("/v1/jobs", json={
         "source": {"type": "tus", "upload_id": "u-half"},
         "inline": True,
-    })
+    }, headers=_auth_headers())
     assert r.status_code == 409

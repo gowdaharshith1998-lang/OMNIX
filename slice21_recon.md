@@ -1,4 +1,4 @@
-## Slice-21 Recon Manifest
+# Slice-21 Recon Manifest
 
 ### Outer tab strip
 - Component: `src/studio/frontend/src/components/Workspace.tsx`

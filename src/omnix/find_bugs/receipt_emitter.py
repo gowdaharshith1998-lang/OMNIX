@@ -16,7 +16,12 @@ from typing import Any
 from omnix.receipts import keystore as mldsa_keystore
 from omnix.receipts import sign as mldsa_sign
 from omnix.receipts import verify as mldsa_verify
-from omnix.receipts.finding_keys import project_privkey_path, sign_finding, verify_finding
+from omnix.receipts.finding_keys import (
+    omnix_home,
+    project_privkey_path,
+    sign_finding,
+    verify_finding,
+)
 from omnix.receipts.finding_receipt import (
     FindingReceipt,
     compute_finding_id,
@@ -204,7 +209,7 @@ def finding_dict_to_receipt(
 
 
 def _global_mldsa_secret_path() -> Path:
-    return Path.home() / ".omnix" / "keys" / "secret.pem"
+    return omnix_home() / ".omnix" / "keys" / "secret.pem"
 
 
 def emit_scan_receipts(
@@ -231,7 +236,7 @@ def emit_scan_receipts(
 
     omnix_version = str(ov)
 
-    receipts_base = receipts_home if receipts_home is not None else Path.home()
+    receipts_base = receipts_home if receipts_home is not None else omnix_home()
     sid = scan_id_now()
     scan_dir = receipts_base / ".omnix" / "receipts" / "findings" / project_id / sid
     scan_dir.mkdir(parents=True, exist_ok=True)
