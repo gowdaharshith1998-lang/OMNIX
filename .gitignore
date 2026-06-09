@@ -70,6 +70,7 @@ GRAPH_REPORT.md
 # AI agent tooling (local, per-developer)
 .scratch/
 .claude/
+.cursor/
 .cursor/mcp.json
 src/axiom/omnix.db-shm
 src/axiom/omnix.db-wal

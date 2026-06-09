@@ -2,12 +2,26 @@
 
 A graph-native pipeline for migrating legacy systems to modern stacks. OMNIX parses your codebase into a typed program graph, rewrites it one structurally-bounded node at a time with an LLM as one of its passes, runs each rebuild through a six-gate verification pipeline, and emits a cryptographically signed receipt covering every transformation. No black-box rewrites, no opaque diffs, nothing you have to take on faith.
 
+Built by [Harshith Gowda](https://github.com/gowdaharshith1998-lang) as a source-visible engineering portfolio and commercial product prototype. The repo is public so reviewers can inspect the architecture, tests, CI, signed-receipt system, parser stack, service surfaces, and deployment work directly.
+
 ```bash
 pip install -r requirements.txt
 python omnix.py analyze /path/to/your/project
 ```
 
 That's the full bootstrap. It parses the codebase, builds the graph, and starts a local React studio so you can poke at the result before you let anything else touch your code.
+
+---
+
+## For hiring reviewers
+
+I built OMNIX to show the kind of systems work I can own end to end: graph-native code analysis, Tree-sitter ingestion, verification gates, property-based testing, source-available product packaging, cloud/API surfaces, GitHub automation, and post-quantum signed audit receipts.
+
+The shortest portfolio framing is:
+
+> I built OMNIX: a graph-native legacy-modernization engine with six-gate verification and post-quantum signed receipts for every finding or transformation.
+
+A 60-second recording script is available in [`docs/demo/60-second-demo.md`](docs/demo/60-second-demo.md). It shows analyze, bug scan with receipt emission, successful receipt verification, and a tamper-fail moment.
 
 ---
 
@@ -59,7 +73,7 @@ Each accepted node emits a signed receipt covering:
 - LLM model + prompt template versions
 - a cryptographic signature any third party can verify offline
 
-We say **verified equivalence with auditable evidence**. We do not say "provable" or "100% accurate." The gates produce strong evidence; receipts produce a tamper-evident record; the shadow bridge (M4) surfaces divergence on real production traffic. None of that is mathematical proof, and we will not market it as one.
+The claim is **verified equivalence with auditable evidence**. Not "provable," not "100% accurate." The gates produce strong evidence; receipts produce a tamper-evident record; the shadow bridge (M4) surfaces divergence on real production traffic. None of that is mathematical proof, and this repo does not market it as one.
 
 ---
 
@@ -72,7 +86,7 @@ If you are running an engineering org with:
 - a quote from Accenture / IBM / Deloitte / Capgemini that's somewhere between $20M and $200M, and an industry failure rate near 60%
 - one internal team that tried once and bounced
 
-OMNIX is built for the VP Eng who has to ship one production module without breaking anything, then point at the receipts when an auditor asks how they know it's equivalent. Your team can drive the pipeline themselves, or we can drive it for you — see below.
+OMNIX is built for the VP Eng who has to ship one production module without breaking anything, then point at the receipts when an auditor asks how they know it's equivalent. A buyer's team can drive the local pipeline directly, or a private pilot can be scoped around a first module.
 
 ---
 
@@ -105,7 +119,7 @@ foundation, and runbook.
 
 ## Ways to run it
 
-OMNIX is both a tool and a team.
+OMNIX can be evaluated locally as a tool, or scoped as a private pilot around a real migration target.
 
 **Run the local evaluation path yourself.** Install the CLI, point it at your
 codebase, and inspect the graph, findings, receipts, and local Studio.
@@ -117,7 +131,7 @@ App, Helm/airgap deployment, and shadow-bridge cutover are private-pilot or
 enterprise surfaces. They require project scoping, tenant configuration, and
 deployment decisions outside this repository.
 
-We charge per engagement, scoped by codebase size, target language, and how deep into the pipeline you want us. Most VP Engs take the service tier for the first migrated module, then move the rest in-house once their team has reps. Some keep us on the shadow-bridge side through cutover.
+Private pilots are scoped by codebase size, target language, and how deep into the pipeline the buyer wants to go. The typical path is one migrated module first, then an internal handoff once the buyer's team has reps. Some deployments keep the shadow-bridge side active through cutover.
 
 [Open an issue](https://github.com/gowdaharshith1998-lang/OMNIX/issues) if you want a scoping call.
 
@@ -178,7 +192,7 @@ equivalence runner.
 
 ## Roadmap
 
-The team is small and the work is honest. Milestones, not dates.
+The project is intentionally scoped around milestones, not dates.
 
 | Milestone | Scope |
 |---|---|
@@ -236,10 +250,10 @@ The studio opens on `http://127.0.0.1:7777`. Click around. Nothing is written ba
 
 Then run `omnix find-bugs <your-repo> --emit-receipts` and look at the receipts under `<your-repo>/.omnix/receipts/`. That is the shape of every artifact OMNIX will produce for you, scaled up.
 
-If you want to talk to whoever is building this: [@gowdaharshith1998-lang](https://github.com/gowdaharshith1998-lang) on GitHub. Issues are open.
+Built by [@gowdaharshith1998-lang](https://github.com/gowdaharshith1998-lang). Issues are open for evaluation questions, demo requests, and licensing inquiries.
 
 ---
 
 ## License
 
-All rights reserved. Source is visible for evaluation and review; commercial use requires a license. [Open an issue](https://github.com/gowdaharshith1998-lang/OMNIX/issues) for licensing inquiries.
+OMNIX is source-available, not open source. Source is visible for evaluation and review; commercial use, redistribution, hosted use, or derivative product use requires a license. See [`LICENSE.md`](LICENSE.md) and [open an issue](https://github.com/gowdaharshith1998-lang/OMNIX/issues) for licensing inquiries.

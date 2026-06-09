@@ -6,6 +6,8 @@ notes for OMNIX.
 ## Start here
 
 - `dm/` - OMNIX-DM data migration pipeline, runbooks, and academic foundation.
+- `demo/60-second-demo.md` - screen-recording script and outreach copy for the
+  public portfolio demo.
 - `deploy/airgap.md` - air-gapped Kubernetes deployment guide.
 - `THREAT_MODEL.md` - current security model notes for subprocess verification.
 - `onboarding/scanning.md` - scanning workflow onboarding.

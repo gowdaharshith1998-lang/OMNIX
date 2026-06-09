@@ -115,6 +115,6 @@ def test_readme_locked_positioning_opening() -> None:
     # Negative: prior marketing positionings must not return
     assert "open-core company brain" not in t
     assert "open-core code intelligence product" not in t
-    # Positive: the explicit no-overclaim disclaimer ("We do not say 'provable'...")
-    # is part of the positioning lock — README §"How it works" must carry it.
-    assert 'We do not say "provable"' in t
+    # Positive: the explicit no-overclaim disclaimer is part of the positioning
+    # lock — README §"How it works" must carry it.
+    assert 'Not "provable," not "100% accurate."' in t

@@ -2,7 +2,8 @@
 
 OMNIX is source-visible commercial software. Contributions, issues, and pull
 requests are welcome for evaluation and collaboration, but this repository is
-not distributed under an open-source license.
+not distributed under an open-source license. See `LICENSE.md` before reusing
+code outside evaluation.
 
 ## Development
 
