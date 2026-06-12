@@ -12,10 +12,12 @@ client. The contract is the same.
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -220,12 +222,52 @@ class FacadeController:
 
 # ---------- signer factory ----------
 
+_CUTOVER_KEY_LOCK = threading.Lock()
+_CUTOVER_KEYPAIR: tuple[bytes, bytes] | None = None
+
+
+def _cutover_key_dir() -> Path:
+    raw = os.environ.get("OMNIX_CUTOVER_KEY_DIR")
+    if raw:
+        return Path(raw).expanduser()
+    return Path.home() / ".omnix" / "keys" / "cutover"
+
+
+def _cutover_keypair() -> tuple[bytes, bytes]:
+    """Load (or, on first use, create + persist) the long-lived cutover key.
+
+    Persisted under OMNIX_CUTOVER_KEY_DIR (default ~/.omnix/keys/cutover/) as
+    public.pem + secret.pem (secret mode 0600) and cached for the process.
+    """
+    global _CUTOVER_KEYPAIR
+    with _CUTOVER_KEY_LOCK:
+        if _CUTOVER_KEYPAIR is not None:
+            return _CUTOVER_KEYPAIR
+        from omnix.receipts import keystore
+
+        d = _cutover_key_dir()
+        pub_p = d / "public.pem"
+        sec_p = d / "secret.pem"
+        if not (pub_p.is_file() and sec_p.is_file()):
+            keystore.write_keypair_dir(d)
+        pk = keystore.public_from_pem(pub_p.read_text(encoding="ascii"))
+        sk = keystore.secret_from_pem(sec_p.read_text(encoding="ascii"))
+        _CUTOVER_KEYPAIR = (pk, sk)
+        return _CUTOVER_KEYPAIR
+
+
 def real_signer():
-    """Return a (signer, pubkey) tuple bound to the real ML-DSA-65 module."""
-    from omnix.receipts import keygen
+    """Return a signer bound to the PERSISTENT ML-DSA-65 cutover key.
+
+    Previously this generated a *fresh ephemeral* keypair on every call, so a
+    cutover authorization receipt could never be verified against a stable
+    trust anchor — it proved nothing across processes or restarts. Now it
+    loads a long-lived keypair (creating + persisting it once on first use),
+    so receipts from any worker/pod verify against the same published key.
+    """
     from omnix.receipts import sign as sign_mod
 
-    pk, sk = keygen.keygen()
+    pk, sk = _cutover_keypair()
 
     def signer(msg: bytes) -> tuple[bytes, bytes]:
         return sign_mod.sign_bytes(sk, msg, b"", None), pk

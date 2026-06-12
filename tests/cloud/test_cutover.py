@@ -20,6 +20,29 @@ def controller():
     return FacadeController(signer=real_signer())
 
 
+def test_cutover_signer_key_is_anchored_not_ephemeral(tmp_path, monkeypatch):
+    """The cutover signer must use a PERSISTENT key (anchored across instances
+    and reloads), not a fresh ephemeral keypair per call."""
+    import omnix.cloud.cutover.facade_controller as fc
+
+    monkeypatch.setenv("OMNIX_CUTOVER_KEY_DIR", str(tmp_path / "ckey"))
+    monkeypatch.setattr(fc, "_CUTOVER_KEYPAIR", None)
+
+    msg = b"cutover-authorization"
+    sig1, pk1 = real_signer()(msg)
+    sig2, pk2 = real_signer()(msg)
+    assert pk1 == pk2, "public key must be stable across signer instances"
+
+    # Simulate a process restart: clear the in-process cache; the key must
+    # reload from disk identically (the file was persisted on first use).
+    monkeypatch.setattr(fc, "_CUTOVER_KEYPAIR", None)
+    _sig3, pk3 = real_signer()(msg)
+    assert pk3 == pk1, "public key must survive a restart (persisted to disk)"
+
+    from omnix.receipts.verify import verify_bytes
+    assert verify_bytes(pk1, msg, b"", sig1)
+
+
 @pytest.fixture
 def stub_controller():
     return FacadeController()  # no signer; receipts unsigned for routing-only tests

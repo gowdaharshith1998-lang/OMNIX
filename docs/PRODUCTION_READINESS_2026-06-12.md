@@ -70,10 +70,10 @@ ordering bug (now fixed, see F8), not a test artifact.
 | ID | Sev | Finding | Fix |
 |----|-----|---------|-----|
 | F19 | High | **Production ingest never produced cross-file `CALLS` edges** (confirmed by repro: a 2-file project where `app.main()` calls `lib.helper()` yielded 0 CALLS edges). Each file is parsed in an isolated per-file store, so calls only resolved within one file — the program graph was silently single-file for call relationships. | Added an **additive global second pass** (`_resolve_cross_file_calls`) to `ingest_unified_codebase`: after all per-file definitions merge, it rebuilds a global call index and re-runs the Python/TypeScript call pass against the merged store. Safe by construction — `add_edge` dedups (within-file edges untouched) and `_resolve_callee` prefers a same-file definition, so only genuinely cross-file calls gain their missing edge. Covers the dedicated-resolver languages (Python, TS/TSX); 2 new regression tests; full parser+graph suite green. |
+| F20 | High | **Cutover authorization receipts signed with a fresh ephemeral keypair per call** — never anchored, so they proved nothing verifiable across processes/restarts. | `real_signer()` now loads a **persistent** ML-DSA-65 keypair (creating + persisting it once under `OMNIX_CUTOVER_KEY_DIR`, default `~/.omnix/keys/cutover/`, secret mode 0600) and caches it; receipts from any worker verify against the same published key. New test asserts the key is stable across signer instances and survives a simulated restart. |
+| F21 | Medium | **Receipt-algorithm overclaim:** README marketed "post-quantum signed receipts for every finding or transformation," but per-finding and per-rebuild receipts are classical Ed25519 (ML-DSA-65 covers the scan manifests + DM migration chain). | Corrected the README claim to describe the actual hybrid scheme accurately rather than upgrading every per-item receipt to 3309-byte ML-DSA signatures (a deliberate size/perf tradeoff). |
 
 ### High — still remaining
-- **Cutover authorization "receipts" use an ephemeral per-process keypair** generated fresh each
-  start and never anchored — they prove nothing verifiable, undermining the cutover trust gate.
 - **Cross-file `CALLS` for non-resolver languages:** the F19 second pass covers Python and
   TypeScript (the languages with name-resolving parsers). Rust/Go/Ruby/generic still resolve calls
   only within a file; extending global resolution to them is follow-on work. Name-collision
@@ -87,9 +87,9 @@ ordering bug (now fixed, see F8), not a test artifact.
   convention is inconsistent across emitters/consumers — chainhash files use `next_hash(pred ++
   canonical)` while the consumer's own output uses plain `sha256(canonical)` — so validation needs a
   dedicated convention-unification pass first.)*
-- **Rebuild (per-node) and per-finding receipts are classical Ed25519, not the advertised
-  ML-DSA-65.** README markets "post-quantum signed receipts for every transformation"; only some
-  receipts are PQC. Either upgrade the signer or correct the marketing.
+- **Optional crypto upgrade:** per-finding/per-rebuild receipts remain Ed25519 (F21 corrected the
+  marketing to match). Upgrading them to ML-DSA-65 would make every per-item receipt post-quantum at
+  the cost of ~50× larger signatures (3309 vs 64 bytes) — a product decision, not a bug.
 
 ### Medium / Low — still remaining
 - Private signing keys stored unencrypted, guarded only by `os.chmod(0o600)` — a no-op on Windows.

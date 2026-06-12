@@ -27,7 +27,7 @@ I built OMNIX to show the kind of systems work I can own end to end: graph-nativ
 
 The shortest portfolio framing is:
 
-> I built OMNIX: a graph-native legacy-modernization engine with six-gate verification and post-quantum signed receipts for every finding or transformation.
+> I built OMNIX: a graph-native legacy-modernization engine with six-gate verification and a signed receipt for every finding and transformation — Ed25519 on the per-item receipts, with post-quantum ML-DSA-65 (FIPS 204) on the scan manifests and the migration receipt chain.
 
 A 60-second recording script is available in [`docs/demo/60-second-demo.md`](docs/demo/60-second-demo.md). It shows analyze, bug scan with receipt emission, successful receipt verification, and a tamper-fail moment.
 
