@@ -17,8 +17,15 @@ from pydantic import BaseModel
 
 from omnix.cloud.auth.jwt_session import Session, SessionError, issue, verify
 from omnix.cloud.auth.workos import get_provider
+from omnix.cloud.config import get_settings
 
 router = APIRouter()
+
+
+def _cookie_secure() -> bool:
+    """State cookies must be HTTPS-only in production; relaxed in dev so the
+    OAuth round-trip works over plain http://localhost."""
+    return not get_settings().debug
 
 
 class AuthState(BaseModel):
@@ -32,10 +39,11 @@ async def login(redirect_uri: str = Query(...), redirect_to: str | None = None):
     state = secrets.token_urlsafe(24)
     url = provider.authorization_url(redirect_uri=redirect_uri, state=state)
     resp = RedirectResponse(url, status_code=303)
-    resp.set_cookie("omnix_state", state, httponly=True, secure=False, samesite="lax")
+    secure = _cookie_secure()
+    resp.set_cookie("omnix_state", state, httponly=True, secure=secure, samesite="lax")
     if redirect_to:
         resp.set_cookie("omnix_post_auth", redirect_to, httponly=True,
-                        secure=False, samesite="lax")
+                        secure=secure, samesite="lax")
     return resp
 
 

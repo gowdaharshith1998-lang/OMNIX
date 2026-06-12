@@ -161,6 +161,13 @@ def load_manifests(
     Draft202012Validator(COLUMN_MAPPING_MANIFEST_SCHEMA).validate(d1)
     Draft202012Validator(EDGE_CASE_MANIFEST_SCHEMA).validate(d2)
     if verify_signatures:
+        if public_key is None:
+            # Fail closed: asking for verification without a key previously
+            # skipped silently, defeating the entire trust gate.
+            raise ConsumerHalt(
+                "verify_signatures=True requires a public_key; refusing to "
+                "proceed with unverifiable PR A manifests"
+            )
         _verify_signature(d1, d1_sig, public_key)
         _verify_signature(d2, d2_sig, public_key)
 

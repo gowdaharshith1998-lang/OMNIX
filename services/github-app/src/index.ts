@@ -37,6 +37,9 @@ async function main(): Promise<void> {
   });
   fastify.all("/api/github/webhooks", (req, reply) => probotMiddleware(req.raw, reply.raw));
 
+  // Liveness probe for container orchestration (HEALTHCHECK / k8s).
+  fastify.get("/health", async () => ({ status: "ok" }));
+
   registerJobCompleteRoute(fastify, probot);
 
   await fastify.listen({ port: config.port(), host: "0.0.0.0" });

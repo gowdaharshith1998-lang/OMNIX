@@ -183,6 +183,13 @@ def test_bad_signature_raises_consumer_halt(tmp_path: Path):
         load_manifests(tmp_path, "m1", public_key=pk, verify_signatures=True)
 
 
+def test_verify_without_key_fails_closed(tmp_path: Path):
+    """verify_signatures=True with no public_key must HALT, not silently skip."""
+    _write_manifests(tmp_path, sign=True, keys=ml_dsa_65.keypair(seed=b"\x33" * 48))
+    with pytest.raises(ConsumerHalt):
+        load_manifests(tmp_path, "m1", public_key=None, verify_signatures=True)
+
+
 def test_missing_manifest_raises_consumer_halt(tmp_path: Path):
     (tmp_path / "m1").mkdir()
     with pytest.raises(ConsumerHalt):

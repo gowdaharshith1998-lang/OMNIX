@@ -2,8 +2,22 @@
 omnix.db
 *.db
 *.db-journal
+# SQLite WAL/SHM sidecars (any location) — runtime only
+*.db-wal
+*.db-shm
+*-wal
+*-shm
 src/web/graph_data.json
+src/web/graph_data_axiom_v2.json
 src/web/timeline_data.json
+
+# Internal AI-agent gate reports / one-off recon notes — not source of truth
+.codex/
+slice21_recon.md
+
+# Bulk file-content dumps (review artifacts, never source)
+omnix-newly-added-files-full-contents.pdf
+*-full-contents.pdf
 
 # python build artifacts
 __pycache__/

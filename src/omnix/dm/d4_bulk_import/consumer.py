@@ -199,6 +199,11 @@ def load_prior_receipts(
     Draft202012Validator(COLUMN_MAPPING_MANIFEST_SCHEMA).validate(d1)
     Draft202012Validator(EDGE_CASE_MANIFEST_SCHEMA).validate(d2)
     if verify_signatures:
+        if public_key is None:
+            # Fail closed rather than silently skipping verification.
+            raise PrePhaseSignatureError(
+                "verify_signatures=True requires a public_key"
+            )
         _verify_signature(d1, pra_dir / "column-mapping.json.sig", public_key)
         _verify_signature(d2, pra_dir / "edge-case-manifest.json.sig", public_key)
 
