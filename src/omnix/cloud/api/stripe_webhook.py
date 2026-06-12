@@ -89,4 +89,24 @@ async def stripe_webhook(
     import json
     event = json.loads(payload)
     tenant_id, tier = resolve_tier_from_event(event)
-    return {"ok": True, "tenant_id": tenant_id, "tier": tier, "event_type": event.get("type")}
+
+    # Actually persist the resolved tier — previously this endpoint computed
+    # the new tier and discarded it, so paid upgrades/downgrades never took
+    # effect. Best-effort: persistence is a no-op when OMNIX_EVENTS_PERSIST is
+    # off (dev/test), and a missing tenant returns persisted=False rather than
+    # erroring the webhook (Stripe would otherwise retry indefinitely).
+    persisted = False
+    if tenant_id and tier:
+        import asyncio
+
+        from omnix.cloud import store
+
+        persisted = await asyncio.to_thread(store.set_tenant_tier, tenant_id, tier)
+
+    return {
+        "ok": True,
+        "tenant_id": tenant_id,
+        "tier": tier,
+        "persisted": persisted,
+        "event_type": event.get("type"),
+    }

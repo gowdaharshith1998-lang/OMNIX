@@ -118,6 +118,16 @@ async def start_job(
     source = _resolve_tus_source(payload.source, tenant_id)
     mode = _validated_mode(payload.mode, payload.inline)
 
+    # Create the durable Job row (no-op unless persistence is enabled) BEFORE
+    # the first event so the event rows have a parent to reference and reads
+    # can authorize by tenant.
+    from omnix.cloud import store
+
+    ingestion_mode = "git_clone" if source.get("type") == "git" else "tus_upload"
+    await asyncio.to_thread(
+        store.record_job, job_id, tenant_id=tenant_id, mode=ingestion_mode
+    )
+
     events.publish(job_id, "ingest", "job created",
                    payload={"source": source, "target": payload.target_language,
                             "mode": mode, "inline": payload.inline})
@@ -194,8 +204,27 @@ async def start_job(
     return StartJobResponse(job_id=job_id, ws_url=f"/ws/jobs/{job_id}", state="queued")
 
 
+async def _authorize_job_read(job_id: str, x_tenant_id: str | None) -> None:
+    """When persistence is on, a job's events may only be read by its owning
+    tenant. With persistence off (single-process dev/test) there is no durable
+    owner to check, so reads stay open as before."""
+    from omnix.cloud import store
+
+    owner = await asyncio.to_thread(store.get_job_tenant, job_id)
+    if owner is None:
+        return  # persistence off, or job not durably recorded
+    tenant_id = require_session_tenant(x_tenant_id)
+    if tenant_id != owner:
+        # Do not leak existence to other tenants.
+        raise HTTPException(status_code=404, detail="job not found")
+
+
 @router.get("/{job_id}")
-async def job_status(job_id: str):
+async def job_status(
+    job_id: str,
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-Id"),
+):
+    await _authorize_job_read(job_id, x_tenant_id)
     hist = events.history(job_id)
     if not hist:
         raise HTTPException(status_code=404, detail="job not found")
@@ -217,7 +246,12 @@ async def job_status(job_id: str):
 
 
 @router.get("/{job_id}/events")
-async def list_events(job_id: str, since_seq: int = Query(0, ge=0)):
+async def list_events(
+    job_id: str,
+    since_seq: int = Query(0, ge=0),
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-Id"),
+):
+    await _authorize_job_read(job_id, x_tenant_id)
     hist = events.history(job_id)
     return [
         {

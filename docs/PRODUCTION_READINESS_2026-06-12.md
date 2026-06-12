@@ -40,21 +40,19 @@ ordering bug (now fixed, see F8), not a test artifact.
 | F7 | Medium | parser/Win | `JavaSemanticEmitter` unresolved-symbol regex used `[^:]+` for the file group, so Windows paths (`C:\…`) truncated at the drive-letter colon and the structured-error parse failed. | Regex now matches the file group non-greedily up to the final `:<line> ::`. |
 | F8 | Medium | studio | A freshly-subscribed WebSocket could receive `stats` frames before `bootstrap_start` (the per-connection stats ticker started before `_run_bootstrap`, which blocks on `ingest_event`), violating the bootstrap-first contract a real frontend relies on. | The stats ticker now starts only after bootstrap is delivered. Studio suite green. |
 | F9 | — | CI/PR #63 | python-tests couldn't collect (cloud tests import PyJWT, only in the `cloud` extra); naming-pivot JS test drifted from its Python twin; two CodeQL path-injection alerts; Java gate needed a matching JDK. | CI installs `.[dev,cloud]`; pinned Temurin 21; reworded the naming-pivot assertion; restructured the studio path guards into the realpath+prefix shape CodeQL recognizes; dismissed 4 by-design localhost open-project alerts. **PR #63 is green.** |
+| F10 | Critical | cloud | The orchestrator never persisted to Postgres — jobs/receipts/tenant state lived only in a process-local in-memory bus, so state was lost on restart and invisible across gunicorn workers and the Celery worker process; the Stripe webhook computed the new tier and discarded it; job-read endpoints had no tenant authorization. | New `cloud/store.py` durable layer (opt-in via `OMNIX_EVENTS_PERSIST`; in-memory stays the dev/test default). `events.publish`/`history` now persist and read job events + advance Job state through Postgres with a DB-authoritative seq, so `GET /v1/jobs/{id}` is correct across processes and survives restart. `record_job` is created before the first event; job reads are tenant-scoped (cross-tenant → 404, no existence leak); the Stripe webhook persists the resolved tier; inline production receipts are persisted. 7 new tests against file-backed SQLite prove durability across a fresh bus. |
 
 ---
 
 ## Top remaining work (not fixed this pass — larger or needs product decisions)
 
 ### Critical
-- **Cloud orchestrator never persists to Postgres.** Jobs, receipts, and tenant/tier state live only
-  in a process-local in-memory bus (`cloud/events.py::_BUS`), despite docstrings promising Redis
-  pub/sub and Receipt-table writes. State is lost on restart and invisible across the configured
-  gunicorn workers and the Celery worker process — so job status breaks even at `--workers 1`
-  (the runner publishes gate events into the worker's own `_BUS`, invisible to the API). This single
-  gap cascades into the Stripe webhook dropping tier changes (below), cross-tenant job reads, and
-  bypassable GitHub-App quota. **This is the #1 blocker for the cloud offering.** Recommended:
-  persist `Job`/`JobEvent`/`Receipt` rows via the existing (currently-unused) async session scopes,
-  and back the event bus with Redis so it spans processes.
+- *(Fixed — see F10.)* Cloud Postgres persistence is now wired (opt-in). The one remaining piece of
+  this finding is **live WebSocket fan-out across processes**: durable job *state/history* is now
+  cross-process via the shared database (`GET /v1/jobs/{id}` is correct across workers), but the live
+  `/ws/jobs/{id}` stream still only sees events published in its own process. Production multi-replica
+  live streaming should add a Redis pub/sub fan-out (the in-memory bus remains the dev default); the
+  durable DB is already the source of truth for replay.
 
 ### High
 - **Cutover authorization "receipts" use an ephemeral per-process keypair** generated fresh each
