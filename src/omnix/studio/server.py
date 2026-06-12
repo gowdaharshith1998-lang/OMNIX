@@ -210,21 +210,6 @@ def _canonical_receipt_roots() -> list[Path]:
     return roots
 
 
-def _receipt_resolves_under_allowed(abs_path: Path) -> bool:
-    try:
-        rp = abs_path.resolve()
-    except OSError:
-        return False
-    for root in _canonical_receipt_roots():
-        try:
-            if root.is_dir():
-                rp.relative_to(root)
-                return True
-        except ValueError:
-            continue
-    return False
-
-
 def _omnix_cli_argv() -> list[str]:
     return [sys.executable, str(_REPO_ROOT / "omnix.py")]
 
@@ -501,23 +486,30 @@ def api_grammar_verify_receipt(
 ) -> Any:
     _require_localhost_starlette(request)
     raw = body.receipt_path.strip()
-    receipt = Path(raw).expanduser()
-    if not receipt.is_absolute():
+    expanded = os.path.expanduser(raw)
+    if not os.path.isabs(expanded):
         raise HTTPException(
             status_code=400,
             detail="receipt_path must be an absolute path under ~/.omnix/receipts/ "
             "or <project>/.omnix/receipts/",
         )
-    try:
-        resolved = receipt.resolve()
-    except OSError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    if not _receipt_resolves_under_allowed(receipt):
+    # realpath + startswith (inline, not behind a helper) keeps the
+    # containment check in the shape CodeQL models as a path-injection
+    # sanitizer; semantics match the old _receipt_resolves_under_allowed.
+    candidate = os.path.realpath(expanded)
+    roots = _canonical_receipt_roots()
+    home_root = str(roots[0]) if roots[0].is_dir() else None
+    project_root = str(roots[1]) if len(roots) > 1 and roots[1].is_dir() else None
+    if not (
+        (home_root is not None and candidate.startswith(home_root + os.sep))
+        or (project_root is not None and candidate.startswith(project_root + os.sep))
+    ):
         raise HTTPException(
             status_code=400,
             detail="receipt_path must resolve under ~/.omnix/receipts/ "
             "or the opened project's .omnix/receipts/",
         )
+    resolved = Path(candidate)
     if not resolved.is_file():
         raise HTTPException(status_code=404, detail="receipt not found")
 
