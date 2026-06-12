@@ -65,6 +65,23 @@ def _hash_lsn(lsn: str) -> int:
         return 0
 
 
+def _watermark_tuple(watermark: str) -> Tuple[int, int]:
+    """Decode a ``lsn#seq`` watermark into a comparable (lsn, seq) pair.
+    Plain-LSN watermarks (pre-seq format) decode with seq=0."""
+    lsn, _, seq = watermark.partition("#")
+    try:
+        return (_hash_lsn(lsn), int(seq or 0))
+    except ValueError:
+        return (_hash_lsn(lsn), 0)
+
+
+def _qident(name: str) -> str:
+    """Quote a SQL identifier; reject injection-capable names outright."""
+    if '"' in name or "\x00" in name:
+        raise ValueError(f"invalid identifier: {name!r}")
+    return f'"{name}"'
+
+
 def replay_one(
     event: ChangeEvent,
     *,
@@ -110,88 +127,129 @@ def replay_one(
             timestamp=_utcnow_iso(),
         )
 
-    # Idempotency check — every prior event for this table sets target_watermark[table]
+    def _quarantine(category: str, detail: str) -> CDCEventQuarantineEntry:
+        return CDCEventQuarantineEntry(
+            migration_id=state.migration_id,
+            event_lsn=event.lsn,
+            relation_id=event.relation_id,
+            table=table,
+            op=event.op,
+            failure_category=category,
+            failure_detail=detail,
+            timestamp=_utcnow_iso(),
+        )
+
+    # Idempotency check — every prior event for this table sets
+    # target_watermark[table]. pgoutput gives every change in a transaction
+    # the same commit LSN, so the watermark is the (lsn, seq) pair: lsn
+    # alone would drop rows 2..N of a multi-row transaction as
+    # "re-deliveries".
     watermark = target_watermark.get(table)
-    if watermark is not None and _hash_lsn(event.lsn) <= _hash_lsn(watermark):
+    if watermark is not None and (
+        (_hash_lsn(event.lsn), event.seq) <= _watermark_tuple(watermark)
+    ):
         state.events_idempotent_skipped += 1
         return None
 
-    # Apply per-column transformers to the after-tuple (or before-tuple for delete).
-    source_tuple = event.after if event.after is not None else event.before
-    if source_tuple is None:
-        return CDCEventQuarantineEntry(
-            migration_id=state.migration_id,
-            event_lsn=event.lsn,
-            relation_id=event.relation_id,
-            table=table,
-            op=event.op,
-            failure_category="schema_drift",
-            failure_detail="event has neither before nor after tuple",
-            timestamp=_utcnow_iso(),
-        )
-
     transformer_hashes: List[str] = []
-    target_values: List[Tuple[str, Any]] = []
-    for col, val in source_tuple:
-        spec_key = f"{table}.{col}"
-        spec = bundle_specs.get(spec_key)
-        target_col = column_mapping_by_table[table].get(col, col)
-        if spec is None:
-            target_values.append((target_col, val))
-            continue
-        try:
-            result = execute(spec["python_source"], val, timeout_ms=4000)
-        except _SecurityViolationError as exc:
-            return CDCEventQuarantineEntry(
-                migration_id=state.migration_id,
-                event_lsn=event.lsn,
-                relation_id=event.relation_id,
-                table=table,
-                op=event.op,
-                failure_category="transform_error",
-                failure_detail=f"security_violation: {exc.violation.reason}",
-                timestamp=_utcnow_iso(),
-            )
-        if isinstance(result, ExecutionSuccess):
-            target_values.append((target_col, result.result_json))
-            transformer_hashes.append(_hash(spec["python_source"]))
-        else:
-            return CDCEventQuarantineEntry(
-                migration_id=state.migration_id,
-                event_lsn=event.lsn,
-                relation_id=event.relation_id,
-                table=table,
-                op=event.op,
-                failure_category="transform_error",
-                failure_detail=repr(result),
-                timestamp=_utcnow_iso(),
-            )
 
-    # Write to target. The mock cursors used in tests record the call; the
-    # operator's real cursor would issue parameterized SQL with a
-    # ``__omnix_cdc_lsn = $1`` column.
+    def _xform(cols: Tuple[Tuple[str, Any], ...]):
+        """Map + transform source columns into target space; quarantine entry on failure."""
+        vals: List[Tuple[str, Any]] = []
+        for col, val in cols:
+            spec = bundle_specs.get(f"{table}.{col}")
+            target_col = column_mapping_by_table[table].get(col, col)
+            if spec is None:
+                vals.append((target_col, val))
+                continue
+            try:
+                result = execute(spec["python_source"], val, timeout_ms=4000)
+            except _SecurityViolationError as exc:
+                return _quarantine(
+                    "transform_error", f"security_violation: {exc.violation.reason}"
+                )
+            if isinstance(result, ExecutionSuccess):
+                vals.append((target_col, result.result_json))
+                transformer_hashes.append(_hash(spec["python_source"]))
+            else:
+                return _quarantine("transform_error", repr(result))
+        return vals
+
+    # Data values: the after-image for I/U; deletes carry no new data.
+    target_values: List[Tuple[str, Any]] = []
+    if event.op in ("I", "U"):
+        if event.after is None:
+            return _quarantine("schema_drift", "event has neither before nor after tuple")
+        xformed = _xform(event.after)
+        if isinstance(xformed, CDCEventQuarantineEntry):
+            return xformed
+        target_values = xformed
+
+    # Predicate values for U/D: replica-identity key columns when known,
+    # else the full before-image. An update with no before-image and no
+    # known key cannot be located safely on the target.
+    predicate_values: List[Tuple[str, Any]] = []
+    if event.op in ("U", "D"):
+        pred_source = event.before if event.before is not None else event.after
+        if pred_source is None:
+            return _quarantine("schema_drift", "event has neither before nor after tuple")
+        if event.key_columns:
+            keyset = set(event.key_columns)
+            pred_pairs = tuple((c, v) for c, v in pred_source if c in keyset)
+        elif event.before is not None:
+            pred_pairs = event.before
+        else:
+            return _quarantine(
+                "schema_drift",
+                "update without before-image or replica-identity key — "
+                "cannot build a safe target predicate",
+            )
+        if not pred_pairs:
+            return _quarantine("schema_drift", "empty predicate tuple for U/D event")
+        xformed = _xform(pred_pairs)
+        if isinstance(xformed, CDCEventQuarantineEntry):
+            return xformed
+        predicate_values = xformed
+
+    # Write to target with op-correct parameterized SQL: INSERT for 'I',
+    # UPDATE-by-predicate for 'U', DELETE-by-predicate for 'D'.
     try:
         cur = target_conn.cursor()
-        cur.execute(
-            f"-- OMNIX-DM CDC apply {event.op} on {table} at lsn {event.lsn}",
-            tuple(v for _, v in target_values) + (event.lsn,),
-        )
+        tname = _qident(table)
+        if event.op == "I":
+            cols = [c for c, _ in target_values] + ["__omnix_cdc_lsn"]
+            sql = (
+                f"INSERT INTO {tname} ({', '.join(_qident(c) for c in cols)}) "
+                f"VALUES ({', '.join(['%s'] * len(cols))})"
+            )
+            params = tuple(v for _, v in target_values) + (event.lsn,)
+        elif event.op == "U":
+            set_sql = ", ".join(
+                f"{_qident(c)} = %s" for c, _ in target_values
+            ) + f", {_qident('__omnix_cdc_lsn')} = %s"
+            where_sql = " AND ".join(
+                f"{_qident(c)} IS NOT DISTINCT FROM %s" for c, _ in predicate_values
+            )
+            sql = f"UPDATE {tname} SET {set_sql} WHERE {where_sql}"
+            params = (
+                tuple(v for _, v in target_values)
+                + (event.lsn,)
+                + tuple(v for _, v in predicate_values)
+            )
+        else:  # "D"
+            where_sql = " AND ".join(
+                f"{_qident(c)} IS NOT DISTINCT FROM %s" for c, _ in predicate_values
+            )
+            sql = f"DELETE FROM {tname} WHERE {where_sql}"
+            params = tuple(v for _, v in predicate_values)
+        cur.execute(sql, params)
         if hasattr(target_conn, "commit"):
             target_conn.commit()
     except Exception as exc:
-        return CDCEventQuarantineEntry(
-            migration_id=state.migration_id,
-            event_lsn=event.lsn,
-            relation_id=event.relation_id,
-            table=table,
-            op=event.op,
-            failure_category="target_connection_error",
-            failure_detail=str(exc),
-            timestamp=_utcnow_iso(),
-        )
+        return _quarantine("target_connection_error", str(exc))
 
     # Only after the target commit do we advance the watermark.
-    target_watermark[table] = event.lsn
+    target_watermark[table] = f"{event.lsn}#{event.seq}"
     state.last_applied_lsn = event.lsn
     state.events_replayed += 1
 

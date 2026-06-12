@@ -44,7 +44,7 @@ def read_checkpoint(path: Path) -> Optional[CheckpointState]:
     p = Path(path)
     if not p.exists():
         return None
-    data = json.loads(p.read_text())
+    data = json.loads(p.read_text(encoding="utf-8"))
     tables = {
         k: TableCheckpoint(
             table=v["table"],

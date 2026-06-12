@@ -107,6 +107,9 @@ def test_pg_copy_happy_path():
     )
     assert result.rows_written == 2
     assert conn._cursor.copy_calls  # COPY path taken
+    # COPY'd rows must be committed — psycopg2 defaults to autocommit=False,
+    # so a missing commit silently rolls back the entire batch
+    assert conn.committed
 
 
 def test_pg_copy_failure_falls_back_to_insert():

@@ -56,7 +56,7 @@ def _verify_signature(
 ) -> None:
     if public_key is None:
         return  # caller opted out (test fixtures)
-    sig_hex = sig_path.read_text().strip()
+    sig_hex = sig_path.read_text(encoding="utf-8").strip()
     try:
         sig = bytes.fromhex(sig_hex)
     except ValueError as exc:
@@ -151,8 +151,13 @@ def load_manifests(
             f"PR A manifests missing at {base!s}: column-mapping + edge-case-manifest"
         )
 
-    d1 = json.loads(d1_path.read_text())
-    d2 = json.loads(d2_path.read_text())
+    # Receipts are written as UTF-8 (ensure_ascii=False); they MUST be read
+    # back as UTF-8 or non-ASCII content (e.g. an em-dash in a parse warning)
+    # is mojibake'd on platforms whose default text encoding is not UTF-8
+    # (Windows cp1252), corrupting both signature verification and the
+    # predecessor-hash chain link.
+    d1 = json.loads(d1_path.read_text(encoding="utf-8"))
+    d2 = json.loads(d2_path.read_text(encoding="utf-8"))
     Draft202012Validator(COLUMN_MAPPING_MANIFEST_SCHEMA).validate(d1)
     Draft202012Validator(EDGE_CASE_MANIFEST_SCHEMA).validate(d2)
     if verify_signatures:

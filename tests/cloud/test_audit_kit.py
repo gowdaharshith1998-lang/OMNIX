@@ -100,6 +100,40 @@ def test_offline_verifier_catches_tampered_payload(real_signed_evidence, tmp_pat
     assert "FAIL" in proc.stdout
 
 
+def test_offline_verifier_rejects_path_traversal_archive(real_signed_evidence, tmp_path):
+    """A tampered kit with a ``../`` member must NOT write outside the unpack
+    dir when the bundled verifier is pointed at the tarball directly."""
+    kit = AuditKit(customer="Bank", tenant_id="t", evidence=real_signed_evidence)
+    out = tmp_path / "audit-kit.tar.gz"
+    export_kit(kit, out)
+
+    # Pull the shipped verify.py out of a clean kit.
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    with tarfile.open(out) as tar:
+        tar.extract("verify.py", staging)
+    verifier = staging / "verify.py"
+
+    # Build a malicious archive containing a traversal member.
+    evil_tar = tmp_path / "evil.tar.gz"
+    payload = tmp_path / "payload.txt"
+    payload.write_text("pwned", encoding="utf-8")
+    with tarfile.open(evil_tar, "w:gz") as tar:
+        tar.add(payload, arcname="../../escaped.txt")
+
+    sentinel = tmp_path / "escaped.txt"
+    assert not sentinel.exists()
+
+    proc = subprocess.run(
+        [sys.executable, str(verifier), str(evil_tar)],
+        capture_output=True, text=True, cwd=tmp_path,
+    )
+    # Verifier must refuse and must not have written outside the unpack dir.
+    assert proc.returncode != 0
+    assert "unsafe path" in (proc.stdout + proc.stderr)
+    assert not sentinel.exists()
+
+
 def test_kit_manifest_is_signed(real_signed_evidence, tmp_path):
     from omnix.receipts import keygen
     from omnix.receipts import sign as sign_mod

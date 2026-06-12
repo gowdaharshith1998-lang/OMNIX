@@ -68,8 +68,8 @@ def test_oracle_pg_d1_to_d2_offline(tmp_path):
         public_key=pk,
         output_root=tmp_path,
     )
-    d1_body = json.loads(d1_path.read_text())
-    d1_sig = (d1_path.with_suffix(".json.sig")).read_text()
+    d1_body = json.loads(d1_path.read_text(encoding="utf-8"))
+    d1_sig = (d1_path.with_suffix(".json.sig")).read_text(encoding="utf-8")
     assert verify_canonical(d1_body, d1_sig, pk)
 
     # Plan D2 probes — at least some mappings should be probable (low_confidence
@@ -85,7 +85,7 @@ def test_oracle_pg_d1_to_d2_offline(tmp_path):
         ) in excluded_pairs
 
     # Empty D2 results — still emits a valid manifest chained to D1
-    chain_hash = (d1_path.parent / "column-mapping.chainhash").read_text().strip()
+    chain_hash = (d1_path.parent / "column-mapping.chainhash").read_text(encoding="utf-8").strip()
     d2_path = emit_d2(
         results=(),
         migration_id="petclinic-offline",
@@ -94,8 +94,8 @@ def test_oracle_pg_d1_to_d2_offline(tmp_path):
         public_key=pk,
         output_root=tmp_path,
     )
-    d2_body = json.loads(d2_path.read_text())
-    d2_sig = (d2_path.with_suffix(".json.sig")).read_text()
+    d2_body = json.loads(d2_path.read_text(encoding="utf-8"))
+    d2_sig = (d2_path.with_suffix(".json.sig")).read_text(encoding="utf-8")
     assert verify_canonical(d2_body, d2_sig, pk)
     assert d2_body["predecessor_hash"] == chain_hash
 

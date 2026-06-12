@@ -140,6 +140,23 @@ import tarfile
 from pathlib import Path
 
 
+def _safe_extract(tar: tarfile.TarFile, out: Path) -> None:
+    """Extract every member, refusing any path that escapes ``out``.
+
+    A tampered audit kit is exactly the threat model this tool exists to
+    catch, so the verifier must never let a malicious archive write outside
+    its unpack dir via ``../`` traversal, absolute paths, or symlinks.
+    """
+    out = out.resolve()
+    for member in tar.getmembers():
+        if member.issym() or member.islnk():
+            raise SystemExit(f"refusing link member in audit kit: {member.name!r}")
+        target = (out / member.name).resolve()
+        if target != out and out not in target.parents:
+            raise SystemExit(f"unsafe path in audit kit: {member.name!r}")
+    tar.extractall(out)
+
+
 def _extract_if_archive(arg: str) -> Path:
     p = Path(arg)
     if p.is_dir():
@@ -147,7 +164,7 @@ def _extract_if_archive(arg: str) -> Path:
     out = Path(arg + ".unpacked")
     out.mkdir(exist_ok=True)
     with tarfile.open(p) as tar:
-        tar.extractall(out)
+        _safe_extract(tar, out)
     return out
 
 

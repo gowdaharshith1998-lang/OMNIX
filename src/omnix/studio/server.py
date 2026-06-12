@@ -1387,7 +1387,13 @@ async def ws_workspace(websocket: WebSocket, workspace_id: str) -> None:
     await websocket.accept()
     w.add_ws(websocket)  # type: ignore[union-attr, misc, no-untyped-def]
     stop = asyncio.Event()
-    t_stats = asyncio.create_task(_stats_ticker(w, stop), name="studio-stats")
+    # The periodic stats ticker must NOT start until the bootstrap handshake
+    # has been sent: a subscriber's contract is that bootstrap_start is the
+    # first frame it receives. Starting the ticker up front let a 0.5s stats
+    # tick race ahead of bootstrap (bootstrap blocks on ingest_event), which
+    # a real frontend — and the live-loop integration test — relies on never
+    # happening.
+    t_stats: asyncio.Task | None = None
     try:
         try:
             first = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
@@ -1408,6 +1414,8 @@ async def ws_workspace(websocket: WebSocket, workspace_id: str) -> None:
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(w.ingest_event.wait(), timeout=600.0)  # type: ignore[union-attr, misc, no-untyped-def]
         await _run_bootstrap(websocket, w)
+        # Bootstrap delivered — now safe to stream periodic stats.
+        t_stats = asyncio.create_task(_stats_ticker(w, stop), name="studio-stats")
         while True:
             try:
                 raw = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
@@ -1427,9 +1435,10 @@ async def ws_workspace(websocket: WebSocket, workspace_id: str) -> None:
         raise
     finally:
         stop.set()
-        t_stats.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await t_stats
+        if t_stats is not None:
+            t_stats.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await t_stats
         w.remove_ws(websocket)  # type: ignore[union-attr, misc, no-untyped-def]
 
 

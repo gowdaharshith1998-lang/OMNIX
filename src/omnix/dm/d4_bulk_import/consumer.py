@@ -66,7 +66,7 @@ class ConsumedBundle:
 def _verify_signature(payload: dict, sig_path: Path, public_key: Optional[bytes]) -> None:
     if public_key is None:
         return  # opt-out for test fixtures
-    sig_hex = sig_path.read_text().strip()
+    sig_hex = sig_path.read_text(encoding="utf-8").strip()
     try:
         sig = bytes.fromhex(sig_hex)
     except ValueError as exc:
@@ -191,8 +191,11 @@ def load_prior_receipts(
     if not d1_path.exists() or not d2_path.exists():
         raise FileNotFoundError(f"PR A manifests missing at {pra_dir!s}")
 
-    d1 = json.loads(d1_path.read_text())
-    d2 = json.loads(d2_path.read_text())
+    # Receipts are UTF-8 (ensure_ascii=False) — read them as UTF-8 so
+    # non-ASCII content survives round-trip on non-UTF-8 default platforms
+    # (Windows cp1252); otherwise signatures and spec hashes break.
+    d1 = json.loads(d1_path.read_text(encoding="utf-8"))
+    d2 = json.loads(d2_path.read_text(encoding="utf-8"))
     Draft202012Validator(COLUMN_MAPPING_MANIFEST_SCHEMA).validate(d1)
     Draft202012Validator(EDGE_CASE_MANIFEST_SCHEMA).validate(d2)
     if verify_signatures:
@@ -204,7 +207,7 @@ def load_prior_receipts(
     spec_hashes: Dict[str, str] = {}
     if prb_dir.exists():
         for spec_path in sorted(prb_dir.glob("transformer-spec-*.json")):
-            payload = json.loads(spec_path.read_text())
+            payload = json.loads(spec_path.read_text(encoding="utf-8"))
             Draft202012Validator(TRANSFORMER_SPEC_SCHEMA).validate(payload)
             if verify_signatures:
                 _verify_signature(
@@ -218,7 +221,7 @@ def load_prior_receipts(
             transformer_specs[key] = payload
             spec_hashes[key] = hashlib.sha256(canonicalize(payload)).hexdigest()
         for halt_path in sorted(prb_dir.glob("transformer-halt-*.json")):
-            payload = json.loads(halt_path.read_text())
+            payload = json.loads(halt_path.read_text(encoding="utf-8"))
             if verify_signatures:
                 _verify_signature(
                     payload, halt_path.with_suffix(".json.sig"), public_key

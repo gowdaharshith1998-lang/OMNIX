@@ -33,8 +33,10 @@ JAR_PATH: Path = Path(__file__).parent / "vendor" / "javaparser-emitter.jar"
 
 # Well-known sentinel emitted by JavaSemanticEmitter on UnsolvedSymbolException.
 # Format: "UnresolvedSymbol: <symbol>@<file>:<line> :: <message>"
+# <file> is matched non-greedily up to the final ":<line> ::" so Windows
+# drive-letter colons (C:\...) stay inside the file group.
 _UNRESOLVED_RE = re.compile(
-    r"UnresolvedSymbol:\s*(?P<symbol>[^@]+)@(?P<file>[^:]+):(?P<line>\d+)\s*::\s*(?P<message>.*)"
+    r"UnresolvedSymbol:\s*(?P<symbol>[^@]+)@(?P<file>.+?):(?P<line>\d+)\s*::\s*(?P<message>.*)"
 )
 
 

@@ -168,6 +168,11 @@ def _pg_copy(
     except Exception:
         # COPY aborts the whole tx; let the orchestrator fall back.
         raise _CopyFallback()
+    try:
+        conn.commit()
+    except Exception:
+        # If commit fails, the COPY'd rows are rolled back; surface.
+        raise TargetWriteError("target commit failed")
     return WriteResult(rows_written=len(batch.transformed_rows), quarantine_entries=())
 
 
