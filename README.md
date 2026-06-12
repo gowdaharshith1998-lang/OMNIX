@@ -9,7 +9,15 @@ pip install -r requirements.txt
 python omnix.py analyze /path/to/your/project
 ```
 
-That's the full bootstrap. It parses the codebase, builds the graph, and starts a local React studio so you can poke at the result before you let anything else touch your code.
+That parses the codebase, builds the graph, and starts the local Studio server so you can poke at the result before you let anything else touch your code.
+
+The Studio **UI** is a React app served from a build directory that is not checked in, so build it once (Node 18+):
+
+```bash
+cd src/omnix/studio/frontend && npm ci && npm run build && cd -
+```
+
+Without that build the server still runs and the CLI/graph analysis works in full — only the browser UI returns a "build frontend" notice until the assets exist.
 
 ---
 

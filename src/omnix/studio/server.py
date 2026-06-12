@@ -100,9 +100,13 @@ async def _app_lifespan(_app: FastAPI) -> Any:  # noqa: ANN401, RUF029, ASYNC109
 
 app = FastAPI(title="OMNIX Studio", lifespan=_app_lifespan)  # type: ignore[assignment, misc, no-untyped-def]
 
+# Studio is a localhost-only tool. A wildcard CORS policy let any website the
+# operator visited read responses from 127.0.0.1 (the per-endpoint localhost
+# guard passes for a browser's own loopback request, and "*" then exposed the
+# body). Restrict to localhost origins only.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -193,6 +197,37 @@ def _is_localhost_request_starlette(request: Request) -> bool:
 def _require_localhost_starlette(request: Request) -> None:
     if not _is_localhost_request_starlette(request):
         raise HTTPException(status_code=403, detail="grammar_api_localhost_only")
+
+
+def _is_localhost_ws(websocket: WebSocket) -> bool:
+    """Origin/host guard for the WebSocket endpoint (mirrors the HTTP guard).
+
+    A cross-origin page can open a ws:// to 127.0.0.1; without this check it
+    could stream the operator's workspace. Reject any non-localhost Origin.
+    """
+    client = websocket.client
+    ip = client.host if client else ""
+    asgi_test = ip == "testclient"
+    if not asgi_test:
+        ok_ip = ip in ("127.0.0.1", "::1")
+        if isinstance(ip, str) and ip.startswith("::ffff:"):
+            ok_ip = ip.split(":")[-1] == "127.0.0.1"
+        if not ok_ip:
+            return False
+    host = websocket.headers.get("Host", "")
+    hn = _parse_host_hostname_studio(host)
+    allowed_hosts = ("127.0.0.1", "localhost", "[::1]", "::1")
+    if asgi_test:
+        allowed_hosts = (*allowed_hosts, "testserver")
+    if hn not in allowed_hosts:
+        return False
+    origin = websocket.headers.get("Origin")
+    if not origin:
+        return True
+    o = origin.strip()
+    if o in ("null", "file://"):
+        return True
+    return bool(re.match(r"^http://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?/?$", o))
 
 
 def _grammar_db_search_root() -> Path | None:
@@ -1380,6 +1415,9 @@ async def _stats_ticker(w: Workspace, stop: asyncio.Event) -> None:
 
 @app.websocket("/ws/workspace/{workspace_id}")
 async def ws_workspace(websocket: WebSocket, workspace_id: str) -> None:
+    if not _is_localhost_ws(websocket):
+        await websocket.close(code=1008)
+        return
     w = MANAGER.get(workspace_id)
     if w is None:
         await websocket.close(code=1008)

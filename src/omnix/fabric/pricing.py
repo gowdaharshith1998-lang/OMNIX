@@ -18,6 +18,22 @@ _DEFAULT_PRICING: dict[str, dict[str, float]] = {
     "google:gemini-2.5-flash": {"in": 0.075, "out": 0.30},
 }
 
+# Fail-safe price for a cloud model with no pricing-table entry. Previously an
+# unknown model was costed at $0, so it never accumulated spend and the daily
+# budget cap could never trip — an unbounded cost-runaway hole the moment a new
+# model id shipped ahead of the table. We instead cost unknown cloud models at
+# the most-expensive known tier so the cap engages; operators can override via
+# cfg["pricing_unknown_fallback_usd_per_million_tokens"]. Local ``ollama`` is
+# genuinely free and stays $0.
+_UNKNOWN_MODEL_FALLBACK: dict[str, float] = {"in": 15.00, "out": 75.00}
+
+
+def _unknown_fallback(cfg: dict[str, Any]) -> dict[str, float]:
+    raw = cfg.get("pricing_unknown_fallback_usd_per_million_tokens")
+    if isinstance(raw, dict) and "in" in raw and "out" in raw:
+        return {"in": float(raw["in"]), "out": float(raw["out"])}
+    return dict(_UNKNOWN_MODEL_FALLBACK)
+
 
 def merged_pricing_table(cfg: dict[str, Any]) -> dict[str, dict[str, float]]:
     raw = cfg.get("pricing_usd_per_million_tokens") or {}
@@ -39,10 +55,9 @@ def compute_cost_usd(
         return 0.0
     key = f"{provider}:{model}"
     table = merged_pricing_table(cfg)
-    row = table.get(key) or table.get(
-        f"{provider}:{model}",
-        {"in": 0.0, "out": 0.0},
-    )
+    # Unknown cloud models are costed at the conservative fallback (not $0) so
+    # the daily budget cap still engages on un-priced models.
+    row = table.get(key) or _unknown_fallback(cfg)
     cost = (tokens_in / 1_000_000.0) * row["in"] + (
         tokens_out / 1_000_000.0
     ) * row["out"]

@@ -8,8 +8,6 @@ process) and is read back from the database.
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 
 from omnix.cloud.config import get_settings
@@ -91,9 +89,10 @@ def test_get_job_tenant_round_trips(persistent_db):
 
 
 def test_set_tenant_tier_persists(persistent_db):
+    from sqlalchemy.orm import Session
+
     from omnix.cloud import store
     from omnix.cloud.db.models import Tenant, TenantTier
-    from sqlalchemy.orm import Session
 
     _seed_tenant(persistent_db)
     assert store.set_tenant_tier("t-acme", "banking") is True
@@ -105,9 +104,10 @@ def test_set_tenant_tier_persists(persistent_db):
 
 
 def test_persist_receipt_appends_row(persistent_db):
-    from omnix.cloud import store
     from sqlalchemy import select
     from sqlalchemy.orm import Session
+
+    from omnix.cloud import store
 
     _seed_tenant(persistent_db)
     store.record_job("job-4", tenant_id="t-acme", mode="git_clone")
@@ -131,11 +131,12 @@ def test_persist_receipt_appends_row(persistent_db):
 def test_inline_production_run_persists_events_and_receipt(persistent_db):
     """End-to-end: the runner's inline production path persists a durable event
     log and a signed completion receipt that survive a fresh bus."""
-    from omnix.cloud import events, store
-    from omnix.cloud.pipeline.runner import run_pipeline
-    from omnix.cloud.db.models import Receipt
     from sqlalchemy import select
     from sqlalchemy.orm import Session
+
+    from omnix.cloud import events, store
+    from omnix.cloud.db.models import Receipt
+    from omnix.cloud.pipeline.runner import run_pipeline
 
     _seed_tenant(persistent_db)
     store.record_job("job-run", tenant_id="t-acme", mode="git_clone")
