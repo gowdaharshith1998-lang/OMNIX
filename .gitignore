@@ -8,8 +8,9 @@ omnix.db
 *-wal
 *-shm
 src/web/graph_data.json
-src/web/graph_data_axiom_v2.json
 src/web/timeline_data.json
+# NOTE: src/web/graph_data_axiom_v2.json is NOT ignored — it is a load-bearing
+# data fixture imported by the Studio frontend (GraphCanvas.tsx / axiomFixture.ts).
 
 # Internal AI-agent gate reports / one-off recon notes — not source of truth
 .codex/
