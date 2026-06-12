@@ -54,46 +54,49 @@ ordering bug (now fixed, see F8), not a test artifact.
   live streaming should add a Redis pub/sub fan-out (the in-memory bus remains the dev default); the
   durable DB is already the source of truth for replay.
 
-### High
+### Second remediation wave — also fixed (F11–F18)
+| ID | Sev | Finding | Fix |
+|----|-----|---------|-----|
+| F11 | High | Cost-runaway guard bypassed for any model missing from the pricing table ($0 → cap never trips). | Unknown cloud models costed at a conservative most-expensive-tier fallback (configurable); `ollama` stays free. Tests added. |
+| F12 | High | Cloud CORS used `allow_origins=["*"]` with `allow_credentials=True` (spec-invalid + unsafe); Studio used unconditional `["*"]` and the Studio WebSocket had no Origin check. | Cloud debug → localhost-regex (credentialed), prod → configured origin; Studio → localhost-regex; Studio WS rejects non-localhost Origin/Host before accept. |
+| F13 | High | DM consumers silently skipped signature verification when `public_key is None` despite `verify_signatures=True`. | d3 + d4 consumers fail closed (HALT). Regression test added. |
+| F14 | High | `aiosqlite` (cloud test DB driver) declared in no dependency group. | Added to the `dev` extra. |
+| F15 | High | README quickstart claimed `analyze` starts the Studio UI, but the frontend dist is not checked in (clean clone shows a build-notice). | Quickstart documents the one-time frontend build and clarifies the CLI path works without it. |
+| F16 | Medium | Cloud OAuth state cookies hardcoded `secure=False` (sent over plaintext even in prod). | `secure` is now true outside debug. |
+| F17 | Medium | Production Docker images ran as root; api/github-app had no `HEALTHCHECK`. | Both drop to an unprivileged user + add a `HEALTHCHECK`; github-app gains a `/health` route. |
+| F18 | Medium | Runtime/generated/internal artifacts tracked in the public repo; pyproject had no license/classifiers; no `py.typed`. | Untracked + gitignored the SQLite WAL/SHM sidecars, the 2.6 MB generated graph JSON, the root PDF dump, `.codex/` gate reports, and `slice21_recon.md`; declared the source-available license + classifiers; shipped `py.typed`. |
+
+### High — still remaining
 - **Cutover authorization "receipts" use an ephemeral per-process keypair** generated fresh each
   start and never anchored — they prove nothing verifiable, undermining the cutover trust gate.
-- **Production ingest never produces cross-file `CALLS` edges:** `omnix analyze` and Studio route
-  through a path that parses each file in an isolated store, so the globally-resolving call index is
-  only ever single-file. The headline artifact (a cross-module program graph) is systematically
-  incomplete in real use; the globally-resolving functions are test-only.
+- **Production ingest never produces cross-file `CALLS` edges** *(confirmed by repro this pass:
+  a 2-file project where `app.main()` calls `lib.helper()` yields **0** CALLS edges)*. Root cause:
+  the universal per-file ingest worker builds its call index from its own single-file
+  `MemoryGraphStore` and resolves calls there, and per-file quality stats
+  (`count_call_edges_for_file`) are computed in that same worker. A correct fix must split the
+  per-file pass into a definitions pass (per file, merged) and a **global** call-resolution second
+  pass over the merged store (mirroring `parse_python_files`' pass1 → global index → pass2), then
+  re-baseline the worker-computed call stats — a sizeable change across the Python/TS/Rust/generic
+  paths with real regression risk to the most-tested subsystem, so it was scoped to its own effort
+  rather than rushed here.
 - **Turboscan worker "slots" collide:** slots are keyed by `hash(file,function) % workers` rather than
   executing-worker identity, so colliding targets share a slot entry and a Hypothesis DB dir under the
   default parallel scan — contradicting the documented worker-isolation claim.
 - **DM Merkle-chain `predecessor_hash` is signed but never validated** by any consumer; substituted or
-  reordered predecessors pass. Relatedly, both DM consumers silently skip signature verification when
-  `public_key is None` despite a `verify_signatures=True` default.
+  reordered predecessors pass. *(Attempted this pass and backed out: the `predecessor_hash`
+  convention is inconsistent across emitters/consumers — chainhash files use `next_hash(pred ++
+  canonical)` while the consumer's own output uses plain `sha256(canonical)` — so validation needs a
+  dedicated convention-unification pass first.)*
 - **Rebuild (per-node) and per-finding receipts are classical Ed25519, not the advertised
   ML-DSA-65.** README markets "post-quantum signed receipts for every transformation"; only some
   receipts are PQC. Either upgrade the signer or correct the marketing.
-- **Cost-runaway guard is bypassed for any model missing from the pricing table** (cost computed as
-  `$0`, daily budget cap never trips).
-- **Studio `CORS allow_origins=["*"]` + ungated GET endpoints** can leak local filesystem paths to any
-  website the operator visits while Studio runs; the WebSocket has no Origin check.
-- **README quickstart is broken on a clean clone:** the two documented commands never build the React
-  Studio, so `analyze` serves a JSON error instead of the UI.
-- **`aiosqlite` is imported by the cloud tests but declared in no dependency group** — cloud tests
-  fail at async-engine creation once CI billing is restored (the local fix here was installing the
-  `cloud` extra; the dependency declaration should still be corrected).
 
-### Medium / Low (selected)
+### Medium / Low — still remaining
 - Private signing keys stored unencrypted, guarded only by `os.chmod(0o600)` — a no-op on Windows.
 - Rebuild prompt interpolates raw legacy source from the (potentially hostile) migrated repo with no
   injection mitigation or documented acknowledgment.
-- Production Docker images run as root; api/github-app images have no `HEALTHCHECK`; OAuth state
-  cookies hardcoded `secure=False`.
 - Celery `start_pipeline` retries re-run the entire non-idempotent pipeline.
-- Runtime SQLite WAL/SHM artifacts and a 2.6 MB generated graph-data JSON and a root PDF dump are
-  tracked in the public repo; `.gitignore` misses them.
-- `pyproject.toml` declares no `license`/`classifiers` despite a custom source-available license;
-  no `py.typed` marker despite the mypy config.
-- Internal AI-agent scratch artifacts (`.codex/` gate reports, `slice21_recon.md`) and a borrowed
-  Linear.app brand spec mislabeled as "architecture decisions" (`DESIGN.md`) are committed to the
-  public portfolio repo.
+- `DESIGN.md` is a borrowed Linear.app brand spec mislabeled as "architecture decisions".
 
 Full per-finding evidence (file:line) is preserved in the audit run output and can be regenerated.
 
