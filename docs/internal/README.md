@@ -18,9 +18,9 @@ maintainers, but they are not the canonical public product description.
 - `NOTES.md` - engineering log of shipped slices and follow-up context.
 - `TODOS.md` - active backlog and known blockers.
 - `AUDIT.md` - audit/verification notes.
-- `DESIGN.md` - design notes for architecture decisions.
+- `DESIGN.md` - visual/brand design reference (color, type, layout language); NOT software architecture.
 - `CHANGELOG.md` - chronological changes.
-- `slice21_recon.md` and `slices/` - historical slice plans.
+- `slices/` - historical slice plans.
 - `docs/XFAIL_AUDIT.md` - expected-failure marker ownership.
 - `tests/_blocked/**` - blocked test rationale, kept out of default test runs.
 - `src/omnix/studio/NOTES.md` - Studio-specific implementation notes.
