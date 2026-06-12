@@ -66,19 +66,19 @@ ordering bug (now fixed, see F8), not a test artifact.
 | F17 | Medium | Production Docker images ran as root; api/github-app had no `HEALTHCHECK`. | Both drop to an unprivileged user + add a `HEALTHCHECK`; github-app gains a `/health` route. |
 | F18 | Medium | Runtime/generated/internal artifacts tracked in the public repo; pyproject had no license/classifiers; no `py.typed`. | Untracked + gitignored the SQLite WAL/SHM sidecars, the 2.6 MB generated graph JSON, the root PDF dump, `.codex/` gate reports, and `slice21_recon.md`; declared the source-available license + classifiers; shipped `py.typed`. |
 
+### Second remediation wave — also fixed (continued)
+| ID | Sev | Finding | Fix |
+|----|-----|---------|-----|
+| F19 | High | **Production ingest never produced cross-file `CALLS` edges** (confirmed by repro: a 2-file project where `app.main()` calls `lib.helper()` yielded 0 CALLS edges). Each file is parsed in an isolated per-file store, so calls only resolved within one file — the program graph was silently single-file for call relationships. | Added an **additive global second pass** (`_resolve_cross_file_calls`) to `ingest_unified_codebase`: after all per-file definitions merge, it rebuilds a global call index and re-runs the Python/TypeScript call pass against the merged store. Safe by construction — `add_edge` dedups (within-file edges untouched) and `_resolve_callee` prefers a same-file definition, so only genuinely cross-file calls gain their missing edge. Covers the dedicated-resolver languages (Python, TS/TSX); 2 new regression tests; full parser+graph suite green. |
+
 ### High — still remaining
 - **Cutover authorization "receipts" use an ephemeral per-process keypair** generated fresh each
   start and never anchored — they prove nothing verifiable, undermining the cutover trust gate.
-- **Production ingest never produces cross-file `CALLS` edges** *(confirmed by repro this pass:
-  a 2-file project where `app.main()` calls `lib.helper()` yields **0** CALLS edges)*. Root cause:
-  the universal per-file ingest worker builds its call index from its own single-file
-  `MemoryGraphStore` and resolves calls there, and per-file quality stats
-  (`count_call_edges_for_file`) are computed in that same worker. A correct fix must split the
-  per-file pass into a definitions pass (per file, merged) and a **global** call-resolution second
-  pass over the merged store (mirroring `parse_python_files`' pass1 → global index → pass2), then
-  re-baseline the worker-computed call stats — a sizeable change across the Python/TS/Rust/generic
-  paths with real regression risk to the most-tested subsystem, so it was scoped to its own effort
-  rather than rushed here.
+- **Cross-file `CALLS` for non-resolver languages:** the F19 second pass covers Python and
+  TypeScript (the languages with name-resolving parsers). Rust/Go/Ruby/generic still resolve calls
+  only within a file; extending global resolution to them is follow-on work. Name-collision
+  resolution (a short name defined in multiple other files) still picks the first global candidate —
+  the pre-existing documented limitation, now also reachable cross-file.
 - **Turboscan worker "slots" collide:** slots are keyed by `hash(file,function) % workers` rather than
   executing-worker identity, so colliding targets share a slot entry and a Hypothesis DB dir under the
   default parallel scan — contradicting the documented worker-isolation claim.

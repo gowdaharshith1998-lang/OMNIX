@@ -752,6 +752,75 @@ def _run_ingest_parallel(
         store.commit_batch()
 
 
+def _resolve_cross_file_calls(store: GraphStore, root: Path) -> int:
+    """Second pass: resolve CALLS edges *across* files.
+
+    Each file is parsed by a worker into its own isolated ``MemoryGraphStore``,
+    so the per-file call index only ever contains that one file's definitions
+    and cross-module calls never form an edge — the program graph the product
+    is built around was silently single-file for call relationships.
+
+    After every file's definitions are merged into ``store`` we rebuild a
+    GLOBAL call index and re-run the language call pass against it. This is
+    additive and safe:
+      * ``add_edge`` dedups, so within-file edges already present are skipped;
+      * ``_resolve_callee`` prefers a same-file definition, so a correct
+        within-file resolution is never changed — only genuinely cross-file
+        calls gain the edge they were missing.
+
+    Currently covers the languages with dedicated, name-resolving parsers
+    (Python, TypeScript/TSX); other languages keep their existing behavior.
+    Returns the number of files re-resolved (for stats/telemetry).
+    """
+    from omnix.parser import python_parser as pp
+    from omnix.parser import typescript_parser as tp
+
+    py_files: list[str] = []
+    ts_files: list[tuple[str, bool]] = []
+    for node in list(store.iter_all_nodes()):
+        if node.type != "file":
+            continue
+        lang = (node.metadata or {}).get("language")
+        rel = node.file_path
+        if not rel:
+            continue
+        if lang == "python":
+            py_files.append(rel)
+        elif lang in ("typescript", "tsx"):
+            ts_files.append((rel, lang == "tsx"))
+
+    def _read(rel: str) -> str | None:
+        try:
+            return (root / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+
+    resolved = 0
+    if py_files:
+        py_idx = pp._build_call_index(store)  # type: ignore[attr-defined]
+        for rel in py_files:
+            text = _read(rel)
+            if text is None:
+                continue
+            try:
+                pp._pass2_calls(store, rel, text, py_idx)  # type: ignore[attr-defined]
+                resolved += 1
+            except (OSError, ValueError, RuntimeError):
+                _LOG.warning("cross-file call resolution failed for %s", rel)
+    if ts_files:
+        ts_idx = tp._build_ts_call_index(store)  # type: ignore[attr-defined]
+        for rel, is_tsx in ts_files:
+            text = _read(rel)
+            if text is None:
+                continue
+            try:
+                tp._ts_pass2(store, rel, text, is_tsx, ts_idx)  # type: ignore[attr-defined]
+                resolved += 1
+            except (OSError, ValueError, RuntimeError):
+                _LOG.warning("cross-file call resolution failed for %s", rel)
+    return resolved
+
+
 def ingest_unified_codebase(
     target_root: str,
     store: GraphStore,
@@ -797,6 +866,9 @@ def ingest_unified_codebase(
         file_digests=file_digests,
         use_cache=ucache,
     )
+    # Resolve CALLS edges across files (the per-file workers can only resolve
+    # within a single file's isolated store).
+    _resolve_cross_file_calls(store, r)
     agg.persist(store)
     store.set_meta("omnix_version", omnix_version)
     store.set_meta("profile_hash", fp)
