@@ -74,6 +74,7 @@ ordering bug (now fixed, see F8), not a test artifact.
 | F21 | Medium | **Receipt-algorithm overclaim:** README marketed "post-quantum signed receipts for every finding or transformation," but per-finding and per-rebuild receipts are classical Ed25519 (ML-DSA-65 covers the scan manifests + DM migration chain). | Corrected the README claim to describe the actual hybrid scheme accurately rather than upgrading every per-item receipt to 3309-byte ML-DSA signatures (a deliberate size/perf tradeoff). |
 | F22 | Medium | **`DESIGN.md` mislabeled:** it is a Linear.app visual/brand spec, but `docs/internal/README.md` listed it as "design notes for architecture decisions" — misleading to a reviewer; the same index pointed at the now-removed `slice21_recon.md`. | Relabeled `DESIGN.md` accurately as a visual/brand design reference (explicitly "NOT software architecture") and dropped the stale `slice21_recon.md` reference. |
 | F23 | Medium | **Prompt-injection posture undocumented:** the rebuild prompt interpolates raw source from the (untrusted) migrated repo with no acknowledgment. | Documented the explicit posture in `prompt_template.py`: source is untrusted and deliberately un-sanitized because the six-gate verification pipeline — not prompt hygiene — is the security boundary; injected instructions can at worst produce gate-failing output flagged for human review, never smuggle unverified code through. |
+| F24 | Medium | **Celery `start_pipeline` retries re-ran the entire non-idempotent pipeline** (re-ingest, re-emit receipts) on any failure or duplicate dispatch. | Added an idempotency guard (`store.job_already_finished`): the task skips when the persisted Job already reached a terminal success state (`complete`/`awaiting_cutover`). No-op when persistence is off (dev/test). 2 new tests. |
 
 ### High — still remaining
 - **Cross-file `CALLS` for non-resolver languages:** the F19 second pass covers Python and
@@ -96,7 +97,6 @@ ordering bug (now fixed, see F8), not a test artifact.
 ### Medium / Low — still remaining
 - Private signing keys stored unencrypted, guarded only by `os.chmod(0o600)` — a no-op on Windows.
   (Real encryption-at-rest / OS keychain integration is follow-on work.)
-- Celery `start_pipeline` retries re-run the entire non-idempotent pipeline.
 
 Full per-finding evidence (file:line) is preserved in the audit run output and can be regenerated.
 

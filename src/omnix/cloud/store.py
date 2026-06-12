@@ -183,6 +183,34 @@ def get_job_tenant(job_id: str) -> str | None:
         return None
 
 
+def get_job_state(job_id: str) -> str | None:
+    """Return a job's lifecycle state (the JobState value), or None."""
+    if not persistence_enabled():
+        return None
+    try:
+        with sync_session_scope() as s:
+            job = s.get(Job, job_id)
+            if job is None:
+                return None
+            return job.state.value if hasattr(job.state, "value") else str(job.state)
+    except Exception:  # noqa: BLE001
+        log.warning("get_job_state failed for %s", job_id, exc_info=True)
+        return None
+
+
+def job_already_finished(job_id: str) -> bool:
+    """True if the job already reached a terminal success state.
+
+    Used to make the Celery pipeline task idempotent: a retry (or a duplicate
+    dispatch) must not re-run a pipeline that already completed. No-op when
+    persistence is off, so single-process dev/test behaves as before.
+    """
+    return get_job_state(job_id) in {
+        JobState.COMPLETE.value,
+        JobState.AWAITING_CUTOVER.value,
+    }
+
+
 def persist_receipt(
     *,
     job_id: str,

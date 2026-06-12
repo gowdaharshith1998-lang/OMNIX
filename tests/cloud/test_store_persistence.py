@@ -164,6 +164,52 @@ def test_inline_production_run_persists_events_and_receipt(persistent_db):
             assert receipts[0].public_key  # verification key persisted
 
 
+def test_job_already_finished_guard(persistent_db):
+    """The idempotency guard reports terminal-success jobs as finished so a
+    Celery retry can skip re-running them."""
+    from omnix.cloud import events, store
+
+    _seed_tenant(persistent_db)
+    store.record_job("job-done", tenant_id="t-acme", mode="git_clone")
+    assert store.job_already_finished("job-done") is False  # queued
+
+    events.publish("job-done", "complete", "done", severity="success")
+    assert store.job_already_finished("job-done") is True
+
+    # awaiting_cutover also counts as finished (terminal for the worker)
+    store.record_job("job-cut", tenant_id="t-acme", mode="git_clone")
+    events.publish("job-cut", "cutover", "awaiting", severity="success")
+    assert store.job_already_finished("job-cut") is True
+
+    assert store.job_already_finished("never-seen") is False
+
+
+def test_replicate_task_skips_finished_job(persistent_db, monkeypatch):
+    """The Celery task body must not re-run a pipeline that already finished."""
+    from omnix.cloud import store
+    from omnix.cloud.tasks import replicate
+
+    _seed_tenant(persistent_db)
+    store.record_job("job-skip", tenant_id="t-acme", mode="git_clone")
+    # Mark it finished.
+    from omnix.cloud import events
+    events.publish("job-skip", "complete", "done", severity="success")
+
+    called = {"ran": False}
+
+    def _boom(*a, **k):
+        called["ran"] = True
+        raise AssertionError("run_pipeline should not be called for a finished job")
+
+    monkeypatch.setattr("omnix.cloud.pipeline.runner.run_pipeline", _boom)
+    # Call the task's underlying function directly (bypass Celery dispatch).
+    result = replicate.start_pipeline.run(  # type: ignore[attr-defined]
+        job_id="job-skip", tenant_id="t-acme",
+    )
+    assert result["skipped"] is True
+    assert called["ran"] is False
+
+
 def test_persistence_off_is_pure_in_memory(monkeypatch):
     """With the flag off, store helpers are no-ops and events stay in-memory."""
     monkeypatch.delenv("OMNIX_EVENTS_PERSIST", raising=False)
