@@ -1,4 +1,7 @@
-import { _SLASH_REGEX_FOR_TESTS as SLASH } from "../src/handlers/pr_comment.js";
+import {
+  _SLASH_REGEX_FOR_TESTS as SLASH,
+  isTrustedSlashCommandAuthor,
+} from "../src/handlers/pr_comment.js";
 
 describe("/omnix replicate slash command", () => {
   test("matches bare command", () => {
@@ -16,5 +19,19 @@ describe("/omnix replicate slash command", () => {
 
   test("tolerates trailing whitespace", () => {
     expect(SLASH.exec("/omnix replicate src/x   ")?.[2]).toBe("src/x");
+  });
+});
+
+describe("slash command author authorization", () => {
+  test("allows trusted repository actors", () => {
+    expect(isTrustedSlashCommandAuthor("OWNER")).toBe(true);
+    expect(isTrustedSlashCommandAuthor("MEMBER")).toBe(true);
+    expect(isTrustedSlashCommandAuthor("COLLABORATOR")).toBe(true);
+  });
+
+  test("rejects untrusted commenters", () => {
+    expect(isTrustedSlashCommandAuthor("CONTRIBUTOR")).toBe(false);
+    expect(isTrustedSlashCommandAuthor("NONE")).toBe(false);
+    expect(isTrustedSlashCommandAuthor(undefined)).toBe(false);
   });
 });

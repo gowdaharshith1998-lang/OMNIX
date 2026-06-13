@@ -12,6 +12,7 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from omnix.cloud.auth.tenancy import require_session_tenant
 from omnix.cloud.ingest.git_clone import GitIngestionError, clone_repository
 
 router = APIRouter()
@@ -38,6 +39,7 @@ async def git_clone(
     x_tenant_id: str | None = Header(None, alias="X-Tenant-Id"),
 ):
     job_id = uuid.uuid4().hex
+    tenant_id = require_session_tenant(x_tenant_id)
     if payload.inline:
         try:
             result = clone_repository(payload.repo, token=payload.token, ref=payload.ref)
@@ -61,7 +63,7 @@ async def git_clone(
             repo_url=payload.repo,
             token=payload.token,
             ref=payload.ref,
-            tenant_id=x_tenant_id,
+            tenant_id=tenant_id,
         )
     except Exception as exc:  # noqa: BLE001 - keep API responsive if Celery is down
         raise HTTPException(

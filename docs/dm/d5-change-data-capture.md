@@ -1,33 +1,38 @@
-# D5 — Change Data Capture (PR C)
+# D5 — Change Data Capture
 
-> Strangler-Fig data plane: capture every legacy write from the D4 snapshot
-> LSN onwards via PostgreSQL logical replication, replay through the same
+> Strangler-Fig data plane: capture supported PostgreSQL change events from the
+> D4 snapshot LSN onwards via logical replication, replay through the same
 > `TransformerSpec`s, surface lag honestly, propose cutover when sustained
 > parity is met.
+
+## Status
+
+D5 is present for PostgreSQL CDC. Oracle and MySQL adapters are intentionally
+stubbed and must not be described as available until implemented and verified.
 
 ## Strangler-Fig phases
 
 ```
 1. Snapshot + Bulk (D4)           — consistent legacy snapshot at LSN L0;
-                                     bulk import via PR B transformers.
+                                     bulk import via D3 transformers.
 2. CDC start at L0 (D5)           — START_REPLICATION from L0; no gap.
 3. Catch-up (D5)                  — process backlog accumulated during bulk;
-                                     lag drops monotonically.
+                                     lag is expected to decrease as backlog drains.
 4. Steady-state replay (D5)       — target stays within seconds of legacy.
 5. Parity check (D5 lag monitor)  — sustained low lag + low divergence.
-6. Cutover (operator + PR F)      — operator signs CutoverProposal; app
+6. Cutover (operator)             — operator signs CutoverProposal; app
                                      traffic moves to target.
 ```
 
-D5's job is phases 2–5. Phase 6 is operator-driven; PR C never auto-cuts.
+D5's job is phases 2–5. Phase 6 is operator-driven; D5 never auto-cuts.
 
 ## pgoutput binary protocol
 
-D5 consumes the PG `pgoutput` plugin (built into PG 10+, the default for
-managed services like AWS RDS / Google Cloud SQL / Azure). The parser
+D5 consumes the PG `pgoutput` plugin (built into PG 10+ and available on many
+managed PostgreSQL services when logical replication is enabled). The parser
 (`pg_adapter/pgoutput_parser.py`) handles:
 
-| Tag | Meaning | PR C behaviour |
+| Tag | Meaning | Current behavior |
 | --- | --- | --- |
 | `R` | Relation schema | Cached by `relation_id`. |
 | `B` | Begin transaction | Records final_lsn + commit_ts + xid. |
@@ -35,11 +40,11 @@ managed services like AWS RDS / Google Cloud SQL / Azure). The parser
 | `U` | Update | Yields `ChangeEvent(op="U", before=key-or-full, after=new)`. |
 | `D` | Delete | Yields `ChangeEvent(op="D", before=key-or-full)`. |
 | `C` | Commit | Records end_lsn. |
-| `T` | Truncate | Surfaces in `unhandled_event_types_seen` + quarantines. PR D will auto-replay. |
+| `T` | Truncate | Surfaces in `unhandled_event_types_seen` + quarantines; automatic replay is future work. |
 | `M`/`Y`/`O`/`S` | Other | Counted in `unhandled_event_types_seen`. |
 
 Tuple data kinds: `n` (NULL), `u` (TOAST-unchanged — surfaced as
-`_UnchangedToast` sentinel; PR D may add a fetch path), `t` (text repr),
+`_UnchangedToast` sentinel; a later fetch path may resolve it), `t` (text repr),
 `b` (binary). Truncated/corrupted bytes raise `ParseError` — **never
 silently skipped**.
 
@@ -57,14 +62,13 @@ not vanish.
 
 ## CDC event receipt sampling
 
-Emitting one ML-DSA-65-signed receipt per CDC event is infeasible at OLTP
-scale (10K-100K events/sec; signing is ~5-10ms each). PR C samples at
+Per-event signing can dominate high-throughput CDC workloads, so D5 samples at
 `OMNIX_DM_CDC_EVENT_RECEIPT_SAMPLE_RATE` (default 0.01 = 1%).
 
-**Every event is still individually replayed + landed on target with the
-`__omnix_cdc_lsn` watermark.** The durable proof of replay is the target
-row + watermark; the sampled receipts are for audit. Set the rate to `1.0`
-for compliance pilots that need full audit and accept the throughput cost.
+**Each replayed event that reaches the target carries the `__omnix_cdc_lsn`
+watermark.** Quarantined and unhandled events are reported separately. The
+sampled receipts are for audit review. Set the rate to `1.0` for pilots that
+need full audit detail and accept the throughput cost.
 
 ## Lag monitor + CutoverProposal
 
@@ -91,13 +95,13 @@ for compliance pilots that need full audit and accept the throughput cost.
   recommended_action="investigate_divergence")`. **Honest — never silently
   propose cutover.**
 
-`parity_metrics` is structural in PR C (`divergence_rate=0.0`); PR D's
-G7 row-diff gate fills it with real divergence data.
+`parity_metrics` is structural in the current D5 path (`divergence_rate=0.0`);
+a later row-diff gate fills it with real divergence data.
 
 ## Replication slot lifecycle
 
 Logical replication slots **block WAL recycling on the legacy DB**. If
-OMNIX-DM crashes and leaves a slot orphaned, legacy fills its disk. PR C
+OMNIX-DM crashes and leaves a slot orphaned, legacy fills its disk. D5
 provides:
 
 * `atexit` handler that tears down the slot on normal Python exit.
@@ -109,22 +113,22 @@ provides:
 SELECT pg_drop_replication_slot('omnix_<migration_id>');
 ```
 
-PR D will add periodic health-checked teardown with retry.
+A later hardening phase will add periodic health-checked teardown with retry.
 
 ## Oracle + MySQL adapters
 
-Both are stubbed in PR C. `OracleAdapter.start()` and `MySQLAdapter.start()`
-raise `NotYetImplementedInPRC` with a message naming PR D. Any customer
-attempting Oracle or MySQL CDC gets a clear error — **never a silent NOP**.
+Oracle and MySQL CDC are out of scope for the current D5 implementation.
+`OracleAdapter.start()` and `MySQLAdapter.start()` raise an explicit
+`NotYetImplementedInPRC` error — **never a silent NOP**.
 
-PR D's plan is documented in the adapter module docstrings: LogMiner via
-`cx_Oracle` for Oracle, `mysql-replication` library for MySQL.
+The planned adapter path is documented in the adapter module docstrings:
+LogMiner via `cx_Oracle` for Oracle, `mysql-replication` for MySQL.
 
 ## Honest gaps deferred
 
-* **Parity metrics divergence_rate** filled by PR D's G7 row-diff gate.
-* **Truncate auto-replay** in PR D (PR C quarantines).
+* **Parity metrics divergence_rate** filled by a later row-diff gate.
+* **Truncate auto-replay** in a later CDC phase; the current path quarantines.
 * **Streaming-protocol messages** (StreamStart/StreamStop/StreamAbort/
-  StreamCommit) counted as unhandled in PR C; PR D adds full streaming
+  StreamCommit) counted as unhandled in the current path; a later phase adds full streaming
   support for very large in-progress transactions.
-* **PG version matrix beyond 18.x** in PR D.
+* **PG version matrix beyond 18.x** in a later compatibility pass.

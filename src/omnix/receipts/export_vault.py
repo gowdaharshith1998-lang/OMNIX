@@ -12,6 +12,7 @@ from pathlib import Path
 
 from omnix.find_bugs.receipt_emitter import verify_scan_directory
 from omnix.omnix_version import __version__ as OMNIX_VERSION
+from omnix.receipts.finding_keys import omnix_home
 
 from .finding_receipt import compute_project_id, now_iso8601_utc
 
@@ -66,13 +67,13 @@ def build_vault_zip(
     """Build vault zip. Returns ``(out_path, scans_included, scans_excluded)``."""
     project_root = project_root.resolve(strict=True)
     project_id = compute_project_id(project_root)
-    receipts_root = Path.home() / ".omnix" / "receipts" / "findings" / project_id
+    receipts_root = omnix_home() / ".omnix" / "receipts" / "findings" / project_id
 
     if not receipts_root.is_dir():
         raise FileNotFoundError(f"no scans found for project {project_id} at {receipts_root}")
 
     ed25519_pub = project_root / ".omnix" / "pubkey.pem"
-    mldsa_pub = Path.home() / ".omnix" / "keys" / "public.pem"
+    mldsa_pub = omnix_home() / ".omnix" / "keys" / "public.pem"
     for p in (ed25519_pub, mldsa_pub):
         if not p.is_file():
             raise FileNotFoundError(f"public key missing: {p}")

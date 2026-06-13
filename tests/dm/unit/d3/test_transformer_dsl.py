@@ -17,7 +17,6 @@ from omnix.dm.d3_transformation_synthesis.transformer_dsl import (
     validate_ast,
 )
 
-
 # ---------------- happy paths ----------------
 
 

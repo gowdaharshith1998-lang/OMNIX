@@ -11,14 +11,21 @@ from __future__ import annotations
 import secrets
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Cookie, Header, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from omnix.cloud.auth.jwt_session import Session, SessionError, issue, verify
 from omnix.cloud.auth.workos import get_provider
+from omnix.cloud.config import get_settings
 
 router = APIRouter()
+
+
+def _cookie_secure() -> bool:
+    """State cookies must be HTTPS-only in production; relaxed in dev so the
+    OAuth round-trip works over plain http://localhost."""
+    return not get_settings().debug
 
 
 class AuthState(BaseModel):
@@ -32,10 +39,11 @@ async def login(redirect_uri: str = Query(...), redirect_to: str | None = None):
     state = secrets.token_urlsafe(24)
     url = provider.authorization_url(redirect_uri=redirect_uri, state=state)
     resp = RedirectResponse(url, status_code=303)
-    resp.set_cookie("omnix_state", state, httponly=True, secure=False, samesite="lax")
+    secure = _cookie_secure()
+    resp.set_cookie("omnix_state", state, httponly=True, secure=secure, samesite="lax")
     if redirect_to:
         resp.set_cookie("omnix_post_auth", redirect_to, httponly=True,
-                        secure=False, samesite="lax")
+                        secure=secure, samesite="lax")
     return resp
 
 
@@ -51,15 +59,20 @@ class CallbackResponse(BaseModel):
 async def callback(
     code: str = Query(...),
     state: str | None = Query(None),
+    omnix_state: str | None = Cookie(None),
     tenant_id_hint: str | None = Header(None, alias="X-Tenant-Id-Hint"),
 ):
+    if not state or not omnix_state or not secrets.compare_digest(state, omnix_state):
+        raise HTTPException(status_code=400, detail="invalid auth state")
     provider = get_provider()
     try:
         profile = provider.exchange_code(code)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=401, detail=f"code exchange failed: {exc}") from exc
 
-    tenant_id = tenant_id_hint or profile.workos_org_id or "default"
+    if tenant_id_hint and profile.workos_org_id and tenant_id_hint != profile.workos_org_id:
+        raise HTTPException(status_code=403, detail="tenant hint does not match identity")
+    tenant_id = profile.workos_org_id or "default"
     tier = "smb"
     if profile.workos_org_id and profile.workos_org_id.startswith("org-bank-"):
         tier = "banking"

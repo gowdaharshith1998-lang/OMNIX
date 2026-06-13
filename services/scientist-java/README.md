@@ -1,6 +1,18 @@
-# omnix-scientist (Java)
+# omnix-scientist for Java
 
-Drop-in GitHub-Scientist port for Java services migrating to OMNIX-replicated targets.
+Java adapter for dual-running a legacy implementation and a candidate
+implementation while OMNIX collects mismatch evidence.
+
+## Status
+
+This package is an adapter surface for private pilots and service-side
+experiments. The experiment always returns the control result; candidate drift
+is published asynchronously to the configured sink.
+
+## Requirements
+
+- JDK 17+
+- Maven 3.9+
 
 ## Maven
 
@@ -20,9 +32,21 @@ Experiment<Order, Receipt> exp = Experiment.<Order, Receipt>named("checkout")
     .try_(NewCheckout::process)
     .publisher(JsonlPublisher.of(Path.of("/var/log/omnix-mismatches.jsonl")))
     .build();
+
 Receipt result = exp.run(order);
 ```
 
-The experiment always returns the **control** result — your users never see
-candidate-side drift. Mismatches are published asynchronously to your sink of
-choice.
+## Verification
+
+Run package-specific checks from this directory when Maven is available:
+
+```bash
+mvn test
+```
+
+## Operational Notes
+
+- The control result is always returned to the caller.
+- Mismatches are review evidence; they do not automatically approve a cutover.
+- Customer services should decide where mismatch logs are retained and who can
+  access them.

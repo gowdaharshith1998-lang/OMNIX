@@ -28,17 +28,16 @@ smallest tool that satisfies the spec.
 
 ## Required dependencies
 
-As of 2026, both libs ship under group `com.github.javaparser` at the same
-version — latest stable major is **3.x** (current `3.26.x` line). Pull the
-matching pair:
+The repository currently pins the JavaParser stack in `vendor/SHA256SUMS`:
 
-| Artifact                                     | Purpose                              |
-|----------------------------------------------|--------------------------------------|
-| `com.github.javaparser:javaparser-core`      | AST parsing                          |
-| `com.github.javaparser:javaparser-symbol-solver-core` | type / call resolution      |
+| Artifact | Version | Purpose |
+|---|---:|---|
+| `com.github.javaparser:javaparser-core` | `3.26.3` | AST parsing |
+| `com.github.javaparser:javaparser-symbol-solver-core` | `3.26.3` | Type and call resolution |
+| `org.javassist:javassist` | `3.30.2-GA` | Symbol-solver runtime dependency |
 
-Pinning the latest stable 3.x release in `vendor/SHA256SUMS` is mandatory.
-Bumping the major is a separate slice (it can shift resolution semantics).
+Bumping any version is a separate slice because it can shift resolution
+semantics.
 
 ## Build
 
@@ -83,7 +82,7 @@ SHA256SUMS in CI on rebuild.
 - **v1 (now):** one `java -jar javaparser-emitter.jar <file> <cp...>` per
   source file. Wall-clock budget `30.0s` (overridable via `parse_file`'s
   `timeout_s`).
-- **v2 (only if perf demands):** daemonize behind a unix-socket protocol.
+- **v2 (only if perf demands):** daemonize behind a Unix-domain socket protocol.
   Until measurements force the issue, we do not pay the complexity tax.
 
 ## Error protocol (must match `parser.py`)

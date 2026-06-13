@@ -14,8 +14,8 @@ Modernize Java 6/7 to Java 21 with verifiable behavioral equivalence.
 OMNIX is a behavioral replicator for legacy Java codebases. Install the
 GitHub App, push to your default branch, and OMNIX opens a pull request
 with Java 21 generated from scratch — accompanied by a cryptographically
-signed receipt that proves the generated code is behaviorally equivalent
-to your existing code.
+signed receipt that records hashes, verifier results, and review evidence for
+the generated code.
 
 The replication runs four equivalence verifiers in parallel:
 
@@ -25,9 +25,10 @@ The replication runs four equivalence verifiers in parallel:
 4. **Daikon-lite** — invariant re-mining on the candidate
 
 Every signed receipt is verifiable independently at
-`verify.axiomcontrol.systems` via a WASM-loaded ML-DSA-65 verifier. The
-signature algorithm is FIPS 204 — compliant with the NIST PQC migration
-mandate (2030) and CNSA 2.0 (2035) ahead of schedule.
+`verify.axiomcontrol.systems` via a WASM-loaded ML-DSA-65 verifier. Receipts
+use ML-DSA-65, the FIPS 204 post-quantum signature primitive. This supports
+PQC-readiness planning; regulatory compliance depends on each customer's
+deployment and control environment.
 
 ## Pricing
 

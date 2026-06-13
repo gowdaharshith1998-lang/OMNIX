@@ -569,7 +569,7 @@ def _import_edges(ctx: _DefContext, node: Node) -> None:
     if node.type == "import_statement":
         for c in node.children:
             if c.type == "dotted_name":
-                mod = _text(ctx.source, c)
+                mod = _text(ctx.source, c).strip()
                 iid = f"{ctx.rel}::import::{mod}"
                 ctx.store.add_node(
                     id=iid,
@@ -585,7 +585,7 @@ def _import_edges(ctx: _DefContext, node: Node) -> None:
             elif c.type == "aliased_import":
                 dn = c.child_by_field_name("name")
                 if dn and dn.type == "dotted_name":
-                    mod = _text(ctx.source, dn)
+                    mod = _text(ctx.source, dn).strip()
                     iid = f"{ctx.rel}::import::{mod}"
                     ctx.store.add_node(
                         id=iid,
@@ -600,14 +600,14 @@ def _import_edges(ctx: _DefContext, node: Node) -> None:
                     ctx.store.add_edge(ctx.file_id, iid, "IMPORTS")
     elif node.type == "import_from_statement":
         mod_node = node.child_by_field_name("module_name")
-        module = _text(ctx.source, mod_node) if mod_node else ""
+        module = _text(ctx.source, mod_node).strip() if mod_node else ""
         for c in node.children:
             if c.type != "aliased_import":
                 continue
             an = c.child_by_field_name("name")
-            sym = _text(ctx.source, an) if an else ""
+            sym = _text(ctx.source, an).strip() if an else ""
             alias = c.child_by_field_name("alias")
-            local = _text(ctx.source, alias) if alias else sym
+            local = _text(ctx.source, alias).strip() if alias else sym
             iid = f"{ctx.rel}::import::{module}.{sym or '*'}"
             ctx.store.add_node(
                 id=iid,

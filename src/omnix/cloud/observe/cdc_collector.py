@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
-from typing import Any
 
 from omnix.cloud.observe.envelope import (
     InMemorySink,

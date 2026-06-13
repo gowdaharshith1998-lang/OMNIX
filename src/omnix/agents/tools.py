@@ -6,6 +6,7 @@ import os
 import sqlite3
 import subprocess
 import urllib.request
+from pathlib import Path
 
 
 class OmnixTools:
@@ -22,11 +23,14 @@ class OmnixTools:
         end_line: int | None = None,
     ) -> dict[str, object]:
         """Read a source file from the project."""
-        full_path = os.path.join(self.project_path, file_path)
-        if not os.path.isfile(full_path):
+        try:
+            full_path = self._resolve_project_file(file_path)
+        except ValueError as exc:
+            return {"error": str(exc)}
+        if not full_path.is_file():
             return {"error": f"File not found: {file_path}"}
         try:
-            with open(full_path, encoding="utf-8", errors="ignore") as f:
+            with full_path.open(encoding="utf-8", errors="ignore") as f:
                 lines = f.readlines()
             if start_line is not None and end_line is not None:
                 lines = lines[max(0, start_line - 1) : end_line]
@@ -34,6 +38,16 @@ class OmnixTools:
             return {"file": file_path, "lines": len(lines), "content": content}
         except OSError as e:
             return {"error": str(e)}
+
+    def _resolve_project_file(self, file_path: str) -> Path:
+        rel = Path(file_path)
+        if rel.is_absolute() or ".." in rel.parts:
+            raise ValueError(f"Path outside project: {file_path}")
+        root = Path(self.project_path).resolve()
+        full_path = (root / rel).resolve()
+        if full_path != root and root not in full_path.parents:
+            raise ValueError(f"Path outside project: {file_path}")
+        return full_path
 
     def search_graph(self, query: str, limit: int = 20) -> dict[str, object]:
         """Search the code knowledge graph for nodes matching a query."""
@@ -161,8 +175,11 @@ class OmnixTools:
         self, file_path: str, line: int | None = None
     ) -> dict[str, object]:
         """Get git blame info for a file."""
-        full_path = os.path.join(self.project_path, file_path)
-        if not os.path.isfile(full_path):
+        try:
+            full_path = self._resolve_project_file(file_path)
+        except ValueError as exc:
+            return {"error": str(exc)}
+        if not full_path.is_file():
             return {"error": f"File not found: {file_path}"}
         try:
             cmd = ["git", "blame", "--porcelain", file_path]

@@ -36,6 +36,10 @@ CREATE TABLE IF NOT EXISTS edges (
     return str(p)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="resource memory caps are unavailable on Windows",
+)
 def test_memory_pathology_finding_on_large_bytes_alloc(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

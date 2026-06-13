@@ -263,11 +263,23 @@ class _State:
     current_xid: Optional[int] = None
     current_commit_ts_iso: Optional[str] = None
     current_lsn: Optional[str] = None
+    current_seq: int = 0
     unhandled_event_types: List[str] = None  # type: ignore[assignment]
 
     def __post_init__(self):
         if self.unhandled_event_types is None:
             self.unhandled_event_types = []
+
+
+def _take_seq(state: "_State") -> int:
+    """Next intra-transaction sequence number (resets on Begin)."""
+    s = state.current_seq
+    state.current_seq = s + 1
+    return s
+
+
+def _key_cols(rel: Optional[RelationSchema]) -> Tuple[str, ...]:
+    return () if rel is None else tuple(n for n, _oid, is_key in rel.columns if is_key)
 
 
 def parse_message(
@@ -292,6 +304,7 @@ def parse_message(
         state.current_xid = xid
         state.current_commit_ts_iso = _pg_ts_to_iso(commit_ts)
         state.current_lsn = _lsn_str(final_lsn)
+        state.current_seq = 0
         return None
     if tag == ord("C"):
         _, _commit_lsn, end_lsn, commit_ts = _parse_commit(cur)
@@ -317,6 +330,8 @@ def parse_message(
             commit_timestamp=state.current_commit_ts_iso,
             before=None,
             after=after,
+            seq=_take_seq(state),
+            key_columns=_key_cols(rel),
         )
     if tag == ord("U"):
         relation_id = cur.u32()
@@ -342,6 +357,8 @@ def parse_message(
             commit_timestamp=state.current_commit_ts_iso,
             before=before,
             after=after,
+            seq=_take_seq(state),
+            key_columns=_key_cols(rel),
         )
     if tag == ord("D"):
         relation_id = cur.u32()
@@ -362,6 +379,8 @@ def parse_message(
             commit_timestamp=state.current_commit_ts_iso,
             before=before,
             after=None,
+            seq=_take_seq(state),
+            key_columns=_key_cols(rel),
         )
     if tag == ord("T"):
         relation_count = cur.u32()
@@ -382,6 +401,8 @@ def parse_message(
             commit_timestamp=state.current_commit_ts_iso,
             before=None,
             after=None,
+            seq=_take_seq(state),
+            key_columns=_key_cols(rel),
         )
     # Other tags: Y / O / M / S / streaming — count + skip.
     state.unhandled_event_types.append(chr(tag))

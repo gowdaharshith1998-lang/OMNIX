@@ -29,8 +29,8 @@ from omnix.dm.d3_transformation_synthesis import (
     spec_emitter,
 )
 from omnix.dm.d3_transformation_synthesis.consumer import findings_for, load_manifests
-from omnix.dm.receipts.ml_dsa_65_signer import sign_canonical
-
+from omnix.dm.receipts import merkle_chain
+from omnix.dm.receipts.ml_dsa_65_signer import canonicalize, sign_canonical
 
 # ---------------------------------------------------------------------------
 # Petclinic fixtures — 16 columns, one engineered failure
@@ -178,7 +178,7 @@ def _build_d1_manifest() -> dict:
     }
 
 
-def _build_d2_manifest() -> dict:
+def _build_d2_manifest(predecessor_hash: str = "ab" * 32) -> dict:
     findings = [
         {
             "probe_category": "encoding_anomaly",
@@ -218,7 +218,7 @@ def _build_d2_manifest() -> dict:
         "schema_version": "omnix-dm/edge-case-manifest/v1",
         "migration_id": "petclinic-2026-05-26",
         "timestamp": "2026-05-26T00:00:00+00:00",
-        "predecessor_hash": "ab" * 32,
+        "predecessor_hash": predecessor_hash,
         "findings": findings,
         "probe_failures": [],
         "requires_operator_review": True,
@@ -242,7 +242,9 @@ def _write_pra_outputs(tmp_path: Path, keys) -> Path:
     base = root / "petclinic-2026-05-26"
     base.mkdir(parents=True)
     d1 = _build_d1_manifest()
-    d2 = _build_d2_manifest()
+    d2 = _build_d2_manifest(
+        predecessor_hash=merkle_chain.next_hash(d1.get("predecessor_hash"), canonicalize(d1))
+    )
     can1, sig1 = sign_canonical(d1, sk)
     can2, sig2 = sign_canonical(d2, sk)
     (base / "column-mapping.json").write_bytes(can1)

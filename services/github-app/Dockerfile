@@ -17,5 +17,11 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 ENV NODE_ENV=production
+# Drop to the built-in unprivileged node user.
+RUN chown -R node:node /app
+USER node
 EXPOSE 3000
+# Liveness probe against the /health route.
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3000/health || exit 1
 CMD ["node", "dist/index.js"]

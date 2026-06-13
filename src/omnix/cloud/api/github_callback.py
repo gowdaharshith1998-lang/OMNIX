@@ -14,12 +14,13 @@ import hashlib
 import hmac
 import json
 import os
-from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel
+
+from omnix.cloud.config import get_settings
 
 router = APIRouter()
 
@@ -116,6 +117,8 @@ class _JobCompletePayload(BaseModel):
 @router.post("/github/emit", include_in_schema=False)
 async def emit(body: _JobCompletePayload = Body(...)):
     """Test/dev mirror endpoint: emit a github callback to the supplied URL."""
+    if get_settings().env not in {"dev", "test"}:
+        raise HTTPException(status_code=404, detail="not found")
     secret = body.secret or os.environ.get("OMNIX_GITHUB_APP_WEBHOOK_SECRET") or ""
     if not secret:
         raise HTTPException(status_code=400, detail="webhook secret required")

@@ -33,6 +33,7 @@ from omnix.dm._types import (
     SchemaSpec,
     TableSpec,
 )
+from omnix.dm.receipts import merkle_chain
 from omnix.dm.receipts.ml_dsa_65_signer import canonicalize
 from omnix.dm.receipts.schemas import (
     COLUMN_MAPPING_MANIFEST_SCHEMA,
@@ -66,7 +67,7 @@ class ConsumedBundle:
 def _verify_signature(payload: dict, sig_path: Path, public_key: Optional[bytes]) -> None:
     if public_key is None:
         return  # opt-out for test fixtures
-    sig_hex = sig_path.read_text().strip()
+    sig_hex = sig_path.read_text(encoding="utf-8").strip()
     try:
         sig = bytes.fromhex(sig_hex)
     except ValueError as exc:
@@ -191,20 +192,40 @@ def load_prior_receipts(
     if not d1_path.exists() or not d2_path.exists():
         raise FileNotFoundError(f"PR A manifests missing at {pra_dir!s}")
 
-    d1 = json.loads(d1_path.read_text())
-    d2 = json.loads(d2_path.read_text())
+    # Receipts are UTF-8 (ensure_ascii=False) — read them as UTF-8 so
+    # non-ASCII content survives round-trip on non-UTF-8 default platforms
+    # (Windows cp1252); otherwise signatures and spec hashes break.
+    d1 = json.loads(d1_path.read_text(encoding="utf-8"))
+    d2 = json.loads(d2_path.read_text(encoding="utf-8"))
     Draft202012Validator(COLUMN_MAPPING_MANIFEST_SCHEMA).validate(d1)
     Draft202012Validator(EDGE_CASE_MANIFEST_SCHEMA).validate(d2)
     if verify_signatures:
+        if public_key is None:
+            # Fail closed rather than silently skipping verification.
+            raise PrePhaseSignatureError(
+                "verify_signatures=True requires a public_key"
+            )
         _verify_signature(d1, pra_dir / "column-mapping.json.sig", public_key)
         _verify_signature(d2, pra_dir / "edge-case-manifest.json.sig", public_key)
+
+    # Enforce the D1->D2 Merkle link (see d3 consumer for rationale): D2's
+    # predecessor_hash must equal D1's chain hash, or a substituted/reordered
+    # manifest pair would slip through despite valid individual signatures.
+    expected_d2_predecessor = merkle_chain.next_hash(
+        d1.get("predecessor_hash"), canonicalize(d1)
+    )
+    if d2.get("predecessor_hash") != expected_d2_predecessor:
+        raise PrePhaseSignatureError(
+            "D1->D2 Merkle chain link broken: edge-case manifest predecessor_hash "
+            "does not equal the column-mapping manifest's chain hash"
+        )
 
     transformer_specs: Dict[str, dict] = {}
     transformer_halts: Dict[str, dict] = {}
     spec_hashes: Dict[str, str] = {}
     if prb_dir.exists():
         for spec_path in sorted(prb_dir.glob("transformer-spec-*.json")):
-            payload = json.loads(spec_path.read_text())
+            payload = json.loads(spec_path.read_text(encoding="utf-8"))
             Draft202012Validator(TRANSFORMER_SPEC_SCHEMA).validate(payload)
             if verify_signatures:
                 _verify_signature(
@@ -218,7 +239,7 @@ def load_prior_receipts(
             transformer_specs[key] = payload
             spec_hashes[key] = hashlib.sha256(canonicalize(payload)).hexdigest()
         for halt_path in sorted(prb_dir.glob("transformer-halt-*.json")):
-            payload = json.loads(halt_path.read_text())
+            payload = json.loads(halt_path.read_text(encoding="utf-8"))
             if verify_signatures:
                 _verify_signature(
                     payload, halt_path.with_suffix(".json.sig"), public_key

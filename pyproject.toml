@@ -8,6 +8,22 @@ version = "0.6.1"
 description = "Code intelligence platform with AXIOM ML-DSA-65 provenance"
 readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "LicenseRef-OMNIX-Source-Available-Evaluation" }
+authors = [{ name = "Harshith Gowda" }]
+keywords = ["legacy-modernization", "code-migration", "program-graph", "post-quantum", "provenance"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: Other/Proprietary License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Security :: Cryptography",
+]
 dependencies = [
     "cryptography>=42.0",
     "dilithium-py>=1.4,<2.0",
@@ -15,6 +31,13 @@ dependencies = [
     "numpy>=1.26",
     "scipy>=1.11",
     "sqlparse>=0.5",
+    "tree-sitter>=0.23.0",
+    "tree-sitter-python>=0.23.0",
+    "tree-sitter-typescript>=0.23.0",
+    "tree-sitter-java>=0.23.0",
+    "tree-sitter-go>=0.25.0",
+    "tree-sitter-ruby>=0.23.0",
+    "tree-sitter-rust>=0.24.0",
     "click>=8.1",
     "fastapi>=0.110",
     "hypothesis>=6.100",
@@ -27,7 +50,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "httpx>=0.27", "moto[s3]>=5.0", "ruff", "mypy", "pycryptodome>=3.20"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "httpx>=0.27", "moto[s3]>=5.0", "ruff", "mypy", "pycryptodome>=3.20", "aiosqlite>=0.20"]
 cloud = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -66,6 +89,7 @@ where = ["src"]
 include = ["omnix*"]
 
 [tool.setuptools.package-data]
+"omnix" = ["py.typed"]
 "omnix.cloud.verify_page" = ["templates/*.html", "templates/*.js"]
 "omnix.cloud.db" = ["migrations/*.mako", "migrations/script.py.mako"]
 "omnix.parser" = ["hints/*.json", "quality_profiles/*.json", "quality_profiles/README.md"]
@@ -129,11 +153,14 @@ warn_unused_ignores = false
 [[tool.mypy.overrides]]
 module = [
     "omnix.agents.*",
+    "omnix.cloud.*",
+    "omnix.dm.*",
     "omnix.fabric.*",
     "omnix.find_bugs.*",
     "omnix.graph.exporter",
     "omnix.parser.*",
     "omnix.scan.turboscan.*",
     "omnix.studio.*",
+    "omnix.verify.runners.*",
 ]
 ignore_errors = true

@@ -1,8 +1,18 @@
 import type { Probot } from "probot";
 import { CloudClient } from "../cloud_client.js";
-import { resolveTenant } from "../tenant.js";
+import { quota } from "../quota.js";
+import { resolveTenant, resolveTier } from "../tenant.js";
 
 const SLASH = /^\/omnix\s+replicate(\s+([\w-/.]+))?\s*$/;
+const TRUSTED_AUTHOR_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+
+export function isTrustedSlashCommandAuthor(
+  authorAssociation: string | undefined,
+): boolean {
+  return Boolean(
+    authorAssociation && TRUSTED_AUTHOR_ASSOCIATIONS.has(authorAssociation),
+  );
+}
 
 export function registerPrCommentHandler(app: Probot): void {
   app.on("issue_comment.created", async (ctx) => {
@@ -15,8 +25,37 @@ export function registerPrCommentHandler(app: Probot): void {
 
     const repo = ctx.payload.repository;
     const prNumber = ctx.payload.issue.number;
+    if (!isTrustedSlashCommandAuthor(ctx.payload.comment.author_association)) {
+      ctx.log.warn(
+        {
+          user: ctx.payload.comment.user?.login,
+          authorAssociation: ctx.payload.comment.author_association,
+        },
+        "skipping untrusted slash command",
+      );
+      await ctx.octokit.issues.createComment({
+        owner: repo.owner.login,
+        repo: repo.name,
+        issue_number: prNumber,
+        body: "OMNIX replication skipped: only repository owners, members, or collaborators may run this command.",
+      });
+      return;
+    }
 
     const tenant = await resolveTenant(installationId);
+    const tier = await resolveTier(installationId);
+    const check = quota.check(installationId, tier);
+    if (!check.allowed) {
+      ctx.log.warn({ installationId, reason: check.reason }, "quota exceeded");
+      await ctx.octokit.issues.createComment({
+        owner: repo.owner.login,
+        repo: repo.name,
+        issue_number: prNumber,
+        body: `OMNIX replication skipped: ${check.reason}`,
+      });
+      return;
+    }
+
     const client = new CloudClient();
     try {
       const job = await client.startJob(
@@ -32,6 +71,7 @@ export function registerPrCommentHandler(app: Probot): void {
         },
         tenant,
       );
+      quota.record(installationId);
       await ctx.octokit.issues.createComment({
         owner: repo.owner.login,
         repo: repo.name,

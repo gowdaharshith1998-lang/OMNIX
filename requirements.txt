@@ -1,3 +1,3 @@
-tree-sitter>=0.23.0
-tree-sitter-python>=0.23.0
-tree-sitter-typescript>=0.23.0
+# Local evaluation install. This installs OMNIX plus the runtime dependencies
+# declared in pyproject.toml, including the bundled Tree-sitter grammar wheels.
+-e .

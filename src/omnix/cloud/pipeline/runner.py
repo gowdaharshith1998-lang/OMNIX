@@ -222,6 +222,25 @@ def run_pipeline(
             source_repo=source_repo, source_sha=source_sha,
             source_sha256=source_sha256,
         )
+        # Durably persist the signed completion receipt (no-op unless
+        # persistence is enabled and we know the owning tenant).
+        if tenant_id:
+            import base64
+            import hashlib
+
+            from omnix.cloud import store
+
+            canonical = base64.b64decode(receipt["payload_canonical_b64"])
+            store.persist_receipt(
+                job_id=job_id,
+                tenant_id=tenant_id,
+                receipt_kind=receipt["payload"]["kind"],
+                payload_canonical=canonical,
+                payload_json=receipt["payload"],
+                payload_sha256=hashlib.sha256(canonical).hexdigest(),
+                signature=base64.b64decode(receipt["signature_b64"]),
+                public_key=base64.b64decode(receipt["public_key_b64"]),
+            )
         _emit(job_id, "complete", "pipeline complete (inline production)",
               severity="success", receipt_count=1)
         return {

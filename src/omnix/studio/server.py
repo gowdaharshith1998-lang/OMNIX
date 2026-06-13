@@ -65,6 +65,7 @@ from omnix.receipts.finding_receipt import compute_project_id
 from omnix.studio.bugs_scan import run_scan_for_workspace
 from omnix.studio.parser_bridge import ParserBridge, broadcast_to_workspace
 from omnix.studio.recent import add_recent, list_recent
+from omnix.studio.security import safe_workspace_file_path
 from omnix.studio.watcher import ProjectWatcher, is_studio_ignored
 from omnix.studio.workspace import (
     MANAGER,
@@ -99,9 +100,13 @@ async def _app_lifespan(_app: FastAPI) -> Any:  # noqa: ANN401, RUF029, ASYNC109
 
 app = FastAPI(title="OMNIX Studio", lifespan=_app_lifespan)  # type: ignore[assignment, misc, no-untyped-def]
 
+# Studio is a localhost-only tool. A wildcard CORS policy let any website the
+# operator visited read responses from 127.0.0.1 (the per-endpoint localhost
+# guard passes for a browser's own loopback request, and "*" then exposed the
+# body). Restrict to localhost origins only.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -194,6 +199,37 @@ def _require_localhost_starlette(request: Request) -> None:
         raise HTTPException(status_code=403, detail="grammar_api_localhost_only")
 
 
+def _is_localhost_ws(websocket: WebSocket) -> bool:
+    """Origin/host guard for the WebSocket endpoint (mirrors the HTTP guard).
+
+    A cross-origin page can open a ws:// to 127.0.0.1; without this check it
+    could stream the operator's workspace. Reject any non-localhost Origin.
+    """
+    client = websocket.client
+    ip = client.host if client else ""
+    asgi_test = ip == "testclient"
+    if not asgi_test:
+        ok_ip = ip in ("127.0.0.1", "::1")
+        if isinstance(ip, str) and ip.startswith("::ffff:"):
+            ok_ip = ip.split(":")[-1] == "127.0.0.1"
+        if not ok_ip:
+            return False
+    host = websocket.headers.get("Host", "")
+    hn = _parse_host_hostname_studio(host)
+    allowed_hosts = ("127.0.0.1", "localhost", "[::1]", "::1")
+    if asgi_test:
+        allowed_hosts = (*allowed_hosts, "testserver")
+    if hn not in allowed_hosts:
+        return False
+    origin = websocket.headers.get("Origin")
+    if not origin:
+        return True
+    o = origin.strip()
+    if o in ("null", "file://"):
+        return True
+    return bool(re.match(r"^http://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?/?$", o))
+
+
 def _grammar_db_search_root() -> Path | None:
     if INITIAL_STUDIO_PATH:
         return Path(INITIAL_STUDIO_PATH).resolve()
@@ -207,21 +243,6 @@ def _canonical_receipt_roots() -> list[Path]:
     if INITIAL_STUDIO_PATH:
         roots.append((Path(INITIAL_STUDIO_PATH) / ".omnix" / "receipts").resolve())
     return roots
-
-
-def _receipt_resolves_under_allowed(abs_path: Path) -> bool:
-    try:
-        rp = abs_path.resolve()
-    except OSError:
-        return False
-    for root in _canonical_receipt_roots():
-        try:
-            if root.is_dir():
-                rp.relative_to(root)
-                return True
-        except ValueError:
-            continue
-    return False
 
 
 def _omnix_cli_argv() -> list[str]:
@@ -500,23 +521,30 @@ def api_grammar_verify_receipt(
 ) -> Any:
     _require_localhost_starlette(request)
     raw = body.receipt_path.strip()
-    if not raw.startswith("/"):
+    expanded = os.path.expanduser(raw)
+    if not os.path.isabs(expanded):
         raise HTTPException(
             status_code=400,
             detail="receipt_path must be an absolute path under ~/.omnix/receipts/ "
             "or <project>/.omnix/receipts/",
         )
-    receipt = Path(raw)
-    try:
-        resolved = receipt.resolve()
-    except OSError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    if not _receipt_resolves_under_allowed(receipt):
+    # realpath + startswith (inline, not behind a helper) keeps the
+    # containment check in the shape CodeQL models as a path-injection
+    # sanitizer; semantics match the old _receipt_resolves_under_allowed.
+    candidate = os.path.realpath(expanded)
+    roots = _canonical_receipt_roots()
+    home_root = str(roots[0]) if roots[0].is_dir() else None
+    project_root = str(roots[1]) if len(roots) > 1 and roots[1].is_dir() else None
+    if not (
+        (home_root is not None and candidate.startswith(home_root + os.sep))
+        or (project_root is not None and candidate.startswith(project_root + os.sep))
+    ):
         raise HTTPException(
             status_code=400,
             detail="receipt_path must resolve under ~/.omnix/receipts/ "
             "or the opened project's .omnix/receipts/",
         )
+    resolved = Path(candidate)
     if not resolved.is_file():
         raise HTTPException(status_code=404, detail="receipt not found")
 
@@ -853,11 +881,13 @@ def _iter_receipts(
 
 @app.get("/api/workspace/{workspace_id}/receipts")
 def api_workspace_receipts(
+    request: Request,
     workspace_id: str,
     since: str | None = None,
     until: str | None = None,
     limit: int = 100,
 ) -> dict[str, list[dict[str, Any]]]:
+    _require_localhost_starlette(request)
     w = MANAGER.get(workspace_id)
     if w is None:
         raise HTTPException(404, "unknown workspace_id")
@@ -873,9 +903,11 @@ def api_workspace_receipts(
 
 @app.get("/api/workspace/{workspace_id}/receipts/{receipt_id}")
 def api_workspace_receipt_by_id(
+    request: Request,
     workspace_id: str,
     receipt_id: str,
 ) -> dict[str, Any]:
+    _require_localhost_starlette(request)
     w = MANAGER.get(workspace_id)
     if w is None:
         raise HTTPException(404, "unknown workspace_id")
@@ -974,7 +1006,8 @@ async def _run_bootstrap(websocket: WebSocket, w: Workspace) -> None:
 
 
 @app.post("/api/workspace/open")
-async def api_workspace_open(body: OpenBody) -> dict[str, Any]:
+async def api_workspace_open(request: Request, body: OpenBody) -> dict[str, Any]:
+    _require_localhost_starlette(request)
     try:
         w, stats0 = open_workspace(body.path)
     except ValueError as e:
@@ -996,7 +1029,8 @@ async def api_workspace_open(body: OpenBody) -> dict[str, Any]:
 
 
 @app.post("/api/workspace/close")
-async def api_workspace_close(body: CloseBody) -> dict[str, bool]:  # noqa: D103
+async def api_workspace_close(request: Request, body: CloseBody) -> dict[str, bool]:  # noqa: D103
+    _require_localhost_starlette(request)
     w = MANAGER.get(body.workspace_id)
     if w is None:
         raise HTTPException(404, "unknown workspace_id")
@@ -1139,10 +1173,12 @@ def _build_file_tree(root: Path, *, max_depth: int = 6) -> dict[str, Any]:
 
 @app.get("/api/workspace/{workspace_id}/files")
 def api_list_files(  # noqa: D103
+    request: Request,
     workspace_id: str,
     prefix: str = "",
     limit: int = 100,
 ) -> dict[str, list[dict[str, Any]]]:  # noqa: E501
+    _require_localhost_starlette(request)
     w = MANAGER.get(workspace_id)  # noqa: E501
     if w is None:
         raise HTTPException(404, "unknown workspace_id")
@@ -1157,7 +1193,8 @@ def api_list_files(  # noqa: D103
 
 
 @app.get("/api/workspace/{workspace_id}/files/tree")
-def api_files_tree(workspace_id: str) -> dict[str, dict[str, Any]]:
+def api_files_tree(request: Request, workspace_id: str) -> dict[str, dict[str, Any]]:
+    _require_localhost_starlette(request)
     w = MANAGER.get(workspace_id)
     if w is None:
         raise HTTPException(404, "unknown workspace_id")
@@ -1166,14 +1203,15 @@ def api_files_tree(workspace_id: str) -> dict[str, dict[str, Any]]:
 
 @app.post("/api/workspace/{workspace_id}/file")
 async def api_create_file(  # noqa: D103
+    request: Request,
     workspace_id: str,
     body: FileWriteBody,
 ) -> dict[str, Any]:  # noqa: E501
+    _require_localhost_starlette(request)
     w = MANAGER.get(workspace_id)  # noqa: E501
     if w is None:
         raise HTTPException(404, "unknown workspace_id")
-    rel = body.path.replace("\\", "/").lstrip("/")
-    p = w.root / rel
+    p, rel = safe_workspace_file_path(w.root, body.path)
     p.parent.mkdir(parents=True, exist_ok=True)  # noqa: E501
     p.write_text(body.content, encoding="utf-8", newline="")  # noqa: E501, WPS
     return {"created": True, "path": rel}  # noqa: E501
@@ -1181,15 +1219,17 @@ async def api_create_file(  # noqa: D103
 
 @app.get("/api/workspace/{workspace_id}/file")
 def api_get_file(  # noqa: D103
+    request: Request,
     workspace_id: str,
     path: str = Query(""),
 ) -> dict[str, Any]:  # noqa: E501
+    _require_localhost_starlette(request)
     w = MANAGER.get(workspace_id)  # noqa: E501
     if w is None:
         raise HTTPException(404, "unknown workspace_id")
     if not path:
         raise HTTPException(400, "path required")
-    p = w.root / path
+    p, rel = safe_workspace_file_path(w.root, path)
     if not p.is_file():
         raise HTTPException(404, "file not found")
     raw = p.read_text(encoding="utf-8", errors="replace")
@@ -1199,7 +1239,7 @@ def api_get_file(  # noqa: D103
     d = detect_for_path(p)
     lang = (d.grammar_name or d.inferred_lang or "text") or "text"  # noqa: E501
     return {  # noqa: E501
-        "path": path,
+        "path": rel,
         "content": raw,
         "last_modified": mtime,
         "language": str(lang),  # noqa: E501
@@ -1214,14 +1254,15 @@ def _mtime_mismatch(
 
 @app.put("/api/workspace/{workspace_id}/file")
 async def api_put_file(  # noqa: D103
+    request: Request,
     workspace_id: str,
     body: FilePutBody,
 ) -> dict[str, Any]:
+    _require_localhost_starlette(request)
     w = MANAGER.get(workspace_id)  # noqa: E501
     if w is None:
         raise HTTPException(404, "unknown workspace_id")
-    rel = body.path.replace("\\", "/").lstrip("/")
-    p = w.root / rel
+    p, rel = safe_workspace_file_path(w.root, body.path)
     if not p.is_file():
         raise HTTPException(404, "file not found")
     try:  # noqa: E501, SIM, E501
@@ -1374,6 +1415,9 @@ async def _stats_ticker(w: Workspace, stop: asyncio.Event) -> None:
 
 @app.websocket("/ws/workspace/{workspace_id}")
 async def ws_workspace(websocket: WebSocket, workspace_id: str) -> None:
+    if not _is_localhost_ws(websocket):
+        await websocket.close(code=1008)
+        return
     w = MANAGER.get(workspace_id)
     if w is None:
         await websocket.close(code=1008)
@@ -1381,7 +1425,13 @@ async def ws_workspace(websocket: WebSocket, workspace_id: str) -> None:
     await websocket.accept()
     w.add_ws(websocket)  # type: ignore[union-attr, misc, no-untyped-def]
     stop = asyncio.Event()
-    t_stats = asyncio.create_task(_stats_ticker(w, stop), name="studio-stats")
+    # The periodic stats ticker must NOT start until the bootstrap handshake
+    # has been sent: a subscriber's contract is that bootstrap_start is the
+    # first frame it receives. Starting the ticker up front let a 0.5s stats
+    # tick race ahead of bootstrap (bootstrap blocks on ingest_event), which
+    # a real frontend — and the live-loop integration test — relies on never
+    # happening.
+    t_stats: asyncio.Task | None = None
     try:
         try:
             first = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
@@ -1402,6 +1452,8 @@ async def ws_workspace(websocket: WebSocket, workspace_id: str) -> None:
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(w.ingest_event.wait(), timeout=600.0)  # type: ignore[union-attr, misc, no-untyped-def]
         await _run_bootstrap(websocket, w)
+        # Bootstrap delivered — now safe to stream periodic stats.
+        t_stats = asyncio.create_task(_stats_ticker(w, stop), name="studio-stats")
         while True:
             try:
                 raw = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
@@ -1421,9 +1473,10 @@ async def ws_workspace(websocket: WebSocket, workspace_id: str) -> None:
         raise
     finally:
         stop.set()
-        t_stats.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await t_stats
+        if t_stats is not None:
+            t_stats.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await t_stats
         w.remove_ws(websocket)  # type: ignore[union-attr, misc, no-untyped-def]
 
 

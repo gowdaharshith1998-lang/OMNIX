@@ -50,7 +50,11 @@ def test_login_redirects_to_workos(client):
 
 def test_callback_mints_session(client):
     code = "stub:user-42:hello@bank.com:org-bank-acme"
-    resp = client.get("/v1/auth/callback", params={"code": code})
+    resp = client.get(
+        "/v1/auth/callback",
+        params={"code": code, "state": "state-1"},
+        cookies={"omnix_state": "state-1"},
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert body["tier"] == "banking"
@@ -59,6 +63,23 @@ def test_callback_mints_session(client):
 
     me = client.get("/v1/auth/me", headers={"Authorization": f"Bearer {body['token']}"})
     assert me.status_code == 200
+
+
+def test_callback_rejects_missing_state_cookie(client):
+    code = "stub:user-42:hello@bank.com:org-bank-acme"
+    resp = client.get("/v1/auth/callback", params={"code": code, "state": "state-1"})
+    assert resp.status_code == 400
+
+
+def test_callback_rejects_tenant_hint_mismatch(client):
+    code = "stub:user-42:hello@bank.com:org-bank-acme"
+    resp = client.get(
+        "/v1/auth/callback",
+        params={"code": code, "state": "state-1"},
+        cookies={"omnix_state": "state-1"},
+        headers={"X-Tenant-Id-Hint": "attacker-tenant"},
+    )
+    assert resp.status_code == 403
 
 
 def test_me_requires_bearer(client):
@@ -74,12 +95,12 @@ def test_protected_route_rejects_bad_token(client):
 
 
 def test_cross_tenant_enforcement_blocks_access():
+    from omnix.cloud.auth.jwt_session import Session
     from omnix.cloud.auth.tenancy import (
         CrossTenantAccessError,
         _current_session,
         enforce_tenant,
     )
-    from omnix.cloud.auth.jwt_session import Session
 
     sess = Session(user_id="u", tenant_id="tenant-A", tier="smb",
                    email="x@y", scopes=(), issued_at=int(time.time()),

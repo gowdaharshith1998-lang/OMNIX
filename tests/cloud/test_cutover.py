@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from omnix.cloud.api.main import create_app
+from omnix.cloud.auth.jwt_session import issue
 from omnix.cloud.cutover.facade_controller import (
     FacadeController,
     real_signer,
@@ -17,6 +18,29 @@ from omnix.cloud.cutover.facade_controller import (
 @pytest.fixture
 def controller():
     return FacadeController(signer=real_signer())
+
+
+def test_cutover_signer_key_is_anchored_not_ephemeral(tmp_path, monkeypatch):
+    """The cutover signer must use a PERSISTENT key (anchored across instances
+    and reloads), not a fresh ephemeral keypair per call."""
+    import omnix.cloud.cutover.facade_controller as fc
+
+    monkeypatch.setenv("OMNIX_CUTOVER_KEY_DIR", str(tmp_path / "ckey"))
+    monkeypatch.setattr(fc, "_CUTOVER_KEYPAIR", None)
+
+    msg = b"cutover-authorization"
+    sig1, pk1 = real_signer()(msg)
+    sig2, pk2 = real_signer()(msg)
+    assert pk1 == pk2, "public key must be stable across signer instances"
+
+    # Simulate a process restart: clear the in-process cache; the key must
+    # reload from disk identically (the file was persisted on first use).
+    monkeypatch.setattr(fc, "_CUTOVER_KEYPAIR", None)
+    _sig3, pk3 = real_signer()(msg)
+    assert pk3 == pk1, "public key must survive a restart (persisted to disk)"
+
+    from omnix.receipts.verify import verify_bytes
+    assert verify_bytes(pk1, msg, b"", sig1)
 
 
 @pytest.fixture
@@ -111,7 +135,8 @@ def test_target_percentage_validation(controller):
 
 def test_cutover_api_round_trip():
     client = TestClient(create_app())
-    headers = {"X-Tenant-Id": "tenant-A"}
+    token = issue("u-1", "tenant-A", "smb", "u@example.com")
+    headers = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tenant-A"}
     body = {
         "target_percentage": 10,
         "verifier_summary": {
@@ -132,3 +157,12 @@ def test_cutover_api_round_trip():
     assert rb.json()["status"] == "rolled_back"
     state2 = client.get("/v1/cutover/payment-svc", headers=headers).json()
     assert state2["percentage"] == 0
+
+
+def test_cutover_api_rejects_spoofed_tenant_header():
+    client = TestClient(create_app())
+    token = issue("u-1", "tenant-A", "smb", "u@example.com")
+    headers = {"Authorization": f"Bearer {token}", "X-Tenant-Id": "tenant-B"}
+    body = {"target_percentage": 10, "verifier_summary": {}}
+    resp = client.post("/v1/cutover/payment-svc/shift", json=body, headers=headers)
+    assert resp.status_code == 403

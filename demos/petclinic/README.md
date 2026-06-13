@@ -1,10 +1,10 @@
-# OMNIX Live Demo — Spring Petclinic
+# OMNIX Live Demo: Spring Petclinic
 
-Reproducible end-to-end demo that proves OMNIX scans a real public Java
-codebase, produces signed receipts, and shifts traffic through the
-strangler-fig facade — all in roughly 15 minutes on a developer laptop.
+Reproducible end-to-end demo showing OMNIX ingesting Spring Petclinic,
+producing signed receipts, and exercising a 1% traffic shift through the
+strangler-fig facade in about 15 minutes on a developer laptop.
 
-## What this demo proves
+## What this demo shows
 1. OMNIX ingests a real public Java codebase (Spring Petclinic, ~5.5K LOC)
 2. The graph builds; the spec mines; the six verification gates run
 3. At least one unit emits a real ML-DSA-65 signed receipt
@@ -42,9 +42,9 @@ Under `demos/petclinic/runs/<TS>/`:
 - `verify.txt` — offline-verify result per receipt
 - `routes-before.json` / `routes-after-1pct.json` / `routes-after-rollback.json`
 - `traffic-baseline.txt` / `traffic-after-shift.txt`
-- `REPORT.md` — single-page summary suitable for an investor email
+- `REPORT.md` — single-page summary of inputs, gate outcomes, receipts, and traffic-shift results
 
-## What you do during the demo (when a partner is watching)
+## Operator flow
 1. Open the Studio in a browser tab BEFORE you run `./demo.sh`
 2. Run `./demo.sh`
 3. As the script announces each gate, the Studio's CHAT tab streams the gate events live
@@ -54,7 +54,7 @@ Under `demos/petclinic/runs/<TS>/`:
 The whole thing is < 15 minutes from `./demo.sh` to "here's the signed receipt."
 
 ## Known limitations on a kind cluster
-Some surfaces from the full Shape B v2 deployment are not exercisable on
+Some surfaces from the full live-observation deployment are not exercisable on
 kind without additional setup (matching the deploy verification dispatch's
 findings):
 
@@ -68,8 +68,8 @@ findings):
   exercises the controller's in-process shift; the per-pod sidecar
   rewrite of `routes.json` is a no-op until that follow-up lands.
 
-These limitations don't affect the "OMNIX scans real Java + produces a real
-signed receipt" claim — that's the demo's load-bearing assertion.
+These limitations do not affect the demo's core result: OMNIX scans real Java
+and produces a signed receipt that can be verified offline.
 
 ## Caching
 First run downloads Spring Petclinic from GitHub. Subsequent runs use the

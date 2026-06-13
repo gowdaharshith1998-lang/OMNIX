@@ -14,6 +14,7 @@ from omnix.dm.d4_bulk_import.consumer import (
     PrePhaseSignatureError,
     load_prior_receipts,
 )
+from omnix.dm.receipts import merkle_chain
 from omnix.dm.receipts.ml_dsa_65_signer import canonicalize, sign_canonical
 
 
@@ -102,12 +103,12 @@ def _d1_payload(migration_id="m1") -> dict:
     }
 
 
-def _d2_payload(migration_id="m1") -> dict:
+def _d2_payload(migration_id="m1", predecessor_hash="ab" * 32) -> dict:
     return {
         "schema_version": "omnix-dm/edge-case-manifest/v1",
         "migration_id": migration_id,
         "timestamp": "2026-05-27T00:00:00+00:00",
-        "predecessor_hash": "ab" * 32,
+        "predecessor_hash": predecessor_hash,
         "findings": [],
         "probe_failures": [],
         "requires_operator_review": False,
@@ -154,7 +155,9 @@ def _write_pra(root: Path, keys=None):
     pra = root / "pra-d1-d2" / "m1"
     pra.mkdir(parents=True)
     d1 = _d1_payload()
-    d2 = _d2_payload()
+    d2 = _d2_payload(
+        predecessor_hash=merkle_chain.next_hash(d1.get("predecessor_hash"), canonicalize(d1))
+    )
     if keys is not None:
         _, sk = keys
         c1, sig1 = sign_canonical(d1, sk)

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import ast
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 from omnix.dm._types import (
@@ -36,7 +36,6 @@ from omnix.dm._types import (
     PropertySet,
     ReflexionHalt,
     ReflexionSuccess,
-    SecurityViolation,
     SketchHint,
     SynthesizerResult,
     TierFailure,
@@ -325,7 +324,7 @@ def run(
     start = time.monotonic()
 
     for iteration in range(1, max_iterations + 1):
-        if time.monotonic() - start > loop_walltime_sec:
+        if loop_walltime_sec <= 0 or time.monotonic() - start >= loop_walltime_sec:
             return ReflexionHalt(
                 column_mapping_key=key,
                 halt_reason="loop_walltime",

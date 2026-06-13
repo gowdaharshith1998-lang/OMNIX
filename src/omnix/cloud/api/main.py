@@ -15,6 +15,7 @@ from __future__ import annotations
 import importlib.metadata
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,13 +45,18 @@ def create_app() -> FastAPI:
         redoc_url=None,
     )
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"] if settings.debug else [settings.cloud_api_base_url],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+    # allow_origins=["*"] with allow_credentials=True is both spec-invalid
+    # (browsers reject it) and unsafe. In debug we instead allow any localhost
+    # origin via regex (so a dev front-end on any port works) while keeping
+    # credentialed requests scoped; in prod only the configured API origin.
+    cors_kwargs: dict[str, Any] = dict(
+        allow_credentials=True, allow_methods=["*"], allow_headers=["*"]
     )
+    if settings.debug:
+        cors_kwargs["allow_origin_regex"] = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
+    else:
+        cors_kwargs["allow_origins"] = [settings.cloud_api_base_url]
+    app.add_middleware(CORSMiddleware, **cors_kwargs)
 
     try:
         from omnix.cloud.auth.tenancy import TenancyMiddleware  # noqa: WPS433

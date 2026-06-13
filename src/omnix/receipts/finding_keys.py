@@ -18,14 +18,22 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 
 from .finding_receipt import FindingReceipt
+from .secure_keyfile import read_secret, read_secret_bytes, write_secret
 
 
 class InvalidFindingPublicKeyError(ValueError):
     """PEM at ``pubkey_path`` is missing, corrupted, or not an Ed25519 public key."""
 
 
+def omnix_home() -> Path:
+    raw = os.environ.get("OMNIX_HOME") or os.environ.get("HOME")
+    if raw:
+        return Path(raw).expanduser()
+    return Path.home()
+
+
 def global_keys_dir() -> Path:
-    return Path.home() / ".omnix" / "keys"
+    return omnix_home() / ".omnix" / "keys"
 
 
 def project_pubkey_path(project_root: Path) -> Path:
@@ -75,14 +83,13 @@ def ensure_project_key(project_root: Path) -> tuple[Path, Path, bool]:
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
     )
-    priv_path.write_bytes(priv_pem)
-    os.chmod(priv_path, 0o600)
+    write_secret(priv_path, priv_pem.decode("ascii"))  # encrypts at rest when enabled
     pub_path.write_bytes(pub_pem)
     return priv_path, pub_path, True
 
 
 def _load_private_key(priv_path: Path) -> Ed25519PrivateKey:
-    pem = priv_path.read_bytes()
+    pem = read_secret_bytes(priv_path)
     key = serialization.load_pem_private_key(pem, password=None)
     if not isinstance(key, Ed25519PrivateKey):
         raise ValueError(f"key at {priv_path} is not Ed25519")
@@ -117,6 +124,60 @@ def sign_finding(payload: dict, project_id: str) -> str:
     priv = _load_private_key(priv_path)
     sig = priv.sign(receipt.canonical_json())
     return base64.b64encode(sig).decode("ascii")
+
+
+def global_mldsa_secret_path() -> Path:
+    """Global ML-DSA-65 signing key (shared with the scan-manifest signer)."""
+    return global_keys_dir() / "secret.pem"
+
+
+def global_mldsa_public_path() -> Path:
+    return global_keys_dir() / "public.pem"
+
+
+def ensure_global_mldsa_key() -> tuple[Path, Path, bool]:
+    """Provision the global ML-DSA-65 keypair if absent. Idempotent.
+
+    Returns (secret_path, public_path, was_created). Used so per-finding /
+    per-rebuild receipts can carry a post-quantum signature alongside the
+    classical Ed25519 one (hybrid signing).
+    """
+    from .keystore import write_keypair_dir
+
+    sec = global_mldsa_secret_path()
+    pub = global_mldsa_public_path()
+    if sec.is_file() and pub.is_file():
+        return sec, pub, False
+    write_keypair_dir(global_keys_dir())
+    return sec, pub, True
+
+
+def sign_bytes_mldsa(canonical: bytes) -> str:
+    """Post-quantum ML-DSA-65 signature (PEM) of *canonical* bytes, using the
+    global keystore key. Provisions the key on first use."""
+    import secrets
+
+    from . import keystore as _ks
+    from . import sign as _mldsa_sign
+
+    ensure_global_mldsa_key()
+    sk = _ks.secret_from_pem(read_secret(global_mldsa_secret_path()))
+    sig_raw = _mldsa_sign.sign_bytes(sk, canonical, b"", secrets.token_bytes(32))
+    return _ks.signature_to_pem(sig_raw)
+
+
+def verify_bytes_mldsa(canonical: bytes, sig_pem: str, mldsa_pubkey_path: Path) -> bool:
+    """Verify an ML-DSA-65 PEM signature over *canonical* bytes. False on any
+    malformed input or mismatch (never raises for a bad signature)."""
+    from . import keystore as _ks
+    from . import verify as _mldsa_verify
+
+    try:
+        pk = _ks.public_from_pem(Path(mldsa_pubkey_path).read_text(encoding="ascii"))
+        sig_raw = _ks.signature_from_pem(sig_pem)
+    except (OSError, ValueError):
+        return False
+    return bool(_mldsa_verify.verify_bytes(pk, canonical, b"", sig_raw))
 
 
 def verify_finding(payload: dict, signature_b64: str, pubkey_path: Path) -> bool:

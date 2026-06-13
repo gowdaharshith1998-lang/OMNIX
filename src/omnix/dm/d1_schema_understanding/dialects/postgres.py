@@ -18,10 +18,6 @@ from __future__ import annotations
 import re
 from typing import List, Optional, Tuple
 
-import sqlparse
-from sqlparse.sql import Identifier, IdentifierList, Parenthesis, Statement
-from sqlparse.tokens import DDL, Keyword, Name, Punctuation
-
 from omnix.dm._types import (
     ColumnSpec,
     ForeignKeySpec,

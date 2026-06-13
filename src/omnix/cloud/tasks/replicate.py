@@ -30,7 +30,20 @@ def start_pipeline(
     target_language: str = "java21",
     **extra: Any,
 ) -> dict[str, Any]:
+    from omnix.cloud import events, store
     from omnix.cloud.pipeline.runner import run_pipeline
+
+    # Idempotency guard: a retry or duplicate dispatch must not re-run a
+    # pipeline that already finished (the pipeline itself is not idempotent —
+    # it re-ingests and re-emits receipts). No-op unless durable persistence
+    # is enabled, so dev/test behavior is unchanged.
+    if store.job_already_finished(job_id):
+        events.publish(
+            job_id, "complete",
+            "pipeline already finished; skipping duplicate run",
+            severity="info",
+        )
+        return {"job_id": job_id, "state": "complete", "skipped": True, "receipts": []}
 
     try:
         return run_pipeline(

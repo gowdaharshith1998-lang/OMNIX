@@ -69,6 +69,18 @@ def _recv_until_types(
     raise AssertionError(f"timeout waiting for any of {want!r}, got types={[x.get('type') for x in got[-8:]]}")
 
 
+def _wait_for_parse_bridge(wid: str, *, timeout_s: float = 15.0) -> Any:
+    deadline = time.time() + timeout_s
+    last_workspace = None
+    while time.time() < deadline:
+        w = MANAGER.get(wid)
+        last_workspace = w
+        if w is not None and w.parse_bridge is not None:
+            return w.parse_bridge
+        time.sleep(0.05)
+    raise AssertionError(f"parse bridge not ready for {wid!r}; workspace={last_workspace!r}")
+
+
 def test_edit_existing_file_emits_node_modified_via_bridge(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -89,11 +101,7 @@ def test_edit_existing_file_emits_node_modified_via_bridge(
         wid = c.post("/api/workspace/open", json={"path": str(proj)}).json()[
             "workspace_id"
         ]
-        time.sleep(0.8)
-        w = MANAGER.get(wid)
-        assert w is not None
-        br = w.parse_bridge
-        assert br is not None
+        br = _wait_for_parse_bridge(wid)
 
         with c.websocket_connect(f"/ws/workspace/{wid}") as ws:
             _subscribe(ws, wid)
@@ -133,11 +141,7 @@ def test_add_new_function_emits_node_added(
         wid = c.post("/api/workspace/open", json={"path": str(proj)}).json()[
             "workspace_id"
         ]
-        time.sleep(0.8)
-        w = MANAGER.get(wid)
-        assert w is not None
-        br = w.parse_bridge
-        assert br is not None
+        br = _wait_for_parse_bridge(wid)
 
         with c.websocket_connect(f"/ws/workspace/{wid}") as ws:
             _subscribe(ws, wid)
@@ -169,11 +173,7 @@ def test_delete_file_emits_node_removed(
         wid = c.post("/api/workspace/open", json={"path": str(proj)}).json()[
             "workspace_id"
         ]
-        time.sleep(0.8)
-        w = MANAGER.get(wid)
-        assert w is not None
-        br = w.parse_bridge
-        assert br is not None
+        br = _wait_for_parse_bridge(wid)
 
         with c.websocket_connect(f"/ws/workspace/{wid}") as ws:
             _subscribe(ws, wid)

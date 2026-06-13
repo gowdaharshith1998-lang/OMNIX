@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from omnix_scientist import Experiment, list_publisher, jsonl_publisher
+from omnix_scientist import Experiment, jsonl_publisher, list_publisher
 
 
 def test_agreement_returns_control_value():

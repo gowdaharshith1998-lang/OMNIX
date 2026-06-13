@@ -1,36 +1,63 @@
-# omnix-scientist (Python)
+# omnix-scientist for Python
 
-Drop-in GitHub-Scientist port for OMNIX behavioral replication. Use it inside
-your Python service to dual-run legacy and candidate implementations and
-upstream every mismatch to your OMNIX tenant.
+Python adapter for dual-running a legacy implementation and a candidate
+implementation while OMNIX collects mismatch evidence.
+
+## Status
+
+This package is an adapter surface for private pilots and service-side
+experiments. The experiment always returns the control result; candidate drift
+is reported asynchronously to the configured sink.
 
 ## Install
 
-    pip install omnix-scientist
+```bash
+pip install omnix-scientist
+```
+
+For local development from this repository:
+
+```bash
+cd services/scientist-python
+pip install -e ".[dev]"
+```
 
 ## Quickstart
 
-    from omnix_scientist import Experiment, http_publisher
+```python
+from flask import jsonify, request
+from omnix_scientist import Experiment, http_publisher
 
-    exp = Experiment(
-        name="checkout/legacy-vs-replica",
-        publisher=http_publisher("https://app.axiomcontrol.systems"),
-    )
+exp = Experiment(
+    name="checkout/legacy-vs-replica",
+    publisher=http_publisher("https://app.axiomcontrol.systems"),
+)
 
-    @exp.use
-    def legacy(order):
-        return legacy_checkout(order)
+@exp.use
+def legacy(order):
+    return legacy_checkout(order)
 
-    @exp.try_
-    def candidate(order):
-        return new_checkout_python(order)
+@exp.try_
+def candidate(order):
+    return new_checkout_python(order)
 
-    @app.route("/checkout", methods=["POST"])
-    def checkout(order):
-        return exp.run(order)
+@app.post("/checkout")
+def checkout():
+    order = request.get_json()
+    return jsonify(exp.run(order))
+```
 
 ## Configuration
 
-Set ``OMNIX_TENANT_TOKEN`` in the environment so every mismatch is upstreamed
-to your tenant. To run without upstreaming (purely local logs), use
-``list_publisher`` or ``jsonl_publisher``.
+Set `OMNIX_TENANT_TOKEN` when publishing to an OMNIX tenant. For local-only
+experiments, use `list_publisher` or `jsonl_publisher` so mismatches stay on
+the machine running the service.
+
+## Verification
+
+Run package-specific tests from this directory when test dependencies are
+installed:
+
+```bash
+pytest
+```

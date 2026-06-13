@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Commercial licensing
+    url: https://github.com/gowdaharshith1998-lang/OMNIX/issues
+    about: Open an issue to request licensing or scoping information without sharing confidential details.
+  - name: Security report
+    url: https://github.com/gowdaharshith1998-lang/OMNIX/security/advisories/new
+    about: Report vulnerabilities privately.

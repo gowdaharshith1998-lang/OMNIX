@@ -99,19 +99,53 @@ _BUS = _InMemoryBus()
 
 def publish(job_id: str, gate: str | None, message: str, *,
             severity: str = "info", payload: dict[str, Any] | None = None) -> JobEvent:
+    payload = payload or {}
+    # Durable, cross-process seq + persistence when enabled; otherwise the
+    # in-process counter. The DB is authoritative for seq so two processes
+    # publishing for the same job don't collide.
+    durable_seq: int | None = None
+    try:
+        from omnix.cloud import store
+
+        event_ts = datetime.now(timezone.utc).isoformat()
+        durable_seq = store.next_seq_and_persist(
+            job_id=job_id, gate=gate, severity=severity,
+            message=message, payload=payload, ts=event_ts,
+        )
+    except Exception:  # noqa: BLE001 - never let persistence break the live path
+        durable_seq = None
+
     event = JobEvent(
         job_id=job_id,
-        seq=_BUS.next_seq(job_id),
+        seq=durable_seq if durable_seq is not None else _BUS.next_seq(job_id),
         gate=gate,
         severity=severity,
         message=message,
-        payload=payload or {},
+        payload=payload,
     )
     _BUS.publish(event)
     return event
 
 
 def history(job_id: str) -> list[JobEvent]:
+    """Durable history when persistence is on (visible across processes),
+    else the in-process bus."""
+    try:
+        from omnix.cloud import store
+
+        rows = store.load_events(job_id)
+        if rows is not None:
+            return [
+                JobEvent(
+                    job_id=r["job_id"], seq=r["seq"], gate=r["gate"],
+                    severity=r["severity"], message=r["message"],
+                    payload=r.get("payload") or {},
+                    ts=r.get("ts") or datetime.now(timezone.utc).isoformat(),
+                )
+                for r in rows
+            ]
+    except Exception:  # noqa: BLE001
+        pass
     return _BUS.history(job_id)
 
 

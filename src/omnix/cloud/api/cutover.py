@@ -12,10 +12,11 @@ import logging
 import os
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Header, HTTPException, Request
+from fastapi import APIRouter, Body, Header, Request
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
+from omnix.cloud.auth.tenancy import require_session_tenant
 from omnix.cloud.cutover.event_bus import (
     InMemoryCutoverBus,
     RedisStreamsCutoverBus,
@@ -90,10 +91,9 @@ async def shift(
     payload: Annotated[ShiftRequest, Body(...)],
     x_tenant_id: str | None = Header(None, alias="X-Tenant-Id"),
 ):
-    if not x_tenant_id:
-        raise HTTPException(status_code=400, detail="X-Tenant-Id required")
+    tenant_id = require_session_tenant(x_tenant_id)
     event = get_controller().request_shift(
-        tenant_id=x_tenant_id,
+        tenant_id=tenant_id,
         unit_id=unit_id,
         target_percentage=payload.target_percentage,
         verifier_summary=payload.verifier_summary,
@@ -108,9 +108,8 @@ async def rollback(
     unit_id: str,
     x_tenant_id: str | None = Header(None, alias="X-Tenant-Id"),
 ):
-    if not x_tenant_id:
-        raise HTTPException(status_code=400, detail="X-Tenant-Id required")
-    event = get_controller().rollback(tenant_id=x_tenant_id, unit_id=unit_id)
+    tenant_id = require_session_tenant(x_tenant_id)
+    event = get_controller().rollback(tenant_id=tenant_id, unit_id=unit_id)
     return event_to_dict(event) | {"status": "rolled_back"}
 
 
@@ -170,9 +169,8 @@ async def get_state(
     unit_id: str,
     x_tenant_id: str | None = Header(None, alias="X-Tenant-Id"),
 ):
-    if not x_tenant_id:
-        raise HTTPException(status_code=400, detail="X-Tenant-Id required")
-    state = get_controller().state(x_tenant_id, unit_id)
+    tenant_id = require_session_tenant(x_tenant_id)
+    state = get_controller().state(tenant_id, unit_id)
     return {
         "tenant_id": state.tenant_id,
         "unit_id": state.unit_id,

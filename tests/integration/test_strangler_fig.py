@@ -20,7 +20,6 @@ from pathlib import Path
 
 import pytest
 
-
 pytestmark = pytest.mark.integration
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -88,7 +87,7 @@ def test_all_omnix_pods_reach_ready(omnix_cluster):
         got, want = ready.split("/", 1)
         if got != want:
             non_ready.append(ln)
-    assert not non_ready, f"non-Ready pods after install:\n" + "\n".join(non_ready)
+    assert not non_ready, "non-Ready pods after install:\n" + "\n".join(non_ready)
 
 
 def test_helm_test_smoke_pod_succeeds(omnix_cluster):

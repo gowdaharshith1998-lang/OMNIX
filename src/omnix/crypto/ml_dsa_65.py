@@ -13,7 +13,6 @@ Callers above (the DM receipt emitters) own canonicalization and atomic writes.
 
 from __future__ import annotations
 
-import os
 from typing import Optional, Tuple
 
 from dilithium_py.ml_dsa import ML_DSA_65 as _ML_DSA_65
@@ -33,14 +32,39 @@ class SigningError(RuntimeError):
 def keypair(seed: Optional[bytes] = None) -> Tuple[bytes, bytes]:
     """Return ``(public_key, secret_key)``. If ``seed`` is given it is used as
     the DRBG seed for deterministic key generation (test fixtures only — never
-    in production)."""
-    if seed is not None:
-        if not isinstance(seed, (bytes, bytearray)):
-            raise SigningError("seed must be bytes")
-        if len(seed) != 48:
-            raise SigningError(f"seed must be exactly 48 bytes, got {len(seed)}")
-        _ML_DSA_65.set_drbg_seed(bytes(seed))
-    pk, sk = _ML_DSA_65.keygen()
+    in production).
+
+    Seeding is strictly scoped to this one keygen call: ``dilithium_py`` keeps
+    its entropy source on the process-global ``_ML_DSA_65`` singleton, so a
+    naive ``set_drbg_seed`` would leave EVERY later ``keygen``/``sign`` drawing
+    from a deterministic stream — order-dependent signatures and a catastrophic
+    loss of nonce entropy for a security product. We therefore snapshot the
+    live entropy source, seed, generate, and restore os.urandom in ``finally``.
+    """
+    saved_random_bytes = getattr(_ML_DSA_65, "random_bytes", None)
+    saved_drbg = getattr(_ML_DSA_65, "_drbg", None)
+    try:
+        if seed is not None:
+            if not isinstance(seed, (bytes, bytearray)):
+                raise SigningError("seed must be bytes")
+            if len(seed) != 48:
+                raise SigningError(f"seed must be exactly 48 bytes, got {len(seed)}")
+            _ML_DSA_65.set_drbg_seed(bytes(seed))
+        pk, sk = _ML_DSA_65.keygen()
+    finally:
+        if seed is not None:
+            # Restore the pre-seed entropy source (os.urandom in production) so
+            # signing and later keygens are never deterministic.
+            if saved_random_bytes is not None:
+                _ML_DSA_65.random_bytes = saved_random_bytes
+            else:  # pragma: no cover - defensive
+                import os as _os
+
+                _ML_DSA_65.random_bytes = lambda n, _u=_os.urandom: _u(n)
+            if saved_drbg is not None:
+                _ML_DSA_65._drbg = saved_drbg
+            elif hasattr(_ML_DSA_65, "_drbg"):
+                _ML_DSA_65._drbg = None
     if len(pk) != PUBLIC_KEY_BYTES or len(sk) != SECRET_KEY_BYTES:
         raise SigningError("keygen returned unexpected size — refusing to proceed")
     return pk, sk

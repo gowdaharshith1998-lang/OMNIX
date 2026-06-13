@@ -12,16 +12,15 @@ import pytest
 
 from omnix.receipts.rebuild_receipt import (
     GATE_NAMES,
-    GateResult,
     M2_DEFERRED_GATES,
-    RebuildReceipt,
     SCHEMA_VERSION,
+    GateResult,
+    RebuildReceipt,
     default_m2_deferred_gate_results,
     sha256_hex_text,
     sign_rebuild,
     verify_rebuild,
 )
-
 
 _VALID_TS = "2026-05-17T10:00:00.000Z"
 _HEX64 = "a" * 64
@@ -203,6 +202,22 @@ def test_sign_then_verify_round_trip(project_key: tuple[Path, str]) -> None:
     r = _valid_receipt(project_id=project_id)
     sig = sign_rebuild(r)
     assert verify_rebuild(r, sig, pub_path) is True
+
+
+def test_mldsa_sign_then_verify_round_trip(project_key: tuple[Path, str]) -> None:
+    """Post-quantum hybrid signature: a rebuild receipt's ML-DSA-65 signature
+    round-trips, and a tampered receipt fails."""
+    from omnix.receipts.finding_keys import global_mldsa_public_path, sign_bytes_mldsa
+    from omnix.receipts.rebuild_receipt import verify_rebuild_mldsa
+
+    _pub, project_id = project_key
+    r = _valid_receipt(project_id=project_id)
+    sig_pem = sign_bytes_mldsa(r.canonical_json())
+    mldsa_pub = global_mldsa_public_path()
+    assert verify_rebuild_mldsa(r, sig_pem, mldsa_pub) is True
+
+    tampered = _valid_receipt(project_id=project_id, rebuilt_source_sha256="e" * 64)
+    assert verify_rebuild_mldsa(tampered, sig_pem, mldsa_pub) is False
 
 
 def test_verify_fails_on_tampered_receipt(project_key: tuple[Path, str]) -> None:

@@ -1,5 +1,10 @@
 # D1 — AI Schema Understanding (Implementation Notes)
 
+## Status
+
+D1 is available as a DM library surface. It emits a signed
+`column-mapping.json` and flags uncertain mappings for operator review.
+
 ## EARS contract
 
 > **When** a customer provides a legacy schema + target schema for migration,
@@ -42,7 +47,7 @@ Per-dialect modules under `dialects/`:
 
 ### 3. Codebase-memory bridge
 The bridge attempts `from omnix import codebase_memory`. If the module is
-not deployed it surfaces that honestly as `confidence_note` rather than
+not deployed it records that condition as `confidence_note` rather than
 silently returning empty.
 
 ### 4. Embed
@@ -50,7 +55,7 @@ silently returning empty.
 * Lazy-loads `sentence-transformers/all-MiniLM-L6-v2` (384-dim).
 * Deterministic prompt template (see source).
 * `set_embedding_backend()` lets CI swap in a hash-based deterministic
-  backend when HuggingFace weights aren't downloadable. The hash backend
+  backend when model weights are unavailable in CI. The hash backend
   preserves the determinism contract — it just isn't semantically
   meaningful for cross-name similarity.
 

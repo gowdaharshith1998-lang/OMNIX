@@ -12,7 +12,8 @@ from omnix.dm.d3_transformation_synthesis.consumer import (
     ConsumerHalt,
     load_manifests,
 )
-from omnix.dm.receipts.ml_dsa_65_signer import sign_canonical
+from omnix.dm.receipts import merkle_chain
+from omnix.dm.receipts.ml_dsa_65_signer import canonicalize, sign_canonical
 
 
 def _make_d1(migration_id="m1") -> dict:
@@ -139,7 +140,10 @@ def _write_manifests(tmp_path: Path, *, sign=False, keys=None):
     base = tmp_path / "m1"
     base.mkdir()
     d1 = _make_d1()
-    d2 = _make_d2()
+    # Chain D2 to D1 via the real Merkle link the consumer now enforces.
+    d2 = _make_d2(
+        predecessor_hash=merkle_chain.next_hash(d1.get("predecessor_hash"), canonicalize(d1))
+    )
     (base / "column-mapping.json").write_text(json.dumps(d1, sort_keys=True, separators=(",", ":")))
     (base / "edge-case-manifest.json").write_text(
         json.dumps(d2, sort_keys=True, separators=(",", ":"))
@@ -181,6 +185,31 @@ def test_bad_signature_raises_consumer_halt(tmp_path: Path):
     sig_path.write_text("00" * 3309)
     with pytest.raises(ConsumerHalt):
         load_manifests(tmp_path, "m1", public_key=pk, verify_signatures=True)
+
+
+def test_broken_merkle_chain_link_raises(tmp_path: Path):
+    """A D2 manifest whose predecessor_hash does not match D1's chain hash must
+    HALT — even though both manifests are individually well-formed. Guards the
+    'predecessor signed but never validated' gap (substituted/reordered pair)."""
+    base = tmp_path / "m1"
+    base.mkdir()
+    d1 = _make_d1()
+    d2 = _make_d2(predecessor_hash="00" * 32)  # NOT D1's chain hash
+    (base / "column-mapping.json").write_text(
+        json.dumps(d1, sort_keys=True, separators=(",", ":"))
+    )
+    (base / "edge-case-manifest.json").write_text(
+        json.dumps(d2, sort_keys=True, separators=(",", ":"))
+    )
+    with pytest.raises(ConsumerHalt, match="chain link broken"):
+        load_manifests(tmp_path, "m1", verify_signatures=False)
+
+
+def test_verify_without_key_fails_closed(tmp_path: Path):
+    """verify_signatures=True with no public_key must HALT, not silently skip."""
+    _write_manifests(tmp_path, sign=True, keys=ml_dsa_65.keypair(seed=b"\x33" * 48))
+    with pytest.raises(ConsumerHalt):
+        load_manifests(tmp_path, "m1", public_key=None, verify_signatures=True)
 
 
 def test_missing_manifest_raises_consumer_halt(tmp_path: Path):

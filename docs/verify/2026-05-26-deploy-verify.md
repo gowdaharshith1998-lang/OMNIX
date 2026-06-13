@@ -2,7 +2,7 @@
 
 Run timestamp: `20260526T020219Z`
 Branch: `main`
-HEAD at start: `f791ae8` (PR #47 mega-dispatch)
+HEAD at start: `f791ae8` (PR #47 verification dispatch)
 HEAD at end: `55a1721` (after fix PRs #48/49/50/51/52)
 
 ## Summary
@@ -42,7 +42,7 @@ End-to-end verification of the OMNIX chart + cloud surface on a real kind cluste
   - vhost domains: `['calculator', 'calculator.svc']` ✅
   - legacy_calculator weight=75 ✅
   - omnix-candidate-calculator.omnix.svc.cluster.local:80 weight=25 ✅
-- **Control plane chain proven end-to-end on real cluster.**
+- **Control plane chain verified end-to-end on real cluster.**
 - ❌ Traffic sampling: 200/200 empty responses — blocked by [#53](https://github.com/gowdaharshith1998-lang/OMNIX/issues/53) (static Envoy cluster table doesn't match the per-unit cluster names the writer generates)
 
 ## Phase E — Triage + fix PRs
@@ -65,7 +65,7 @@ One follow-up issue filed:
 
 **Deployable on kind: PARTIAL.** The chart now installs cleanly, the api/worker/facade reach Ready, signed receipts round-trip end-to-end on a real cluster, and the strangler-fig control-plane chain (POST shift → bus → SSE → writer → routes.json) is verifiably working. Traffic actually routing through Envoy per the shift is blocked by #53 — a chart-design refactor, not a runtime bug.
 
-**Next operator action:** Resolve #53 (CDS or writer-managed clusters.json). Then re-run Phase D — the rest of the chain is proven.
+**Next operator action:** Resolve #53 (CDS or writer-managed clusters.json). Then re-run Phase D to verify the remaining data-plane path.
 
 ## Evidence
 

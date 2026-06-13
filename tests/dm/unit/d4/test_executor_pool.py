@@ -8,7 +8,6 @@ from omnix.dm._types import Batch
 from omnix.dm.d4_bulk_import._primitives import make_batch_id, normalize_row
 from omnix.dm.d4_bulk_import.executor_pool import ExecutorPool
 
-
 _PASSTHROUGH = {"python_source": "def transform(v):\n    return v\n"}
 _UPPER = {"python_source": "def transform(v):\n    return v.upper() if v is not None else None\n"}
 _BAD_TYPE = {"python_source": "def transform(v):\n    return v.strip()\n"}  # fails on int

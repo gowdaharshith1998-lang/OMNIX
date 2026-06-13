@@ -13,7 +13,7 @@ Two acceptable input shapes:
 from __future__ import annotations
 
 import json
-from typing import Iterator, List, Optional, Tuple
+from typing import Iterator, List, Tuple
 
 from omnix.dm._types import ColumnSpec, SchemaSpec, TableSpec
 

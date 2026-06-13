@@ -101,7 +101,7 @@ No open failures at completion; the main correctness bug was `modpm` for even mo
 
 ### Strategic context (competitive landscape as of Apr 24 2026)
 - Graphify released Apr 3 2026, 22k stars in 10 days — commoditized the "graph-of-codebase" layer
-- GitNexus, Axon, CodeGraph, code-review-graph all in the graph lane
+- Axon, CodeGraph, code-review-graph all in the graph lane
 - To our current knowledge, no other product in this space signs graph/code-intelligence *events* with ML-DSA-65 in the same way as OMNIX; see README “Adjacent prior art” for related signing stacks (e.g. Sigstore, pqrascv-style attestation)
 - OMNIX moat: everything ABOVE the graph (vault, signed receipts, legacy migration, agent routing)
 - Revised positioning: "To our current knowledge, the only open-core code intelligence product that bundles universal Tree-Sitter + self-evolving query patterns + ML-DSA-65 signed audit trail + hybrid universal PBT + sandbox-isolated auto-fix in one shipping repo."

@@ -53,11 +53,8 @@ Contents:
   kots/        Replicated KOTS manifests for kots install
 
 Verify bundle:
-  sha256sum    omnix-airgap-${VERSION}.airgap
-  signature    omnix-airgap-${VERSION}.airgap.sig   (ML-DSA-65, FIPS 204)
-
-Independent receipt verification (no internet required):
-  omnix verify --bundle omnix-airgap-${VERSION}.airgap
+  sha256sum -c omnix-airgap-${VERSION}.airgap.sha256
+  verify omnix-airgap-${VERSION}.airgap.sig with the release public key before loading images
 EOF
 
 out="${ROOT}/dist/omnix-airgap-${VERSION}.airgap"

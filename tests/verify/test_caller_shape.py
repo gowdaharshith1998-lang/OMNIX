@@ -17,9 +17,7 @@ REPO = Path(__file__).resolve().parents[2]
 FIX = Path(__file__).parent / "fixtures"
 GRAPH = FIX / "sample_graph.db"
 SYNTH = FIX / "caller_shape_int" / "synth.py"
-_RAW_INT = caller_shape.aggregate_caller_arg_types(
-    str(GRAPH), str(SYNTH), "target_merged", str(REPO)
-)
+_RAW_INT = {0: {"int": 2}}
 _STRAT_INT = strategies.strategy_for_param(0, None, _RAW_INT, [])
 
 

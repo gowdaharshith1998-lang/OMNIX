@@ -69,21 +69,20 @@ def parse_tree_cached(grammar_id: str, file_key: str, parser: Parser, source: by
     Return a :class:`Tree` for *source*, using:
 
     1) LRU hit with same bytes fingerprint: no parse (e.g. pass2 reuses pass1).
-    2) Otherwise, if the slot held a prior tree: parse with ``old_tree`` (e.g. small edit).
-    3) Otherwise full parse.
+    2) Otherwise full parse. Tree-sitter incremental parsing requires explicit
+       edit ranges on the old tree; reusing it for arbitrary changed bytes can
+       corrupt node byte offsets (notably LF -> CRLF on Windows).
     """
     if not source:
         return parser.parse(source)
     k = (grammar_id, file_key)
     h = _source_fingerprint(source)
-    otree: Tree | None = None
     if k in _lru:
         it = _lru[k]
         if it.source_fp == h:
             _lru.move_to_end(k)
             return it.tree
-        otree = it.tree
-    t = parser.parse(source, old_tree=otree) if otree is not None else parser.parse(source)
+    t = parser.parse(source)
     _lru[k] = _CacheItem(h, t)
     _lru.move_to_end(k)
     while len(_lru) > _MAX_ENTRIES:

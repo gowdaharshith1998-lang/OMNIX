@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import secrets
 import uuid
 from base64 import b64decode, b64encode
@@ -32,6 +31,7 @@ from pathlib import Path
 from fastapi import APIRouter, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
+from omnix.cloud.auth.tenancy import require_session_tenant
 from omnix.cloud.config import get_settings
 from omnix.cloud.ingest.storage import get_storage
 
@@ -148,6 +148,12 @@ def _common_response_headers() -> dict[str, str]:
     }
 
 
+def _require_upload_owner(desc: UploadDescriptor) -> None:
+    tenant_id = require_session_tenant()
+    if desc.tenant_id != tenant_id:
+        raise HTTPException(status_code=403, detail="upload belongs to another tenant")
+
+
 router = APIRouter()
 
 
@@ -176,6 +182,7 @@ async def tus_create(
         raise HTTPException(status_code=400, detail="Upload-Length required")
     if upload_length > settings.tus_max_bytes:
         raise HTTPException(status_code=413, detail="upload exceeds Tus-Max-Size")
+    tenant_id = require_session_tenant(x_tenant_id)
 
     upload_id = uuid.uuid4().hex
     desc = UploadDescriptor(
@@ -183,7 +190,7 @@ async def tus_create(
         length=upload_length,
         offset=0,
         metadata=_parse_upload_metadata(upload_metadata),
-        tenant_id=x_tenant_id,
+        tenant_id=tenant_id,
     )
     _part_path(upload_id).write_bytes(b"")
     _save(desc)
@@ -198,6 +205,7 @@ async def tus_create(
 @router.head("/{upload_id}")
 async def tus_head(upload_id: str) -> Response:
     desc = _load(upload_id)
+    _require_upload_owner(desc)
     headers = _common_response_headers()
     headers["Upload-Length"] = str(desc.length)
     headers["Upload-Offset"] = str(desc.offset)
@@ -220,6 +228,7 @@ async def tus_patch(
         raise HTTPException(status_code=400, detail="Upload-Offset required")
 
     desc = _load(upload_id)
+    _require_upload_owner(desc)
     if upload_offset != desc.offset:
         raise HTTPException(status_code=409, detail="Upload-Offset mismatch")
     if desc.committed:
@@ -262,6 +271,8 @@ async def tus_patch(
 
 @router.delete("/{upload_id}")
 async def tus_delete(upload_id: str) -> Response:
+    desc = _load(upload_id)
+    _require_upload_owner(desc)
     mp = _meta_path(upload_id)
     pp = _part_path(upload_id)
     if not mp.exists():
@@ -274,6 +285,7 @@ async def tus_delete(upload_id: str) -> Response:
 @router.get("/{upload_id}/status")
 async def upload_status(upload_id: str) -> JSONResponse:
     desc = _load(upload_id)
+    _require_upload_owner(desc)
     return JSONResponse(
         {
             "id": desc.id,

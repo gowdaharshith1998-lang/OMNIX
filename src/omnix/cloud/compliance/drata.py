@@ -8,7 +8,6 @@ substitute a fake transport.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Protocol

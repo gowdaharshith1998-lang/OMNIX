@@ -31,7 +31,7 @@ import queue
 import threading
 import time
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from omnix.cloud.cutover.facade_controller import (
@@ -151,7 +151,7 @@ def compute_clusters(
         rather than a silent misroute at request time.
         """
         if not s:
-            raise ValueError(f"empty service address")
+            raise ValueError("empty service address")
         if s.startswith("["):
             raise ValueError(f"IPv6 literal addresses not supported in service addr: {s!r}")
         if ":" not in s:

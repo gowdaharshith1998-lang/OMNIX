@@ -55,7 +55,7 @@ class _FakeTarget:
         self.committed += 1
 
 
-def _ev(op, lsn, after=None, before=None, table="owners"):
+def _ev(op, lsn, after=None, before=None, table="owners", seq=0, key_columns=()):
     return ChangeEvent(
         op=op,
         relation_id=1234,
@@ -66,6 +66,8 @@ def _ev(op, lsn, after=None, before=None, table="owners"):
         commit_timestamp="2026-05-27T00:00:00+00:00",
         before=before,
         after=after,
+        seq=seq,
+        key_columns=key_columns,
     )
 
 
@@ -125,6 +127,64 @@ def test_delete_event_applied_from_before_tuple(tmp_path, keys):
         output_root=tmp_path,
     )
     assert state.events_replayed == 1
+    # the emitted statement must actually be a DELETE keyed on the
+    # before-tuple, not a generic insert-shaped write
+    sql, params = target.applied[0]
+    assert sql.startswith('DELETE FROM "owners"')
+    assert params == (1,)
+
+
+def test_multi_row_transaction_applies_every_row(tmp_path, keys):
+    """pgoutput gives all rows of one transaction the same commit LSN; the
+    (lsn, seq) watermark must not skip rows 2..N as re-deliveries."""
+    pk, sk = keys
+    target = _FakeTarget()
+    state = run_cdc_replay(
+        events=[
+            _ev("I", "0/500", after=(("id", 1),), seq=0),
+            _ev("I", "0/500", after=(("id", 2),), seq=1),
+            _ev("I", "0/500", after=(("id", 3),), seq=2),
+        ],
+        migration_id="m1",
+        bundle_specs={},
+        column_mapping_by_table={"owners": {"id": "id"}},
+        target_conn=target,
+        secret_key=sk,
+        public_key=pk,
+        output_root=tmp_path,
+    )
+    assert state.events_replayed == 3
+    assert state.events_idempotent_skipped == 0
+    assert len(target.applied) == 3
+
+
+def test_update_emits_update_statement_keyed_on_before(tmp_path, keys):
+    pk, sk = keys
+    target = _FakeTarget()
+    state = run_cdc_replay(
+        events=[
+            _ev(
+                "U",
+                "0/600",
+                before=(("id", 7),),
+                after=(("id", 7), ("email", "new@x")),
+            )
+        ],
+        migration_id="m1",
+        bundle_specs={},
+        column_mapping_by_table={"owners": {"id": "id", "email": "email"}},
+        target_conn=target,
+        secret_key=sk,
+        public_key=pk,
+        output_root=tmp_path,
+    )
+    assert state.events_replayed == 1
+    sql, params = target.applied[0]
+    assert sql.startswith('UPDATE "owners" SET')
+    assert '"__omnix_cdc_lsn"' in sql
+    assert "IS NOT DISTINCT FROM" in sql
+    # SET values (after + lsn), then predicate values (before)
+    assert params == (7, "new@x", "0/600", 7)
 
 
 def test_truncate_event_quarantined(tmp_path, keys):

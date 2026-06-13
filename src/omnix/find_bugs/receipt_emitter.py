@@ -16,7 +16,14 @@ from typing import Any
 from omnix.receipts import keystore as mldsa_keystore
 from omnix.receipts import sign as mldsa_sign
 from omnix.receipts import verify as mldsa_verify
-from omnix.receipts.finding_keys import project_privkey_path, sign_finding, verify_finding
+from omnix.receipts.finding_keys import (
+    omnix_home,
+    project_privkey_path,
+    sign_bytes_mldsa,
+    sign_finding,
+    verify_bytes_mldsa,
+    verify_finding,
+)
 from omnix.receipts.finding_receipt import (
     FindingReceipt,
     compute_finding_id,
@@ -204,7 +211,7 @@ def finding_dict_to_receipt(
 
 
 def _global_mldsa_secret_path() -> Path:
-    return Path.home() / ".omnix" / "keys" / "secret.pem"
+    return omnix_home() / ".omnix" / "keys" / "secret.pem"
 
 
 def emit_scan_receipts(
@@ -231,7 +238,7 @@ def emit_scan_receipts(
 
     omnix_version = str(ov)
 
-    receipts_base = receipts_home if receipts_home is not None else Path.home()
+    receipts_base = receipts_home if receipts_home is not None else omnix_home()
     sid = scan_id_now()
     scan_dir = receipts_base / ".omnix" / "receipts" / "findings" / project_id / sid
     scan_dir.mkdir(parents=True, exist_ok=True)
@@ -257,6 +264,12 @@ def emit_scan_receipts(
         json_path.write_bytes(canonical)
         sig_b64 = sign_finding(asdict(r), project_id)
         sig_path.write_text(sig_b64 + "\n", encoding="ascii")
+        # Hybrid signing: also emit a post-quantum ML-DSA-65 signature over the
+        # same canonical bytes, so every per-finding receipt is directly PQC
+        # signed (not only Merkle-anchored under the ML-DSA manifest).
+        (scan_dir / f"{r.finding_id}.mldsa.sig").write_text(
+            sign_bytes_mldsa(canonical), encoding="ascii"
+        )
 
     root_hex = compute_merkle_root(leaf_digests)
 
@@ -299,7 +312,9 @@ def emit_scan_receipts(
         ensure_ascii=False,
     ).encode("utf-8")
 
-    sk_pem = mldsa_secret.read_text(encoding="ascii")
+    from omnix.receipts.secure_keyfile import read_secret as _read_secret
+
+    sk_pem = _read_secret(mldsa_secret)
     sk = mldsa_keystore.secret_from_pem(sk_pem)
     rnd = secrets.token_bytes(32)
     sig_raw = mldsa_sign.sign_bytes(sk, manifest_bytes, b"", rnd)
@@ -369,6 +384,15 @@ def verify_scan_directory(
                 return False, "finding_signature_invalid"
         except (FileNotFoundError, OSError, ValueError):
             return False, "finding_signature_invalid"
+        # Post-quantum signature: required when present (always, for receipts
+        # emitted by current OMNIX); absent only on legacy scan dirs, which
+        # still hold via Ed25519 + the ML-DSA-signed Merkle root.
+        mldsa_sig_p = scan_dir / f"{fid}.mldsa.sig"
+        if mldsa_sig_p.is_file():
+            if not verify_bytes_mldsa(
+                canonical, mldsa_sig_p.read_text(encoding="ascii"), mldsa_pubkey
+            ):
+                return False, "finding_pqc_signature_invalid"
         leaves_recomputed.append(leaf_b)
 
     expected_root = str(manifest.get("merkle_root") or "")

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -104,7 +103,7 @@ def test_atomic_write_under_mid_write_kill(tmp_path: Path) -> None:
     )
     proc = subprocess.Popen([sys.executable, "-c", script])
     time.sleep(0.5)
-    proc.send_signal(signal.SIGKILL)
+    proc.kill()
     proc.wait(timeout=5)
 
     # The reader still sees the unchanged v1 — rename was never executed.

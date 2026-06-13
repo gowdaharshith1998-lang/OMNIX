@@ -1,0 +1,23 @@
+name: Docs cleanup
+description: Report stale, confusing, or incomplete OMNIX documentation.
+title: "[Docs]: "
+labels: ["documentation"]
+body:
+  - type: textarea
+    id: location
+    attributes:
+      label: Location
+      description: Which file, section, or link needs attention?
+    validations:
+      required: true
+  - type: textarea
+    id: issue
+    attributes:
+      label: Issue
+      description: What is stale, unclear, missing, or incorrect?
+    validations:
+      required: true
+  - type: textarea
+    id: suggested
+    attributes:
+      label: Suggested change

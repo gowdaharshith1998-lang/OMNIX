@@ -15,8 +15,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-from omnix.receipts.finding_keys import ensure_project_key, project_privkey_path
+from omnix.receipts.finding_keys import ensure_project_key, omnix_home, project_privkey_path
 from omnix.receipts.finding_receipt import compute_project_id
+
+from .keystore import harden_permissions
+from .secure_keyfile import read_secret_bytes, write_secret
 
 Scope = Literal["global", "project"]
 
@@ -48,7 +51,7 @@ def _now() -> str:
 
 
 def _providers_dir() -> Path:
-    return Path.home() / ".omnix" / "providers"
+    return omnix_home() / ".omnix" / "providers"
 
 
 def _index_path() -> Path:
@@ -91,7 +94,7 @@ def _save_index(index: dict[str, KeyMetadata]) -> None:
     os.chmod(p.parent, 0o700)
     data = {"keys": [asdict(v) for v in sorted(index.values(), key=lambda k: k.id)]}
     p.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.chmod(p, 0o600)
+    harden_permissions(p)
 
 
 def _project_id_from_cwd() -> str:
@@ -109,19 +112,17 @@ def _private_key_path(project_id: str | None) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(path.parent, 0o700)
         priv = Ed25519PrivateKey.generate()
-        path.write_bytes(
-            priv.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption(),
-            )
+        priv_pem = priv.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
         )
-        os.chmod(path, 0o600)
+        write_secret(path, priv_pem.decode("ascii"))  # encrypts at rest when enabled
     return path
 
 
 def _derive_aes_key(project_id: str | None) -> bytes:
-    pem = _private_key_path(project_id).read_bytes()
+    pem = read_secret_bytes(_private_key_path(project_id))
     key = serialization.load_pem_private_key(pem, password=None)
     if not isinstance(key, Ed25519PrivateKey):
         raise ValueError("provider vault requires Ed25519 project key")
@@ -206,7 +207,7 @@ def _write_file(path: Path, blob: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     os.chmod(path.parent, 0o700)
     path.write_text(blob, encoding="utf-8")
-    os.chmod(path, 0o600)
+    harden_permissions(path)
 
 
 def encrypt_key(

@@ -4,6 +4,12 @@ In-cluster bridge containers that consume vendor-emitted Kafka messages from
 mainframe-side observation agents and forward normalized `Observation`
 envelopes to the OMNIX collector.
 
+## Status
+
+This is an optional enterprise chart surface. The mainframe-side capture agents
+remain customer-licensed and operated outside this chart; OMNIX deploys only
+the in-cluster bridge workers.
+
 ## Vendor matrix
 
 | Vendor | Source | Delivery | License |
@@ -29,12 +35,14 @@ mainframe:
     bootstrapServers: "kafka.platform:9092"
 ```
 
-Each bridge requires a Kafka consumer credential — see the parent chart's
-`secrets.yaml` for the canonical Secret names.
+Each bridge currently accepts topic, bootstrap servers, and consumer group
+through chart values (`OMNIX_MAINFRAME_TOPIC`, `OMNIX_MAINFRAME_BOOTSTRAP`,
+`OMNIX_MAINFRAME_GROUP`). If the Kafka cluster requires SASL/TLS, add the
+required Secret mounts or env wiring before enabling the bridge in production.
 
 ## Bridge behavior
 
-- Bridges are FastAPI-less Python processes that consume the configured
+- Bridges are plain Python worker processes that consume the configured
   topic and POST each batch to the collector at `OMNIX_COLLECTOR_URL`.
 - Vendor-specific wire-format handling lives in
   `src/omnix/cloud/observe/mainframe_bridge.py`:
@@ -46,9 +54,9 @@ Each bridge requires a Kafka consumer credential — see the parent chart's
   imports. If neither is installed the bridge logs a fatal error and exits 0
   so the pod's `CrashLoopBackOff` is visible without burning restart budget.
 
-## Compliance notes
+## Audit notes
 
-Mainframe observation is part of the regulator-facing audit trail and shares
+Mainframe observation can contribute to a regulator-facing audit trail and shares
 the OMNIX `Observation` envelope (`src/omnix/cloud/observe/envelope.py`),
 which carries `redacted_fields` per record. PII redaction patterns are
 inherited from the parent — emails, SSNs, PANs, IPv4.

@@ -111,6 +111,7 @@ describe('naming pivot (slice-19)', () => {
     expect(t).not.toContain('open-core company brain');
     expect(t).not.toContain('open-core code intelligence product');
     // Positive: the explicit no-overclaim disclaimer is part of the lock
-    expect(t).toContain('We do not say "provable"');
+    // (PR #63 reworded it; kept in lockstep with tests/studio/test_naming_pivot.py)
+    expect(t).toContain('Not "provable," not "100% accurate."');
   });
 });

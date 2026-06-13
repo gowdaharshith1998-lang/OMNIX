@@ -10,6 +10,7 @@ This module wraps a small Python SDK surface so tests can substitute a fake.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -104,6 +105,13 @@ def get_provider() -> IdentityProvider:
         try:
             _PROVIDER = WorkOSProvider()
         except RuntimeError:
+            settings = get_settings()
+            allow_stub = (
+                settings.env in {"dev", "test"}
+                or os.environ.get("OMNIX_ALLOW_STUB_AUTH") == "1"
+            )
+            if not allow_stub:
+                raise
             _PROVIDER = StubProvider()
     return _PROVIDER
 

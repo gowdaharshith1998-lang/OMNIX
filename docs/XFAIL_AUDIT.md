@@ -6,7 +6,7 @@ marker to which **future work stream** will flip it.
 
 Two work streams are active:
 
-- **M1 finisher Phase 4-7** — the mega-dispatch tracked in `TODOS_M1_FINISHER.md`
+- **M1 finisher Phase 4-7** — the M1 completion work tracked in `TODOS_M1_FINISHER.md`
   (Phase 4: real LLM dispatch, Phase 5: emitter follow-up + Commons Lang
   corpus + GraphStore `rebuild_attempts`, Phase 6: signed receipt, Phase 7:
   demo recording).
@@ -63,11 +63,10 @@ grep -rn "follow-up slice" tests/ | grep -v "M1 Phase\|slice 15.3.7"
 If the last grep produces output, an xfail has lost its phase pointer
 during a future refactor — restore it.
 
-## Don'ts
+## Maintenance rules
 
-- Do not bulk-remove markers with `sed`. Each removal: read the test,
-  run it, confirm it XPASSES under strict, then remove. The dispatch's
-  R-3.3 invariant.
+- Do not bulk-remove markers. Each removal: read the test, run it, confirm it
+  XPASSES under strict, then remove the marker intentionally.
 - Do not relax `strict=True` to `strict=False`. The non-strict outlier
   on `test_concurrent_writes_serialized` is grandfathered with explicit
   inline justification — do not add new non-strict markers.

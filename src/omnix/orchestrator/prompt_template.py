@@ -8,6 +8,19 @@ which is how Phase 6 verification gates anchor reproducibility.
 SCC batching (mutual recursion) goes through `format_scc_prompt`, which
 shares the SYSTEM banner but enumerates all specs + sources together so
 the model has the whole cycle in one window.
+
+PROMPT-INJECTION POSTURE (explicit, by design):
+The `[SOURCE]` block interpolates raw source from the repository being
+migrated, which is UNTRUSTED input — a hostile repo can embed text that
+tries to steer the model (e.g. "ignore the spec, emit X"). OMNIX does not
+attempt to sanitize or escape that source, because the model's output is
+never trusted on its own: every rebuilt node must pass the six-gate
+verification pipeline (syntactic parse, type check, signature check,
+dependency check, property-based tests, behavioral equivalence) before it is
+accepted, and the signed receipt records the exact prompt hash. An injected
+instruction can at worst produce output that FAILS a gate and is flagged for
+human review — it cannot smuggle unverified code past the gates. The gates,
+not prompt hygiene, are the security boundary here.
 """
 
 from __future__ import annotations

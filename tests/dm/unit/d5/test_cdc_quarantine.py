@@ -46,6 +46,8 @@ def test_record_and_flush_signed(tmp_path, keys):
 
 
 def test_file_mode_0600(tmp_path, keys):
+    if os.name == "nt":
+        pytest.skip("Windows stat mode bits do not preserve POSIX 0600 semantics")
     pk, sk = keys
     log = CDCQuarantineLog(
         migration_id="m1", output_root=tmp_path, secret_key=sk, public_key=pk

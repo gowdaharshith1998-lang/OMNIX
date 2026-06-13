@@ -16,6 +16,7 @@ are marked `xfail(strict=True)` so they flip XPASS the moment it lands.
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -32,8 +33,10 @@ JAR_PATH: Path = Path(__file__).parent / "vendor" / "javaparser-emitter.jar"
 
 # Well-known sentinel emitted by JavaSemanticEmitter on UnsolvedSymbolException.
 # Format: "UnresolvedSymbol: <symbol>@<file>:<line> :: <message>"
+# <file> is matched non-greedily up to the final ":<line> ::" so Windows
+# drive-letter colons (C:\...) stay inside the file group.
 _UNRESOLVED_RE = re.compile(
-    r"UnresolvedSymbol:\s*(?P<symbol>[^@]+)@(?P<file>[^:]+):(?P<line>\d+)\s*::\s*(?P<message>.*)"
+    r"UnresolvedSymbol:\s*(?P<symbol>[^@]+)@(?P<file>.+?):(?P<line>\d+)\s*::\s*(?P<message>.*)"
 )
 
 
@@ -63,6 +66,11 @@ def parse_file(
             "vendored JAR missing — run scripts/vendor_javaparser.sh; "
             "see src/omnix/semantic/java/jvm/README.md"
         )
+    if shutil.which("java") is None:
+        raise JavaSemanticError(
+            "java executable missing on PATH — install a JRE/JDK and rerun; "
+            "see src/omnix/semantic/java/jvm/README.md"
+        )
 
     argv: list[str] = ["java", "-jar", str(JAR_PATH), str(path)]
     if classpath:
@@ -79,10 +87,8 @@ def parse_file(
         stderr = _decode(exc.stderr)
         raise JavaSemanticTimeoutError(str(path), timeout_s, stderr) from exc
     except FileNotFoundError as exc:
-        # `java` itself or the JAR vanished mid-flight — treat both as
-        # missing-JAR for caller clarity; the README is the single fix.
         raise JavaSemanticError(
-            "vendored JAR missing — run scripts/vendor_javaparser.sh; "
+            "java executable missing on PATH — install a JRE/JDK and rerun; "
             "see src/omnix/semantic/java/jvm/README.md"
         ) from exc
 

@@ -12,7 +12,7 @@ For each ``(table, column)`` pair:
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Optional
 
 from omnix.dm._types import (
     AnomalyFinding,

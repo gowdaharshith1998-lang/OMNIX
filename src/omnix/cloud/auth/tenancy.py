@@ -10,10 +10,8 @@ injects the tenant_id into a contextvar; data-access helpers read from it.
 from __future__ import annotations
 
 import contextvars
-from collections.abc import Awaitable, Callable
 
-from fastapi import Request
-from fastapi.responses import JSONResponse
+from fastapi import HTTPException, Request
 
 from omnix.cloud.auth.jwt_session import Session, SessionError, verify
 
@@ -100,6 +98,22 @@ def require_session(request: Request) -> Session:
     if sess is None:
         raise SessionError("no active session")
     return sess
+
+
+def require_session_http() -> Session:
+    """Return the request session or raise a FastAPI 401 response."""
+    sess = current_session()
+    if sess is None:
+        raise HTTPException(status_code=401, detail="missing session")
+    return sess
+
+
+def require_session_tenant(x_tenant_id: str | None = None) -> str:
+    """Return the authenticated tenant and reject spoofed tenant headers."""
+    sess = require_session_http()
+    if x_tenant_id and x_tenant_id != sess.tenant_id:
+        raise HTTPException(status_code=403, detail="tenant header does not match session")
+    return sess.tenant_id
 
 
 class CrossTenantAccessError(RuntimeError):

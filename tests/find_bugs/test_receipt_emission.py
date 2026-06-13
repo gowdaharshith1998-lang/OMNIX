@@ -67,7 +67,7 @@ def test_emit_no_findings_writes_manifest_only(
     assert man["merkle_root"] == compute_merkle_root([])
 
 
-def test_emit_one_finding_writes_four_artifacts(
+def test_emit_one_finding_writes_artifacts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     proj = tmp_path / "proj"
@@ -86,11 +86,13 @@ def test_emit_one_finding_writes_four_artifacts(
         files_scanned=1,
     )
     assert len(list(scan_dir.glob("*.json"))) == 2
-    assert len(list(scan_dir.glob("*.sig"))) == 2
+    # <fid>.sig (Ed25519) + <fid>.mldsa.sig (ML-DSA-65) + scan_manifest.sig
+    assert len(list(scan_dir.glob("*.sig"))) == 3
     man = json.loads((scan_dir / "scan_manifest.json").read_text(encoding="utf-8"))
     fid = man["finding_leaves"][0]["finding_id"]
     assert (scan_dir / f"{fid}.json").is_file()
     assert (scan_dir / f"{fid}.sig").is_file()
+    assert (scan_dir / f"{fid}.mldsa.sig").is_file()  # post-quantum signature
 
 
 def test_emit_n_findings_file_count(
@@ -115,7 +117,8 @@ def test_emit_n_findings_file_count(
         files_scanned=2,
     )
     all_files = list(scan_dir.iterdir())
-    assert len(all_files) == 6
+    # per finding: .json + .sig + .mldsa.sig (3) × 2 + scan_manifest.json/.sig
+    assert len(all_files) == 8
 
 
 def test_manifest_merkle_root_matches_recomputed(
@@ -257,6 +260,43 @@ def test_tamper_finding_json_breaks_merkle(
     )
     assert not ok
     assert reason in ("merkle_mismatch", "finding_signature_invalid")
+
+
+def test_tampered_pqc_signature_breaks_verify(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Corrupting a finding's ML-DSA-65 (.mldsa.sig) signature must fail verify."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "pkg").mkdir()
+    (proj / "pkg" / "a.py").write_text("def foo():\n pass\n", encoding="utf-8")
+    _home, keys = _setup_home(tmp_path, monkeypatch)
+    ensure_project_key(proj.resolve())
+    scan_dir = emit_scan_receipts(
+        [_minimal_finding()],
+        proj.resolve(),
+        scan_started_at=now_iso8601_utc(),
+        files_scanned=1,
+    )
+    mldsa_sig = next(scan_dir.glob("*.mldsa.sig"))
+    # Verifies cleanly before tampering.
+    ok, _ = verify_scan_directory(
+        scan_dir, project_pubkey_path(proj.resolve()), keys / "public.pem"
+    )
+    assert ok
+    body = mldsa_sig.read_text(encoding="ascii")
+    # Flip a base64 char in the PEM body to corrupt the signature.
+    lines = body.splitlines()
+    for i, ln in enumerate(lines):
+        if ln and "-----" not in ln:
+            lines[i] = ("A" if ln[0] != "A" else "B") + ln[1:]
+            break
+    mldsa_sig.write_text("\n".join(lines) + "\n", encoding="ascii")
+    ok, reason = verify_scan_directory(
+        scan_dir, project_pubkey_path(proj.resolve()), keys / "public.pem"
+    )
+    assert not ok
+    assert reason == "finding_pqc_signature_invalid"
 
 
 def test_delete_finding_json_breaks_verify(

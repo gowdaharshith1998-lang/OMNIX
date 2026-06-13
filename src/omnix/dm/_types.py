@@ -429,6 +429,13 @@ class ChangeEvent:
     commit_timestamp: Optional[str]
     before: Optional[Tuple[Tuple[str, object], ...]]
     after: Optional[Tuple[Tuple[str, object], ...]]
+    # pgoutput stamps every change in a transaction with the same commit
+    # LSN, so (lsn, seq) — not lsn alone — is the unique identity of a
+    # change for idempotency purposes.
+    seq: int = 0
+    # Replica-identity key column names from the relation message; empty
+    # when the relation declared no usable key.
+    key_columns: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

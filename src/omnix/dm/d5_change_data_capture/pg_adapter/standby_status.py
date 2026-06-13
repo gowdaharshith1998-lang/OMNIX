@@ -17,7 +17,6 @@ from __future__ import annotations
 import datetime
 import struct
 import threading
-import time
 from typing import Any, Callable
 
 _PG_EPOCH = datetime.datetime(2000, 1, 1, tzinfo=datetime.timezone.utc)
@@ -84,20 +83,20 @@ class HeartbeatThread(threading.Thread):
         self._send = send_callback
         self._get = get_flush_lsn
         self._interval = interval_sec
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()
 
     def stop(self) -> None:
-        self._stop.set()
+        self._stop_event.set()
 
     def run(self) -> None:
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             try:
                 lsn = self._get()
                 self._send(lsn)
             except Exception:
                 # Heartbeat is best-effort; surface a metric in PR D.
                 pass
-            if self._stop.wait(self._interval):
+            if self._stop_event.wait(self._interval):
                 return
 
 

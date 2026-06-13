@@ -24,7 +24,6 @@ from typing import Any
 from cryptography.exceptions import InvalidSignature
 
 from omnix.receipts.finding_keys import (
-    InvalidFindingPublicKeyError,
     _load_private_key,
     _load_public_key,
     project_privkey_path,
@@ -259,6 +258,16 @@ def sign_rebuild(receipt: RebuildReceipt) -> str:
     priv = _load_private_key(priv_path)
     sig = priv.sign(receipt.canonical_json())
     return base64.b64encode(sig).decode("ascii")
+
+
+def verify_rebuild_mldsa(
+    receipt: RebuildReceipt, signature_pem: str, mldsa_pubkey_path: Path
+) -> bool:
+    """Verify a rebuild receipt's post-quantum ML-DSA-65 signature (the
+    ``<node>.mldsa.sig`` written alongside the classical Ed25519 ``.sig``)."""
+    from omnix.receipts.finding_keys import verify_bytes_mldsa
+
+    return verify_bytes_mldsa(receipt.canonical_json(), signature_pem, mldsa_pubkey_path)
 
 
 def verify_rebuild(

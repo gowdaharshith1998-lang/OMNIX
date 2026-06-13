@@ -10,9 +10,9 @@ import pytest
 from omnix.dm._types import ChangeEvent, RelationSchema
 from omnix.dm.d5_change_data_capture.pg_adapter.pgoutput_parser import (
     ParseError,
+    _lsn_str,
     _State,
     _UnchangedToast,
-    _lsn_str,
     parse_message,
 )
 

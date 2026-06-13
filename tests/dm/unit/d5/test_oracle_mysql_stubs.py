@@ -9,8 +9,8 @@ from omnix.dm.d5_change_data_capture.cdc_core import (
     _eager_import_adapters,
     get_adapter,
 )
-from omnix.dm.d5_change_data_capture.oracle_adapter import OracleAdapter
 from omnix.dm.d5_change_data_capture.mysql_adapter import MySQLAdapter
+from omnix.dm.d5_change_data_capture.oracle_adapter import OracleAdapter
 
 
 @pytest.fixture(autouse=True)
