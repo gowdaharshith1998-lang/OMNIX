@@ -34,6 +34,7 @@ from omnix.orchestrator.dispatcher import (
 )
 from omnix.orchestrator.prompt_template import PROMPT_TEMPLATE_VERSION, format_prompt
 from omnix.orchestrator.topological import topo_sort
+from omnix.receipts.finding_keys import sign_bytes_mldsa
 from omnix.receipts.finding_receipt import (
     compute_project_id,
     now_iso8601_utc,
@@ -191,8 +192,15 @@ def _write_outputs(
     sig_path = out_dir / f"{base}.sig"
 
     src_path.write_text(rebuilt_source, encoding="utf-8")
-    receipt_path.write_bytes(receipt.canonical_json())
+    canonical = receipt.canonical_json()
+    receipt_path.write_bytes(canonical)
     sig_path.write_text(signature_b64 + "\n", encoding="utf-8")
+    # Hybrid: post-quantum ML-DSA-65 signature over the same canonical bytes,
+    # so every per-node rebuild receipt is directly PQC-signed (the Ed25519
+    # .sig remains for classical defense-in-depth / backward compatibility).
+    (out_dir / f"{base}.mldsa.sig").write_text(
+        sign_bytes_mldsa(canonical), encoding="ascii"
+    )
 
     return RebuildOutput(
         node_fqn=node_fqn,

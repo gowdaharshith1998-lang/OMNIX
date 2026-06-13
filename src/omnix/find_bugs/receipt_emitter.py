@@ -19,7 +19,9 @@ from omnix.receipts import verify as mldsa_verify
 from omnix.receipts.finding_keys import (
     omnix_home,
     project_privkey_path,
+    sign_bytes_mldsa,
     sign_finding,
+    verify_bytes_mldsa,
     verify_finding,
 )
 from omnix.receipts.finding_receipt import (
@@ -262,6 +264,12 @@ def emit_scan_receipts(
         json_path.write_bytes(canonical)
         sig_b64 = sign_finding(asdict(r), project_id)
         sig_path.write_text(sig_b64 + "\n", encoding="ascii")
+        # Hybrid signing: also emit a post-quantum ML-DSA-65 signature over the
+        # same canonical bytes, so every per-finding receipt is directly PQC
+        # signed (not only Merkle-anchored under the ML-DSA manifest).
+        (scan_dir / f"{r.finding_id}.mldsa.sig").write_text(
+            sign_bytes_mldsa(canonical), encoding="ascii"
+        )
 
     root_hex = compute_merkle_root(leaf_digests)
 
@@ -374,6 +382,15 @@ def verify_scan_directory(
                 return False, "finding_signature_invalid"
         except (FileNotFoundError, OSError, ValueError):
             return False, "finding_signature_invalid"
+        # Post-quantum signature: required when present (always, for receipts
+        # emitted by current OMNIX); absent only on legacy scan dirs, which
+        # still hold via Ed25519 + the ML-DSA-signed Merkle root.
+        mldsa_sig_p = scan_dir / f"{fid}.mldsa.sig"
+        if mldsa_sig_p.is_file():
+            if not verify_bytes_mldsa(
+                canonical, mldsa_sig_p.read_text(encoding="ascii"), mldsa_pubkey
+            ):
+                return False, "finding_pqc_signature_invalid"
         leaves_recomputed.append(leaf_b)
 
     expected_root = str(manifest.get("merkle_root") or "")
