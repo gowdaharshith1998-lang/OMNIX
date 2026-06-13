@@ -154,9 +154,18 @@ def dispatch_turboscan_python_phase(
     rels_order = [t[0] for t in targets]
 
     payloads: list[dict[str, Any]] = []
-    for relp, fn, lineno, fpath in targets:
+    for idx, (relp, fn, lineno, fpath) in enumerate(targets):
         ex = budget_map.get((relp, fn), examples_default)
-        slot = hash((relp, fn)) % workers_w
+        # Unique per-target slot. The slot keys BOTH the in-flight hygiene
+        # registry (`book[slot]`, read by the filesystem-hygiene watcher to
+        # attribute an FS event to the running target) AND the per-target
+        # Hypothesis example-DB dir. The previous `hash((relp, fn)) % workers`
+        # collided across distinct targets, so two targets that ran
+        # concurrently clobbered each other's registry entry (misattributed
+        # hygiene events; one clearing the slot mid-run of the other) and
+        # shared a single Hypothesis DB dir (corrupted/cross-contaminated
+        # replay). A unique slot per target makes both isolations exact.
+        slot = idx
         hyp_d = str(worker_hypothesis_dir(root, slot))
         ra = {
             **base_run,

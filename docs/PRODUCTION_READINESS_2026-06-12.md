@@ -75,6 +75,7 @@ ordering bug (now fixed, see F8), not a test artifact.
 | F22 | Medium | **`DESIGN.md` mislabeled:** it is a Linear.app visual/brand spec, but `docs/internal/README.md` listed it as "design notes for architecture decisions" — misleading to a reviewer; the same index pointed at the now-removed `slice21_recon.md`. | Relabeled `DESIGN.md` accurately as a visual/brand design reference (explicitly "NOT software architecture") and dropped the stale `slice21_recon.md` reference. |
 | F23 | Medium | **Prompt-injection posture undocumented:** the rebuild prompt interpolates raw source from the (untrusted) migrated repo with no acknowledgment. | Documented the explicit posture in `prompt_template.py`: source is untrusted and deliberately un-sanitized because the six-gate verification pipeline — not prompt hygiene — is the security boundary; injected instructions can at worst produce gate-failing output flagged for human review, never smuggle unverified code through. |
 | F24 | Medium | **Celery `start_pipeline` retries re-ran the entire non-idempotent pipeline** (re-ingest, re-emit receipts) on any failure or duplicate dispatch. | Added an idempotency guard (`store.job_already_finished`): the task skips when the persisted Job already reached a terminal success state (`complete`/`awaiting_cutover`). No-op when persistence is off (dev/test). 2 new tests. |
+| F25 | High | **Turboscan worker-slot collision:** the slot keyed both the in-flight hygiene registry (`book[slot]`) and the Hypothesis DB dir, but was `hash((relp, fn)) % workers` — so two distinct targets running concurrently clobbered each other's registry entry (misattributed filesystem-hygiene events; one cleared the slot mid-run of the other) and shared one Hypothesis example DB (corrupted/cross-contaminated replay), contradicting the documented worker-isolation. | Assign each target a **unique** slot (its index), making both the hygiene-registry correlation and the Hypothesis DB dir per-target and collision-free. Scan suite green. |
 
 ### High — still remaining
 - **Cross-file `CALLS` for non-resolver languages:** the F19 second pass covers Python and
@@ -82,9 +83,6 @@ ordering bug (now fixed, see F8), not a test artifact.
   only within a file; extending global resolution to them is follow-on work. Name-collision
   resolution (a short name defined in multiple other files) still picks the first global candidate —
   the pre-existing documented limitation, now also reachable cross-file.
-- **Turboscan worker "slots" collide:** slots are keyed by `hash(file,function) % workers` rather than
-  executing-worker identity, so colliding targets share a slot entry and a Hypothesis DB dir under the
-  default parallel scan — contradicting the documented worker-isolation claim.
 - **DM Merkle-chain `predecessor_hash` is signed but never validated** by any consumer; substituted or
   reordered predecessors pass. *(Attempted this pass and backed out: the `predecessor_hash`
   convention is inconsistent across emitters/consumers — chainhash files use `next_hash(pred ++
