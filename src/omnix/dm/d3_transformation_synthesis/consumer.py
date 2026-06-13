@@ -30,6 +30,7 @@ from omnix.dm._types import (
     ColumnMapping,
     ColumnSpec,
 )
+from omnix.dm.receipts import merkle_chain
 from omnix.dm.receipts.ml_dsa_65_signer import canonicalize
 from omnix.dm.receipts.schemas import (
     COLUMN_MAPPING_MANIFEST_SCHEMA,
@@ -170,6 +171,22 @@ def load_manifests(
             )
         _verify_signature(d1, d1_sig, public_key)
         _verify_signature(d2, d2_sig, public_key)
+
+    # Validate the D1->D2 Merkle link. Each manifest's chain hash is
+    # next_hash(predecessor_hash, canonical(manifest)) — the value every
+    # emitter writes to its .chainhash file. The edge-case (D2) manifest must
+    # carry the column-mapping (D1) manifest's chain hash as its
+    # predecessor_hash; otherwise a substituted or reordered D1/D2 pair whose
+    # individual signatures still verify would be accepted. This is the chain
+    # integrity check the receipts previously signed but never enforced.
+    expected_d2_predecessor = merkle_chain.next_hash(
+        d1.get("predecessor_hash"), canonicalize(d1)
+    )
+    if d2.get("predecessor_hash") != expected_d2_predecessor:
+        raise ConsumerHalt(
+            "D1->D2 Merkle chain link broken: edge-case manifest predecessor_hash "
+            "does not equal the column-mapping manifest's chain hash"
+        )
 
     canonical_d2 = canonicalize(d2)
     predecessor_hash = hashlib.sha256(canonical_d2).hexdigest()

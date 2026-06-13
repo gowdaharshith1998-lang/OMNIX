@@ -77,18 +77,15 @@ ordering bug (now fixed, see F8), not a test artifact.
 | F24 | Medium | **Celery `start_pipeline` retries re-ran the entire non-idempotent pipeline** (re-ingest, re-emit receipts) on any failure or duplicate dispatch. | Added an idempotency guard (`store.job_already_finished`): the task skips when the persisted Job already reached a terminal success state (`complete`/`awaiting_cutover`). No-op when persistence is off (dev/test). 2 new tests. |
 | F25 | High | **Turboscan worker-slot collision:** the slot keyed both the in-flight hygiene registry (`book[slot]`) and the Hypothesis DB dir, but was `hash((relp, fn)) % workers` — so two distinct targets running concurrently clobbered each other's registry entry (misattributed filesystem-hygiene events; one cleared the slot mid-run of the other) and shared one Hypothesis example DB (corrupted/cross-contaminated replay), contradicting the documented worker-isolation. | Assign each target a **unique** slot (its index), making both the hygiene-registry correlation and the Hypothesis DB dir per-target and collision-free. Scan suite green. |
 | F26 | Medium | **Private key files were world-readable on Windows:** every key/secret write used `os.chmod(.., 0o600)`, which only toggles the read-only bit on Windows — leaving private keys readable by all accounts. | New cross-platform `keystore.harden_permissions()` (chmod on POSIX; lock-out-safe `icacls` owner-only ACL on Windows — additive grant first, then break inheritance) wired into all key/secret writes (ML-DSA keystore, Ed25519 project keys, provider vault). Verified owner-only on Windows with no lockout. NOTE: restricts *access*, not encryption-at-rest — a passphrase/OS-keychain-encrypted store remains follow-on. |
+| F27 | High | **DM Merkle-chain `predecessor_hash` was signed but never validated** — a substituted or reordered D1/D2 manifest pair with individually-valid signatures was accepted; every unit fixture used a dummy predecessor (`"abcd"*16`/`"ab"*32`), so the chain was never exercised end-to-end. | Both the d3 and d4 consumers now enforce the canonical link: D2's `predecessor_hash` must equal D1's chain hash, `next_hash(d1.predecessor_hash, canonical(d1))` — the value every emitter already writes to its `.chainhash`. Fixtures across d3/d4 (unit + integration) updated to chain properly; new test asserts a tampered predecessor HALTs. Full DM suite (360) green. |
 
 ### High — still remaining
 - **Cross-file `CALLS` for non-resolver languages:** the F19 second pass covers Python and
   TypeScript (the languages with name-resolving parsers). Rust/Go/Ruby/generic still resolve calls
-  only within a file; extending global resolution to them is follow-on work. Name-collision
-  resolution (a short name defined in multiple other files) still picks the first global candidate —
-  the pre-existing documented limitation, now also reachable cross-file.
-- **DM Merkle-chain `predecessor_hash` is signed but never validated** by any consumer; substituted or
-  reordered predecessors pass. *(Attempted this pass and backed out: the `predecessor_hash`
-  convention is inconsistent across emitters/consumers — chainhash files use `next_hash(pred ++
-  canonical)` while the consumer's own output uses plain `sha256(canonical)` — so validation needs a
-  dedicated convention-unification pass first.)*
+  only within a file; extending global resolution to them is follow-on work (their call extraction is
+  inline, with no clean pass1/pass2 seam to reuse). Name-collision resolution (a short name defined in
+  multiple other files) still picks the first global candidate — the pre-existing documented
+  limitation, now also reachable cross-file.
 - **Optional crypto upgrade:** per-finding/per-rebuild receipts remain Ed25519 (F21 corrected the
   marketing to match). Upgrading them to ML-DSA-65 would make every per-item receipt post-quantum at
   the cost of ~50× larger signatures (3309 vs 64 bytes) — a product decision, not a bug.

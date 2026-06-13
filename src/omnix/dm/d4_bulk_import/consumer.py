@@ -33,6 +33,7 @@ from omnix.dm._types import (
     SchemaSpec,
     TableSpec,
 )
+from omnix.dm.receipts import merkle_chain
 from omnix.dm.receipts.ml_dsa_65_signer import canonicalize
 from omnix.dm.receipts.schemas import (
     COLUMN_MAPPING_MANIFEST_SCHEMA,
@@ -206,6 +207,18 @@ def load_prior_receipts(
             )
         _verify_signature(d1, pra_dir / "column-mapping.json.sig", public_key)
         _verify_signature(d2, pra_dir / "edge-case-manifest.json.sig", public_key)
+
+    # Enforce the D1->D2 Merkle link (see d3 consumer for rationale): D2's
+    # predecessor_hash must equal D1's chain hash, or a substituted/reordered
+    # manifest pair would slip through despite valid individual signatures.
+    expected_d2_predecessor = merkle_chain.next_hash(
+        d1.get("predecessor_hash"), canonicalize(d1)
+    )
+    if d2.get("predecessor_hash") != expected_d2_predecessor:
+        raise PrePhaseSignatureError(
+            "D1->D2 Merkle chain link broken: edge-case manifest predecessor_hash "
+            "does not equal the column-mapping manifest's chain hash"
+        )
 
     transformer_specs: Dict[str, dict] = {}
     transformer_halts: Dict[str, dict] = {}
