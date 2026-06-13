@@ -19,6 +19,7 @@ from omnix.receipts.finding_keys import ensure_project_key, omnix_home, project_
 from omnix.receipts.finding_receipt import compute_project_id
 
 from .keystore import harden_permissions
+from .secure_keyfile import read_secret_bytes, write_secret
 
 Scope = Literal["global", "project"]
 
@@ -111,19 +112,17 @@ def _private_key_path(project_id: str | None) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(path.parent, 0o700)
         priv = Ed25519PrivateKey.generate()
-        path.write_bytes(
-            priv.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption(),
-            )
+        priv_pem = priv.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
         )
-        harden_permissions(path)
+        write_secret(path, priv_pem.decode("ascii"))  # encrypts at rest when enabled
     return path
 
 
 def _derive_aes_key(project_id: str | None) -> bytes:
-    pem = _private_key_path(project_id).read_bytes()
+    pem = read_secret_bytes(_private_key_path(project_id))
     key = serialization.load_pem_private_key(pem, password=None)
     if not isinstance(key, Ed25519PrivateKey):
         raise ValueError("provider vault requires Ed25519 project key")

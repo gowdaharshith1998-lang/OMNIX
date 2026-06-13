@@ -312,7 +312,9 @@ def emit_scan_receipts(
         ensure_ascii=False,
     ).encode("utf-8")
 
-    sk_pem = mldsa_secret.read_text(encoding="ascii")
+    from omnix.receipts.secure_keyfile import read_secret as _read_secret
+
+    sk_pem = _read_secret(mldsa_secret)
     sk = mldsa_keystore.secret_from_pem(sk_pem)
     rnd = secrets.token_bytes(32)
     sig_raw = mldsa_sign.sign_bytes(sk, manifest_bytes, b"", rnd)

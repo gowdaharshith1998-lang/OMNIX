@@ -244,6 +244,7 @@ def _cutover_keypair() -> tuple[bytes, bytes]:
         if _CUTOVER_KEYPAIR is not None:
             return _CUTOVER_KEYPAIR
         from omnix.receipts import keystore
+        from omnix.receipts.secure_keyfile import read_secret
 
         d = _cutover_key_dir()
         pub_p = d / "public.pem"
@@ -251,7 +252,7 @@ def _cutover_keypair() -> tuple[bytes, bytes]:
         if not (pub_p.is_file() and sec_p.is_file()):
             keystore.write_keypair_dir(d)
         pk = keystore.public_from_pem(pub_p.read_text(encoding="ascii"))
-        sk = keystore.secret_from_pem(sec_p.read_text(encoding="ascii"))
+        sk = keystore.secret_from_pem(read_secret(sec_p))  # decrypts at rest when enabled
         _CUTOVER_KEYPAIR = (pk, sk)
         return _CUTOVER_KEYPAIR
 

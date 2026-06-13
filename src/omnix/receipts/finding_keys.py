@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 
 from .finding_receipt import FindingReceipt
-from .keystore import harden_permissions
+from .secure_keyfile import read_secret, read_secret_bytes, write_secret
 
 
 class InvalidFindingPublicKeyError(ValueError):
@@ -83,14 +83,13 @@ def ensure_project_key(project_root: Path) -> tuple[Path, Path, bool]:
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
     )
-    priv_path.write_bytes(priv_pem)
-    harden_permissions(priv_path)
+    write_secret(priv_path, priv_pem.decode("ascii"))  # encrypts at rest when enabled
     pub_path.write_bytes(pub_pem)
     return priv_path, pub_path, True
 
 
 def _load_private_key(priv_path: Path) -> Ed25519PrivateKey:
-    pem = priv_path.read_bytes()
+    pem = read_secret_bytes(priv_path)
     key = serialization.load_pem_private_key(pem, password=None)
     if not isinstance(key, Ed25519PrivateKey):
         raise ValueError(f"key at {priv_path} is not Ed25519")
@@ -162,7 +161,7 @@ def sign_bytes_mldsa(canonical: bytes) -> str:
     from . import sign as _mldsa_sign
 
     ensure_global_mldsa_key()
-    sk = _ks.secret_from_pem(global_mldsa_secret_path().read_text(encoding="ascii"))
+    sk = _ks.secret_from_pem(read_secret(global_mldsa_secret_path()))
     sig_raw = _mldsa_sign.sign_bytes(sk, canonical, b"", secrets.token_bytes(32))
     return _ks.signature_to_pem(sig_raw)
 

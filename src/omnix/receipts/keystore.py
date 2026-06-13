@@ -130,5 +130,8 @@ def write_keypair_dir(out: Path) -> None:
     p_pub = out / "public.pem"
     p_sec = out / "secret.pem"
     p_pub.write_text(public_to_pem(pk), encoding="ascii")
-    p_sec.write_text(secret_to_pem(sk), encoding="ascii")
-    harden_permissions(p_sec)
+    # Encryption-at-rest (opt-in) for the secret; harden_permissions runs
+    # inside write_secret. Lazy import avoids a keystore<->secure_keyfile cycle.
+    from .secure_keyfile import write_secret
+
+    write_secret(p_sec, secret_to_pem(sk))

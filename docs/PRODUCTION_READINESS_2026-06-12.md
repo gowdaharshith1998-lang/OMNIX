@@ -89,10 +89,10 @@ ordering bug (now fixed, see F8), not a test artifact.
   (the languages with real call extraction) are now covered. Name-collision resolution (a short name
   defined in multiple files) picks the first global candidate — a documented limitation.
 
-### Medium / Low — still remaining
-- **Encryption-at-rest for private keys.** F26 restricts key-file *access* (owner-only on POSIX +
-  Windows), but the keys are still stored unencrypted. A passphrase- or OS-keychain-encrypted key
-  store is the remaining hardening step (a backend/UX decision).
+### Second remediation wave — also fixed (continued)
+| ID | Sev | Finding | Fix |
+|----|-----|---------|-----|
+| F30 | Medium | **Private keys stored unencrypted at rest** (F26 restricted *access*; the bytes were still plaintext). | New opt-in `secure_keyfile` layer (`OMNIX_KEY_ENCRYPTION=1`): secret PEMs are stored as an AES-256-GCM envelope whose KEK lives in the OS keychain (`keyring`), with transparent decrypt-on-load. Wired into every secret-key write/read (ML-DSA keystore, Ed25519 project keys, cutover key, provider vault). Default-off → zero change for dev/test/CI; no lock-out (plaintext+warn fallback when no keychain; a genuine envelope with a lost KEK raises loudly). 6 new tests incl. an encrypted-project-key end-to-end. |
 
 Full per-finding evidence (file:line) is preserved in the audit run output and can be regenerated.
 
