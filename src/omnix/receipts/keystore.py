@@ -7,10 +7,54 @@ PEM wrapping for OMNIX AXIOM ML-DSA-65 (raw FIPS-204 key/signature bytes).
 from __future__ import annotations
 
 import base64
+import getpass
 import os
+import subprocess
 from pathlib import Path
 
 from . import params as P
+
+
+def harden_permissions(path: Path | str) -> None:
+    """Restrict a secret file to its owner, cross-platform.
+
+    POSIX: ``chmod 0600``. On Windows ``os.chmod(.., 0o600)`` is effectively a
+    no-op (it only toggles the read-only bit), leaving private keys readable
+    by every account on the box. There we reset the ACL via ``icacls``.
+
+    The Windows sequence is lock-out-safe: we ADD an explicit full-control ACE
+    for the current user FIRST, and only break inheritance if that grant
+    succeeded — so a failed/garbled principal can never strip the owner's own
+    access. Any icacls failure leaves the (inherited) ACL untouched.
+    """
+    p = Path(path)
+    if os.name != "nt":
+        try:
+            os.chmod(p, 0o600)
+        except OSError:
+            pass
+        return
+    # Windows
+    try:
+        user = getpass.getuser()
+    except Exception:  # noqa: BLE001
+        user = os.environ.get("USERNAME", "")
+    if not user:
+        return
+    try:
+        granted = subprocess.run(
+            ["icacls", str(p), "/grant", f"{user}:(F)"],
+            capture_output=True, text=True, check=False,
+        )
+        if granted.returncode == 0:
+            # User now has an explicit ACE; safe to drop inherited ACEs.
+            subprocess.run(
+                ["icacls", str(p), "/inheritance:r"],
+                capture_output=True, text=True, check=False,
+            )
+    except (OSError, FileNotFoundError):
+        # icacls unavailable — leave inherited ACL rather than risk lockout.
+        pass
 
 PUB_PEM = "OMNIX-AXIOM ML-DSA-65 PUBLIC KEY"
 SEC_PEM = "OMNIX-AXIOM ML-DSA-65 SECRET KEY"
@@ -87,4 +131,4 @@ def write_keypair_dir(out: Path) -> None:
     p_sec = out / "secret.pem"
     p_pub.write_text(public_to_pem(pk), encoding="ascii")
     p_sec.write_text(secret_to_pem(sk), encoding="ascii")
-    os.chmod(p_sec, 0o600)
+    harden_permissions(p_sec)

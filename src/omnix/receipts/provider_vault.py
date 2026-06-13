@@ -18,6 +18,8 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from omnix.receipts.finding_keys import ensure_project_key, omnix_home, project_privkey_path
 from omnix.receipts.finding_receipt import compute_project_id
 
+from .keystore import harden_permissions
+
 Scope = Literal["global", "project"]
 
 _SALT = b"omnix-provider-vault-v1"
@@ -91,7 +93,7 @@ def _save_index(index: dict[str, KeyMetadata]) -> None:
     os.chmod(p.parent, 0o700)
     data = {"keys": [asdict(v) for v in sorted(index.values(), key=lambda k: k.id)]}
     p.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.chmod(p, 0o600)
+    harden_permissions(p)
 
 
 def _project_id_from_cwd() -> str:
@@ -116,7 +118,7 @@ def _private_key_path(project_id: str | None) -> Path:
                 encryption_algorithm=serialization.NoEncryption(),
             )
         )
-        os.chmod(path, 0o600)
+        harden_permissions(path)
     return path
 
 
@@ -206,7 +208,7 @@ def _write_file(path: Path, blob: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     os.chmod(path.parent, 0o700)
     path.write_text(blob, encoding="utf-8")
-    os.chmod(path, 0o600)
+    harden_permissions(path)
 
 
 def encrypt_key(

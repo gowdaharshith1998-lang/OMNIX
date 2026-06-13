@@ -18,6 +18,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 
 from .finding_receipt import FindingReceipt
+from .keystore import harden_permissions
 
 
 class InvalidFindingPublicKeyError(ValueError):
@@ -83,7 +84,7 @@ def ensure_project_key(project_root: Path) -> tuple[Path, Path, bool]:
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
     )
     priv_path.write_bytes(priv_pem)
-    os.chmod(priv_path, 0o600)
+    harden_permissions(priv_path)
     pub_path.write_bytes(pub_pem)
     return priv_path, pub_path, True
 

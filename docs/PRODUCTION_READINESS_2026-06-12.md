@@ -76,6 +76,7 @@ ordering bug (now fixed, see F8), not a test artifact.
 | F23 | Medium | **Prompt-injection posture undocumented:** the rebuild prompt interpolates raw source from the (untrusted) migrated repo with no acknowledgment. | Documented the explicit posture in `prompt_template.py`: source is untrusted and deliberately un-sanitized because the six-gate verification pipeline — not prompt hygiene — is the security boundary; injected instructions can at worst produce gate-failing output flagged for human review, never smuggle unverified code through. |
 | F24 | Medium | **Celery `start_pipeline` retries re-ran the entire non-idempotent pipeline** (re-ingest, re-emit receipts) on any failure or duplicate dispatch. | Added an idempotency guard (`store.job_already_finished`): the task skips when the persisted Job already reached a terminal success state (`complete`/`awaiting_cutover`). No-op when persistence is off (dev/test). 2 new tests. |
 | F25 | High | **Turboscan worker-slot collision:** the slot keyed both the in-flight hygiene registry (`book[slot]`) and the Hypothesis DB dir, but was `hash((relp, fn)) % workers` — so two distinct targets running concurrently clobbered each other's registry entry (misattributed filesystem-hygiene events; one cleared the slot mid-run of the other) and shared one Hypothesis example DB (corrupted/cross-contaminated replay), contradicting the documented worker-isolation. | Assign each target a **unique** slot (its index), making both the hygiene-registry correlation and the Hypothesis DB dir per-target and collision-free. Scan suite green. |
+| F26 | Medium | **Private key files were world-readable on Windows:** every key/secret write used `os.chmod(.., 0o600)`, which only toggles the read-only bit on Windows — leaving private keys readable by all accounts. | New cross-platform `keystore.harden_permissions()` (chmod on POSIX; lock-out-safe `icacls` owner-only ACL on Windows — additive grant first, then break inheritance) wired into all key/secret writes (ML-DSA keystore, Ed25519 project keys, provider vault). Verified owner-only on Windows with no lockout. NOTE: restricts *access*, not encryption-at-rest — a passphrase/OS-keychain-encrypted store remains follow-on. |
 
 ### High — still remaining
 - **Cross-file `CALLS` for non-resolver languages:** the F19 second pass covers Python and
@@ -93,8 +94,9 @@ ordering bug (now fixed, see F8), not a test artifact.
   the cost of ~50× larger signatures (3309 vs 64 bytes) — a product decision, not a bug.
 
 ### Medium / Low — still remaining
-- Private signing keys stored unencrypted, guarded only by `os.chmod(0o600)` — a no-op on Windows.
-  (Real encryption-at-rest / OS keychain integration is follow-on work.)
+- **Encryption-at-rest for private keys.** F26 restricts key-file *access* (owner-only on POSIX +
+  Windows), but the keys are still stored unencrypted. A passphrase- or OS-keychain-encrypted key
+  store is the remaining hardening step (a backend/UX decision).
 
 Full per-finding evidence (file:line) is preserved in the audit run output and can be regenerated.
 
