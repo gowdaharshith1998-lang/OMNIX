@@ -78,17 +78,15 @@ ordering bug (now fixed, see F8), not a test artifact.
 | F25 | High | **Turboscan worker-slot collision:** the slot keyed both the in-flight hygiene registry (`book[slot]`) and the Hypothesis DB dir, but was `hash((relp, fn)) % workers` — so two distinct targets running concurrently clobbered each other's registry entry (misattributed filesystem-hygiene events; one cleared the slot mid-run of the other) and shared one Hypothesis example DB (corrupted/cross-contaminated replay), contradicting the documented worker-isolation. | Assign each target a **unique** slot (its index), making both the hygiene-registry correlation and the Hypothesis DB dir per-target and collision-free. Scan suite green. |
 | F26 | Medium | **Private key files were world-readable on Windows:** every key/secret write used `os.chmod(.., 0o600)`, which only toggles the read-only bit on Windows — leaving private keys readable by all accounts. | New cross-platform `keystore.harden_permissions()` (chmod on POSIX; lock-out-safe `icacls` owner-only ACL on Windows — additive grant first, then break inheritance) wired into all key/secret writes (ML-DSA keystore, Ed25519 project keys, provider vault). Verified owner-only on Windows with no lockout. NOTE: restricts *access*, not encryption-at-rest — a passphrase/OS-keychain-encrypted store remains follow-on. |
 | F27 | High | **DM Merkle-chain `predecessor_hash` was signed but never validated** — a substituted or reordered D1/D2 manifest pair with individually-valid signatures was accepted; every unit fixture used a dummy predecessor (`"abcd"*16`/`"ab"*32`), so the chain was never exercised end-to-end. | Both the d3 and d4 consumers now enforce the canonical link: D2's `predecessor_hash` must equal D1's chain hash, `next_hash(d1.predecessor_hash, canonical(d1))` — the value every emitter already writes to its `.chainhash`. Fixtures across d3/d4 (unit + integration) updated to chain properly; new test asserts a tampered predecessor HALTs. Full DM suite (360) green. |
+| F28 | High | **Cross-file `CALLS` for Rust** were unresolved (F19 covered only Python/TS), and the Rust `scoped_identifier` resolver hardcoded the calling file (`rel::path::func`), producing phantom same-file targets for `module::func` calls. | Factored the Rust call-walk into a reusable pass + a store-reconstructed global Rust index, wired into `_resolve_cross_file_calls`; `_rust_call_target` resolves `path::to::func` by its tail segment against the global index (same-file preferred). Cross-file Rust calls (`main::main → lib::helper`) now link. New regression test. |
 
 ### High — still remaining
-- **Cross-file `CALLS` for non-resolver languages:** the F19 second pass covers Python and
-  TypeScript (the languages with name-resolving parsers). Rust/Go/Ruby/generic still resolve calls
-  only within a file; extending global resolution to them is follow-on work (their call extraction is
-  inline, with no clean pass1/pass2 seam to reuse). Name-collision resolution (a short name defined in
-  multiple other files) still picks the first global candidate — the pre-existing documented
-  limitation, now also reachable cross-file.
-- **Optional crypto upgrade:** per-finding/per-rebuild receipts remain Ed25519 (F21 corrected the
-  marketing to match). Upgrading them to ML-DSA-65 would make every per-item receipt post-quantum at
-  the cost of ~50× larger signatures (3309 vs 64 bytes) — a product decision, not a bug.
+- **Cross-file `CALLS` for Go/Ruby/other generic languages:** these route through
+  `_ingest_generic_ts_tree`, which emits only `DEFINES` edges — it extracts **no call sites at all**
+  (and uses unstable positional `fn_N` ids). Cross-file calls there require first adding per-language
+  call extraction + stable ids — a net-new parser feature, not a resolution fix. Python, TS, and Rust
+  (the languages with real call extraction) are now covered. Name-collision resolution (a short name
+  defined in multiple files) picks the first global candidate — a documented limitation.
 
 ### Medium / Low — still remaining
 - **Encryption-at-rest for private keys.** F26 restricts key-file *access* (owner-only on POSIX +

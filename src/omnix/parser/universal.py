@@ -239,6 +239,46 @@ def _ingest_rust(
             )
             store.add_edge(file_id, iid, "IMPORTS")
 
+    _rust_resolve_calls(store, rel, root, source, m, index)
+
+
+def _build_rust_call_index(store: _GraphSink) -> dict[str, list[tuple[str, str]]]:
+    """Reconstruct the Rust call index from the (merged) store's function/method
+    nodes, restricted to Rust files. Mirrors ``_reg_fn``'s key scheme so the
+    global cross-file pass resolves the same names as the per-file pass."""
+    rust_files = {
+        n.file_path
+        for n in store.iter_all_nodes()
+        if n.type == "file" and (n.metadata or {}).get("language") == "rust"
+    }
+    idx: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for n in store.iter_all_nodes():
+        if n.type not in ("function", "method"):
+            continue
+        fp = n.file_path or ""
+        if fp not in rust_files:
+            continue
+        name = n.name or ""
+        if "::" in name:  # method node "Type::method"
+            ttype, mname = name.rsplit("::", 1)
+            idx[mname].append((n.id, fp))
+            idx[f"{ttype}.{mname}"].append((n.id, fp))
+        else:
+            idx[name].append((n.id, fp))
+    return idx
+
+
+def _rust_resolve_calls(
+    store: _GraphSink,
+    rel: str,
+    root: Node,
+    source: bytes,
+    m: MergedHints,
+    index: dict[str, list[tuple[str, str]]],
+) -> None:
+    """Walk a Rust file's call sites and add CALLS edges resolved against
+    *index*. add_edge dedups, so re-running with a global index (cross-file
+    pass) only adds the edges the per-file pass could not resolve."""
     for n in _iter_nodes(root):
         if n.type not in m.all_call_node_types and n.type != "call_expression":
             continue
@@ -251,6 +291,22 @@ def _ingest_rust(
         if not tgt or tgt == caller:
             continue
         store.add_edge(caller, tgt, "CALLS", metadata=None)
+
+
+def _rust_resolve_calls_from_text(
+    store: _GraphSink,
+    rel: str,
+    text: str,
+    language: Language,
+    m: MergedHints,
+    index: dict[str, list[tuple[str, str]]],
+) -> None:
+    """Parse *text* and resolve its Rust calls against *index* (used by the
+    global cross-file pass, which only has the file path + text)."""
+    source = text.encode("utf-8")
+    p = get_shared_parser("rust", language)
+    root = parse_tree_cached("rust", rel, p, source).root_node
+    _rust_resolve_calls(store, rel, root, source, m, index)
 
 
 def _containing_function_id(
@@ -290,6 +346,17 @@ def _rust_call_target(
     fn0 = call.children[0]
     if fn0.type == "scoped_identifier":
         s = _text(source, fn0)
+        # Resolve `path::to::func` by its tail segment against the index
+        # (same-file preferred, then any file). This is what makes a
+        # cross-module Rust call link to the callee's real node instead of
+        # the old hardcoded same-file `rel::path::to::func` phantom id.
+        tail = s.split("::")[-1]
+        cands = index.get(tail)
+        if cands:
+            for nid, fp in cands:
+                if fp == rel:
+                    return nid
+            return cands[0][0]
         if "::" in s:
             return f"{rel}::{s}"
     if fn0.type == "field_expression":

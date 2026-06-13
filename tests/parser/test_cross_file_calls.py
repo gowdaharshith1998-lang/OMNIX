@@ -59,6 +59,32 @@ def test_python_cross_file_call_edge(tmp_path: Path, monkeypatch: pytest.MonkeyP
     ), f"expected app.main -> lib.helper, got {cross}"
 
 
+def test_rust_cross_file_call_edge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from omnix.parser.grammar_detect import try_load_language_for_grammar
+
+    if try_load_language_for_grammar("rust") is None:
+        pytest.skip("tree_sitter_rust not installed")
+    monkeypatch.setenv("OMNIX_INGEST_WORKERS", "1")
+    src = tmp_path / "proj"
+    src.mkdir()
+    (src / "lib.rs").write_text("pub fn helper(x: i32) -> i32 {\n    x + 1\n}\n", encoding="utf-8")
+    (src / "main.rs").write_text(
+        "fn main() {\n    let _ = helper(41);\n}\n", encoding="utf-8"
+    )
+    db = tmp_path / "omnix.db"
+    store = GraphStore(str(db))
+    ind.ingest_unified_codebase(str(src), store, force=True, parse_mode="hinted")
+    edges = _calls(store)
+    store.close()
+
+    cross = [
+        (s, t)
+        for (s, t, sf, df) in edges
+        if sf != df and s.startswith("main.rs::main") and t.startswith("lib.rs::helper")
+    ]
+    assert cross, f"expected main.rs::main -> lib.rs::helper, got {edges}"
+
+
 def test_within_file_call_still_resolves(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The global pass must not disturb correct same-file resolution."""
     monkeypatch.setenv("OMNIX_INGEST_WORKERS", "1")

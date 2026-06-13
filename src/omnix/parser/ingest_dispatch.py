@@ -774,9 +774,11 @@ def _resolve_cross_file_calls(store: GraphStore, root: Path) -> int:
     """
     from omnix.parser import python_parser as pp
     from omnix.parser import typescript_parser as tp
+    from omnix.parser import universal as up
 
     py_files: list[str] = []
     ts_files: list[tuple[str, bool]] = []
+    rust_files: list[str] = []
     for node in list(store.iter_all_nodes()):
         if node.type != "file":
             continue
@@ -788,6 +790,8 @@ def _resolve_cross_file_calls(store: GraphStore, root: Path) -> int:
             py_files.append(rel)
         elif lang in ("typescript", "tsx"):
             ts_files.append((rel, lang == "tsx"))
+        elif lang == "rust":
+            rust_files.append(rel)
 
     def _read(rel: str) -> str | None:
         try:
@@ -818,6 +822,25 @@ def _resolve_cross_file_calls(store: GraphStore, root: Path) -> int:
                 resolved += 1
             except (OSError, ValueError, RuntimeError):
                 _LOG.warning("cross-file call resolution failed for %s", rel)
+    if rust_files:
+        from omnix.parser.grammar_detect import try_load_language_for_grammar
+        from omnix.parser.hint_loader import load_merged_hints
+
+        rust_lang = try_load_language_for_grammar("rust")
+        if rust_lang is not None:
+            rust_idx = up._build_rust_call_index(store)  # type: ignore[attr-defined]
+            m_rust = load_merged_hints("rust", parse_mode="hinted")
+            for rel in rust_files:
+                text = _read(rel)
+                if text is None:
+                    continue
+                try:
+                    up._rust_resolve_calls_from_text(  # type: ignore[attr-defined]
+                        store, rel, text, rust_lang, m_rust, rust_idx
+                    )
+                    resolved += 1
+                except (OSError, ValueError, RuntimeError):
+                    _LOG.warning("cross-file call resolution failed for %s", rel)
     return resolved
 
 
