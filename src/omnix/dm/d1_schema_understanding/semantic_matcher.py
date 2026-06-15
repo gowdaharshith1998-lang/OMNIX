@@ -10,7 +10,7 @@ Pipeline:
        max sim < 0.60             → status="no_match"
        N candidates above 0.60   → "ambiguous" if top-2 spread is < 0.05
   4. For every legacy column emit at least one ColumnMapping — never silently
-     dropping any. Codex axiom: the property test below enforces this.
+     dropping any. Honesty invariant: the property test below enforces this.
 
 Configuration:
   ``OMNIX_DM_CONFIDENCE_THRESHOLD`` env var overrides the 0.85 default.
@@ -59,7 +59,7 @@ def match(
 ) -> Tuple[ColumnMapping, ...]:
     """Return one ColumnMapping per legacy column.
 
-    Contract (load-bearing for Codex honesty):
+    Contract (load-bearing for the honesty invariant):
       ``len(result) == len(legacy_ctx)`` — every legacy column appears in the
       output. The status field encodes whether the mapping is usable.
     """

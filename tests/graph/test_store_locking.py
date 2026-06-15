@@ -18,7 +18,7 @@ from omnix.graph.store import GraphStore
     reason=(
         "slice 15.3.7 GraphStore locking: GraphStore lacks .locked_connection() "
         "context manager. Test is the spec for slice 15.3.7 RLock-based "
-        "concurrent-write serialization. Tracked in TODOS.md P1. "
+        "concurrent-write serialization. Tracked as a known pre-M1 limitation. "
         "[Outside M1 finisher Phase 4-7 scope — separate slice-15.3.7 work stream.]"
     ),
 )
@@ -48,8 +48,8 @@ def test_sqlite_connection_raw_still_returns_connection(tmp_path: Path) -> None:
         "slice 15.3.7 GraphStore locking: GraphStore lacks the threading.RLock "
         "serialization needed for concurrent writes; raises "
         "sqlite3.InterfaceError under load. strict=False because behavior is "
-        "flaky (passes in isolation, fails under full suite). Tracked in "
-        "TODOS.md P1 slice-15.3.7-graph-store-locking. "
+        "flaky (passes in isolation, fails under full suite). Tracked as a "
+        "known pre-M1 limitation (slice-15.3.7-graph-store-locking). "
         "[Outside M1 finisher Phase 4-7 scope — separate slice-15.3.7 work stream. "
         "strict=False retained intentionally — flaky-under-load behavior predates "
         "M1 finisher and tightening it requires the slice 15.3.7 RLock landing.]"
@@ -78,7 +78,7 @@ def test_concurrent_writes_serialized(tmp_path: Path) -> None:
     reason=(
         "slice 15.3.7 GraphStore locking: depends on .locked_connection() ctx "
         "manager (same unbuilt feature as test_locked_connection_select). "
-        "Tracked in TODOS.md P1. "
+        "Tracked as a known pre-M1 limitation. "
         "[Outside M1 finisher Phase 4-7 scope — separate slice-15.3.7 work stream.]"
     ),
 )
@@ -98,7 +98,7 @@ def test_rlock_nested_locked_connection(tmp_path: Path) -> None:
     reason=(
         "slice 15.3.7 GraphStore locking: GraphStore lacks _lock attribute "
         "(threading.RLock instance). Test is the spec for slice 15.3.7's RLock "
-        "field on the store. Tracked in TODOS.md P1. "
+        "field on the store. Tracked as a known pre-M1 limitation. "
         "[Outside M1 finisher Phase 4-7 scope — separate slice-15.3.7 work stream.]"
     ),
 )

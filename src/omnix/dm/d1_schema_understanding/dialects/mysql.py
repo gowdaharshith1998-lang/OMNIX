@@ -2,7 +2,7 @@
 common helper module, but maps types and identifier quoting per MySQL semantics.
 
 Handles backtick-quoted identifiers, ENGINE=..., CHARACTER SET, COLLATE, and
-AUTO_INCREMENT. Surfaces ParseFailure on unbalanced bodies (Codex axiom).
+AUTO_INCREMENT. Surfaces ParseFailure on unbalanced bodies (honesty invariant).
 """
 
 from __future__ import annotations

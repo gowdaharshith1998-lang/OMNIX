@@ -1,1 +1,47 @@
-*.pdf binary
+# ===========================================================================
+# OMNIX — .gitattributes
+# Enforce LF line endings in the repository for all text, regardless of the
+# contributor's platform or core.autocrlf setting. Prevents CRLF/LF churn.
+# ===========================================================================
+
+# Default: detect text vs binary, store text with LF.
+* text=auto eol=lf
+
+# Source & config (explicit for clarity)
+*.py    text eol=lf
+*.pyi   text eol=lf
+*.js    text eol=lf
+*.jsx   text eol=lf
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.json  text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.toml  text eol=lf
+*.cfg   text eol=lf
+*.ini   text eol=lf
+*.sql   text eol=lf
+
+# Shell scripts must always be LF (they break with CRLF).
+*.sh    text eol=lf
+
+# Binary assets — never normalize.
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.jar   binary
+*.class binary
+*.zip   binary
+*.gz    binary
+*.db    binary
+
+# Generated files — collapse diffs and exclude from language stats.
+package-lock.json                                   linguist-generated=true
+src/omnix/studio/frontend/package-lock.json         linguist-generated=true

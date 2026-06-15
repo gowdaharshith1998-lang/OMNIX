@@ -133,7 +133,7 @@ def test_mfi_history_is_monotone_across_iterations():
 
 def test_transformer_spec_properties_failed_must_be_empty_for_success():
     """The schema validator MUST reject a 'success' payload with any failed
-    property — Codex honesty invariant."""
+    property — honesty invariant."""
     spec = TransformerSpec(
         column_mapping_key="t.x",
         python_source="def transform(v): return v",

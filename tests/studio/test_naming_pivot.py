@@ -1,4 +1,4 @@
-"""Naming pivot (slice-19): company-brain UI strings — file-level assertions per AUDIT / dispatch."""
+"""Naming pivot: company-brain UI strings — file-level assertions on the shipped UI copy."""
 
 from __future__ import annotations
 
@@ -94,27 +94,24 @@ def test_cli_docstring_knowledge_intelligence() -> None:
 
 
 def test_readme_locked_positioning_opening() -> None:
-    """README opens with the locked positioning (graph-native legacy modernization).
+    """README opens with the locked, mechanism-first positioning.
 
-    Tracks the positioning lock — PRs #35 (de0170b) + #36 (0b237b8) rewrote the README
-    to a mechanism-first, dev-tool voice and shipped 'graph-native pipeline' as the
-    opening positioning. The original test on commit 6ee9053 asserted
-    'graph-native platform' and 'verified behavioral equivalence' as a single phrase;
-    PRs #35/#36 split the value-prop into 'verified equivalence' (gate output) and
-    'behavioral equivalence' (gate 6). This test is updated to match the shipped
-    wording while preserving every other positioning assertion.
+    The README leads with graph-native legacy migration plus a cryptographically
+    signed receipt, and frames the claim as *verified equivalence with auditable
+    evidence* — explicitly not "provable" and not "100% accurate". This test locks
+    that positioning and guards against any return to the prior open-core
+    "company brain" / "code intelligence product" marketing.
     """
     t = _read("README.md")
-    # Positive: locked positioning is the opening sentence (PRs #35/#36 wording)
-    assert "graph-native pipeline for migrating legacy systems" in t
-    # Positive: the value-prop — both 'verified equivalence' and 'behavioral equivalence'
-    # must appear (the README threads them: gate 6 produces behavioral equivalence,
-    # which the verifier stack signs into 'verified equivalence with auditable evidence').
+    # Positive: the locked opening positioning.
+    assert "Graph-native legacy migration" in t
+    # Positive: the value-prop — both 'verified equivalence' (the signed gate
+    # output) and 'behavioral equivalence' (gate 6) must appear.
     assert "verified equivalence" in t
     assert "behavioral equivalence" in t
-    # Negative: prior marketing positionings must not return
+    # Negative: prior marketing positionings must not return.
     assert "open-core company brain" not in t
     assert "open-core code intelligence product" not in t
-    # Positive: the explicit no-overclaim disclaimer is part of the positioning
-    # lock — README §"How it works" must carry it.
-    assert 'Not "provable," not "100% accurate."' in t
+    # Positive: the explicit no-overclaim disclaimer is part of the lock.
+    assert 'not "provable,"' in t
+    assert '"100% accurate."' in t

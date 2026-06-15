@@ -49,7 +49,7 @@ def test_postgres_empty_ddl_returns_failure():
 def test_postgres_garbage_returns_failure():
     res = parse("this is not sql at all", "postgres")
     assert isinstance(res, ParseFailure)
-    # Codex honesty: we surface the gap rather than returning an empty SchemaSpec
+    # Honesty invariant: we surface the gap rather than returning an empty SchemaSpec
     assert "CREATE TABLE" in res.reason or "no" in res.reason.lower()
 
 

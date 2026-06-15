@@ -1,0 +1,24 @@
+# Code owners for OMNIX
+#
+# These rules auto-request review from the listed owners when matching paths
+# change. The last matching pattern takes precedence. See
+# https://docs.github.com/articles/about-code-owners for syntax.
+
+# Default owner for everything in the repo.
+*                               @gowdaharshith1998-lang
+
+# Security-sensitive surfaces — changes here always require code-owner review.
+/src/omnix/crypto/              @gowdaharshith1998-lang
+/src/omnix/receipts/            @gowdaharshith1998-lang
+/src/omnix/verify/              @gowdaharshith1998-lang
+/src/omnix/cloud/               @gowdaharshith1998-lang
+/services/github-app/           @gowdaharshith1998-lang
+/deploy/                        @gowdaharshith1998-lang
+/src/omnix/studio/frontend/     @gowdaharshith1998-lang
+
+# Project governance and policy.
+/SECURITY.md                    @gowdaharshith1998-lang
+/CODE_OF_CONDUCT.md             @gowdaharshith1998-lang
+/GOVERNANCE.md                  @gowdaharshith1998-lang
+/LICENSE                        @gowdaharshith1998-lang
+/.github/                       @gowdaharshith1998-lang

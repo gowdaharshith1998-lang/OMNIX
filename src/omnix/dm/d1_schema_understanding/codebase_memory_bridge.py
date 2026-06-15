@@ -51,7 +51,7 @@ def lookup_column_usage(
             table=table,
             column=column,
         )
-    except Exception as e:  # noqa: BLE001 — explicit surfacing per Codex axiom
+    except Exception as e:  # noqa: BLE001 — explicit surfacing per the honesty invariant
         return (), (f"codebase_memory query failed: {type(e).__name__}: {e}",)
 
     if raw is None:

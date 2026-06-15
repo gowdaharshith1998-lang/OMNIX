@@ -48,7 +48,7 @@ class DBConnection(Protocol):
 def _verify_read_only(conn: DBConnection, dialect: Dialect) -> None:
     """Issue the dialect-appropriate read-only sentinel query. On any sign of
     write privilege OR query failure we halt — silently treating an unknown
-    connection as read-only would violate the Codex axiom."""
+    connection as read-only would violate the honesty invariant."""
     cursor = conn.cursor()
     if dialect == "postgres":
         cursor.execute("SHOW transaction_read_only")
@@ -150,7 +150,7 @@ def _extract_column(
                 notes.append(
                     "empty table — semantic embedding will rely on metadata only"
                 )
-        except Exception as e:  # noqa: BLE001 — explicit surfacing per Codex axiom
+        except Exception as e:  # noqa: BLE001 — explicit surfacing per the honesty invariant
             notes.append(f"sampling failed: {type(e).__name__}: {e}")
     else:
         # Mongo: caller passes a Mongo-aware conn with a ``sample`` method.

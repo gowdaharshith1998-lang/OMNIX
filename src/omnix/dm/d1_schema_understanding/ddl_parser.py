@@ -2,7 +2,7 @@
 
 Per the EARS contract: when a DDL string is passed in we either return a
 fully-formed ``SchemaSpec`` or — explicitly — a ``ParseFailure`` record. We
-never silently swallow an unparseable statement; the Codex axiom requires
+never silently swallow an unparseable statement; the honesty invariant requires
 that unrecognised input surface as a first-class output.
 """
 
@@ -48,7 +48,7 @@ def parse(ddl: str, dialect: Dialect) -> Union[SchemaSpec, ParseFailure]:
         return ParseFailure(
             dialect=dialect, reason=f"invalid JSON: {e.msg}", location=f"line {e.lineno}"
         )
-    except Exception as e:  # noqa: BLE001 — explicit surfacing per Codex axiom
+    except Exception as e:  # noqa: BLE001 — explicit surfacing per the honesty invariant
         return ParseFailure(
             dialect=dialect,
             reason=f"{type(e).__name__}: {e}",
