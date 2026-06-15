@@ -45,6 +45,20 @@ class ParseError(RuntimeError):
 _PG_EPOCH = datetime.datetime(2000, 1, 1, tzinfo=datetime.timezone.utc)
 
 
+def _parse_pg_timestamptz(s: str) -> datetime.datetime:
+    """Parse a PostgreSQL ``timestamptz`` text value to a UTC-aware datetime.
+
+    PostgreSQL emits a whole-hour zone as a bare ``+HH`` / ``-HH`` offset
+    (e.g. ``2026-05-27 14:00:00+00``). ``datetime.fromisoformat`` only accepts
+    that bare-hour form on Python 3.11+, so pad it to ``+HH:00`` to parse
+    identically on Python 3.10+.
+    """
+    s = s.replace(" ", "T")
+    if len(s) >= 3 and s[-3] in "+-" and s[-2:].isdigit():
+        s += ":00"
+    return datetime.datetime.fromisoformat(s).astimezone(datetime.timezone.utc)
+
+
 # Curated PG type OIDs we map to native Python types. Anything else stays as
 # the raw text representation (which is what pgoutput sends with kind='t').
 _OID_DECODERS: Dict[int, Any] = {
@@ -59,9 +73,7 @@ _OID_DECODERS: Dict[int, Any] = {
     1043: str,               # varchar
     1042: str,               # bpchar
     1114: lambda s: datetime.datetime.fromisoformat(s.replace(" ", "T")),  # timestamp
-    1184: lambda s: datetime.datetime.fromisoformat(
-        s.replace(" ", "T")
-    ).astimezone(datetime.timezone.utc),  # timestamptz
+    1184: lambda s: _parse_pg_timestamptz(s),  # timestamptz
     1082: lambda s: datetime.date.fromisoformat(s),  # date
     17: lambda s: bytes.fromhex(s[2:]) if s.startswith("\\x") else s.encode(),  # bytea
 }

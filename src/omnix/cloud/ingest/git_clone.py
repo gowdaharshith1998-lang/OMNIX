@@ -24,6 +24,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,11 +51,16 @@ def git_executable() -> str:
 
 
 def _rmtree(path: Path) -> None:
-    def _onexc(func, target, _exc_info):
+    def _on_error(func, target, _exc):
         os.chmod(target, stat.S_IWRITE)
         func(target)
 
-    shutil.rmtree(path, onexc=_onexc)
+    # shutil.rmtree gained the `onexc` callback in Python 3.12 and deprecated
+    # `onerror`; both pass (func, path, exc) so a single handler works on 3.10+.
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_on_error)
+    else:
+        shutil.rmtree(path, onerror=_on_error)
 
 
 def _allowed_git_hosts() -> set[str]:
