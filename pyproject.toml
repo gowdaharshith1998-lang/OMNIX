@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,14 +8,13 @@ version = "0.6.1"
 description = "Graph-native legacy-code migration with cryptographically signed, post-quantum (ML-DSA-65) receipts"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "LicenseRef-OMNIX-Source-Available-Evaluation" }
+license = "LicenseRef-OMNIX-Source-Available-Evaluation"
 license-files = ["LICENSE"]
 authors = [{ name = "Harshith Gowda", email = "gowdaharshith1998@gmail.com" }]
 keywords = ["legacy-modernization", "code-migration", "program-graph", "post-quantum", "provenance"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: Other/Proprietary License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
