@@ -4,7 +4,7 @@ Heuristic graph quality score (0.0–1.0) for LLM fallback gating (Layer 3 uses 
 **v1 (legacy):** :func:`compute_score` uses one language-agnostic :class:`QualityInputs`
 formula (thresholds + line-density). Evolution receipts with ``schema_version`` 1 or
 2 used this; schema **3** sets ``quality_formula_version`` to 1 (legacy) or
-2 (per-grammar) (see ``NOTES.md`` / Phase 3).
+2 (per-grammar) (see ``docs/PHASES.md``).
 
 **v2:** :func:`compute_score_v2` consults ``src/omnix/parser/quality_profiles/``; when no
 profile match exists, :func:`load_profile` falls back to ``generic.json``; if that

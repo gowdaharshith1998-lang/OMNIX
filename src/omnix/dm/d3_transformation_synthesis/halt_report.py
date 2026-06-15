@@ -5,7 +5,7 @@ a given ColumnMapping. The receipt captures every failing MFI, the latest
 attempted Python source, the last critique, and (if applicable) the
 SecurityViolation that triggered the halt.
 
-Codex honesty: PR B NEVER silently substitutes an identity transformer when
+Honesty invariant: synthesis NEVER silently substitutes an identity transformer when
 synthesis halts. The halt is a first-class signed receipt the operator must
 adjudicate.
 """

@@ -8,7 +8,7 @@ COMMENT ON. This is robust enough for the dialect surfaces Petclinic exercises
 (the PR A acceptance corpus) and surfaces ParseFailure rather than swallowing
 unknown statements — see ``omnix.dm._types.ParseFailure``.
 
-Honest gap (Codex axiom): rare PG extensions (partitions, custom operators,
+Honest gap (honesty invariant): rare PG extensions (partitions, custom operators,
 GENERATED AS / GENERATED IDENTITY clauses) are tolerated but the resulting
 ``ColumnSpec.dialect_specific`` will flag ``flag_for_d3: True``.
 """

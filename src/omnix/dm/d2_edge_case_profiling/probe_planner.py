@@ -227,7 +227,7 @@ def plan(
         if len(scheduled) >= max_iterations * len(PROBE_CATEGORIES):
             break
 
-    # Codex honesty invariant: every mapping is either probed or explicitly excluded
+    # Honesty invariant: every mapping is either probed or explicitly excluded
     probed_pairs = {(r.legacy_table, r.legacy_column) for r in scheduled}
     excluded_pairs = {(t, c) for (t, c, _) in excluded}
     for m in mappings:

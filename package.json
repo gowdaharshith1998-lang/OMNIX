@@ -2,6 +2,16 @@
   "name": "omnix-vault",
   "type": "module",
   "private": true,
+  "description": "Browser-side provider-key vault for OMNIX (IndexedDB-backed credential storage with WebCrypto encryption).",
+  "license": "LicenseRef-OMNIX-Source-Available-Evaluation",
+  "author": "Harshith Gowda",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gowdaharshith1998-lang/OMNIX.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest tests/vault"

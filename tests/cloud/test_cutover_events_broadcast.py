@@ -420,7 +420,12 @@ def test_sse_endpoint_is_mounted_at_v1_cutover_events():
     above; this just proves the route wiring.
     """
     app, bus, controller = _build_app_with_isolated_state()
-    paths = {r.path for r in app.routes if hasattr(r, "path")}
+    # Resolve the route table via the OpenAPI schema, which flattens included
+    # routers regardless of FastAPI's internal representation. (FastAPI 0.137
+    # nests included routes under an _IncludedRouter object instead of copying
+    # them into app.routes, so iterating app.routes directly no longer sees
+    # them — the routes themselves still serve correctly.)
+    paths = set(app.openapi()["paths"].keys())
     assert "/v1/cutover/events" in paths, (
         f"SSE route /v1/cutover/events not registered. Routes: {paths!r}"
     )

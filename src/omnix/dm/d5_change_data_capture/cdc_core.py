@@ -19,7 +19,7 @@ from typing import Any, Callable, Dict, Iterable, Protocol
 
 class UnsupportedCDCDialect(RuntimeError):
     """Raised when ``get_adapter`` is called with a dialect the registry does
-    not know about — Codex honesty (never silently return a no-op adapter)."""
+    not know about — fail honest (never silently return a no-op adapter)."""
 
 
 class NotYetImplementedInPRC(NotImplementedError):

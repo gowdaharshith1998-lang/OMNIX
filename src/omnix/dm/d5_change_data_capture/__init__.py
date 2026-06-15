@@ -7,7 +7,7 @@ replication (``pgoutput`` plugin), replays each event through the same
 signed ``CutoverProposal`` when statistical parity is sustained.
 
 The Oracle (LogMiner) and MySQL (binlog) adapters are explicitly stubbed
-with ``NotYetImplementedInPRC`` and deferred to PR D — Codex honesty.
+with ``NotYetImplementedInPRC`` and deferred to PR D — never a silent no-op.
 """
 
 from __future__ import annotations

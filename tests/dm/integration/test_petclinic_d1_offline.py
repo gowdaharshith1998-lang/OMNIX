@@ -55,7 +55,7 @@ def test_oracle_pg_d1_to_d2_offline(tmp_path):
     assert len(legacy_ctx) > 0 and len(target_ctx) > 0
 
     mappings = semantic_matcher.match(legacy_ctx, target_ctx)
-    # Every legacy column appears in output (Codex invariant)
+    # Every legacy column appears in output (honesty invariant)
     assert len(mappings) == len(legacy_ctx)
 
     pk, sk = ml_dsa_65.keypair()

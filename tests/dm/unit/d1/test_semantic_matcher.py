@@ -81,7 +81,7 @@ def test_perfect_match_is_ok(monkeypatch):
 
 
 def test_no_legacy_column_dropped(monkeypatch):
-    """Codex honesty invariant: every legacy column must appear in the output."""
+    """Honesty invariant: every legacy column must appear in the output."""
     legacy = tuple(_ctx(f"col{i}", table="L") for i in range(20))
     target = (_ctx("totally_unrelated", table="T"),)
     _force_embed_backend(

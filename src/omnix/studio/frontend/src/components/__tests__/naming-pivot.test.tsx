@@ -1,5 +1,5 @@
 /**
- * Mirrors tests/studio/test_naming_pivot.py — company-brain UI strings (slice-19).
+ * Mirrors tests/studio/test_naming_pivot.py — company-brain UI strings.
  * File-level assertions only (no new test dependencies).
  */
 import { describe, expect, it } from 'vitest';
@@ -15,7 +15,7 @@ const repoRoot = join(frontendSrc, '..', '..', '..', '..', '..');
 const readFE = (relFromSrc: string) => readFileSync(join(frontendSrc, relFromSrc), 'utf-8');
 const readRoot = (rel: string) => readFileSync(join(repoRoot, rel), 'utf-8');
 
-describe('naming pivot (slice-19)', () => {
+describe('naming pivot', () => {
   it('XRayHead — BRAIN, not X-RAY', () => {
     const t = readFE('components/XRayHead.tsx');
     expect(t).toContain('BRAIN');
@@ -94,24 +94,24 @@ describe('naming pivot (slice-19)', () => {
     expect(t).not.toContain('code intelligence and AXIOM provenance');
   });
 
-  it('README opens with locked positioning (graph-native legacy modernization)', () => {
-    // 6ee9053 dropped the prior 'open-core company brain / code intelligence
-    // product' marketing. PRs #35/#36 then moved to a mechanism-first, dev-tool
-    // voice: 'graph-native pipeline' as the opener, and the value-prop split
-    // into 'verified equivalence' (gate output) + 'behavioral equivalence'
-    // (gate 6). This guards that current positioning + the no-overclaim
-    // disclaimer — kept in lockstep with tests/studio/test_naming_pivot.py.
+  it('README opens with locked positioning (graph-native legacy migration)', () => {
+    // The README leads with graph-native legacy migration + a signed receipt,
+    // and frames the claim as 'verified equivalence with auditable evidence' —
+    // explicitly not 'provable' and not '100% accurate'. This guards that
+    // positioning and the no-overclaim disclaimer, in lockstep with
+    // tests/studio/test_naming_pivot.py.
     const t = readRoot('README.md');
-    // Positive: current opener
-    expect(t).toContain('graph-native pipeline for migrating legacy systems');
-    // Positive: the value-prop, as the dev-tool voice splits it
+    // Positive: the locked opening positioning.
+    expect(t).toContain('Graph-native legacy migration');
+    // Positive: the value-prop — verified equivalence (signed gate output) and
+    // behavioral equivalence (gate 6).
     expect(t).toContain('verified equivalence');
     expect(t).toContain('behavioral equivalence');
-    // Negative: prior marketing positionings must not return
+    // Negative: prior marketing positionings must not return.
     expect(t).not.toContain('open-core company brain');
     expect(t).not.toContain('open-core code intelligence product');
-    // Positive: the explicit no-overclaim disclaimer is part of the lock
-    // (PR #63 reworded it; kept in lockstep with tests/studio/test_naming_pivot.py)
-    expect(t).toContain('Not "provable," not "100% accurate."');
+    // Positive: the explicit no-overclaim disclaimer is part of the lock.
+    expect(t).toContain('not "provable,"');
+    expect(t).toContain('"100% accurate."');
   });
 });

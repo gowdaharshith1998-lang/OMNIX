@@ -1,6 +1,6 @@
-"""Regression: forkserver env cleanup on hygiene toggle (codex adversarial).
+"""Regression: forkserver env cleanup on hygiene toggle (adversarial review).
 
-Two findings from the codex adversarial review of phase C:
+Two findings from the adversarial review of phase C:
   * HIGH — `_run_verify_limited` set hygiene env keys via `subprocess_env_overrides`
     but never cleared stale ones. On Python 3.14 forkserver, a worker can hold
     an env snapshot from a prior hygiene-enabled scan; running a hygiene-disabled
@@ -89,7 +89,7 @@ def test_run_verify_limited_toggle_clears_stale_hygiene_env(
     """
     monkeypatch.setattr(subprocess, "Popen", _FakePopen)
     # Pretend a prior call already polluted the parent's os.environ — exactly
-    # the forkserver-stale shape codex flagged.
+    # the forkserver-stale shape the adversarial review flagged.
     for k in _HYGIENE_KEYS:
         monkeypatch.setenv(k, f"stale-{k}")
 
@@ -122,7 +122,7 @@ def test_run_verify_limited_toggle_clears_stale_hygiene_env(
     for k in _HYGIENE_KEYS:
         assert k not in second_env, (
             f"stale {k}={second_env.get(k)!r} leaked into hygiene-disabled scan "
-            f"(forkserver staleness regression — see codex adversarial finding)"
+            f"(forkserver staleness regression — see adversarial-review finding)"
         )
 
 
@@ -131,7 +131,7 @@ def test_child_verify_applies_overrides_and_clears_stale(
 ) -> None:
     """`_child_verify` (Hypothesis fallback path) mirrors `_run_verify_limited`.
 
-    Codex MEDIUM finding: the fallback path dropped `subprocess_env_overrides`
+    Adversarial-review (MEDIUM) finding: the fallback path dropped `subprocess_env_overrides`
     entirely, reintroducing the staleness bug. Fix: apply the same override +
     pop-stale logic on os.environ inside the child.
     """
@@ -163,7 +163,7 @@ def test_child_verify_applies_overrides_and_clears_stale(
     for k in _HYGIENE_KEYS:
         assert k not in os.environ, (
             f"stale {k} survived _child_verify with hygiene disabled "
-            f"(Hypothesis-fallback override regression — see codex adversarial finding)"
+            f"(Hypothesis-fallback override regression — see adversarial-review finding)"
         )
 
 

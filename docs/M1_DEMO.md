@@ -90,12 +90,12 @@ omnix axiom keygen --project .
 
 ### Drive the demo
 
-The repo ships `docs/m1_demo_rehearsal.sh` which drives the full flow
+The repo ships `scripts/m1_demo_rehearsal.sh` which drives the full flow
 end-to-end against a clean tmp workspace. Run it directly to see the
 output without recording:
 
 ```bash
-bash docs/m1_demo_rehearsal.sh
+bash scripts/m1_demo_rehearsal.sh
 ```
 
 The script:
@@ -120,12 +120,12 @@ requires a single live take + a human watching to redo bad takes:
 sudo dnf install asciinema    # or: brew install asciinema
 
 # Rehearse off-camera until you can hit the flow cleanly
-bash docs/m1_demo_rehearsal.sh
+bash scripts/m1_demo_rehearsal.sh
 
 # When ready, record:
 asciinema rec docs/m1_demo.cast \
     --idle-time-limit 2 \
-    --command "bash docs/m1_demo_rehearsal.sh"
+    --command "bash scripts/m1_demo_rehearsal.sh"
 ```
 
 Recording constraints:

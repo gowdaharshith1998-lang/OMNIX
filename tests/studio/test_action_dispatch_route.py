@@ -18,7 +18,7 @@ pytestmark = pytest.mark.xfail(
         "slice 15.3.7 action-dispatch backend: omnix.studio.server lacks the "
         "/action/dispatch route and the get_provider_client symbol that these "
         "tests monkeypatch. Whole module marked xfail-strict until slice 15.3.7 "
-        "lands the backend. Tracked in TODOS.md P1. "
+        "lands the backend. Tracked as a known pre-M1 limitation. "
         "[Outside M1 finisher Phase 4-7 scope — separate slice-15.3.7 work stream.]"
     ),
 )

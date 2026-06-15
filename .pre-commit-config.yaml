@@ -1,0 +1,27 @@
+# Pre-commit hooks for OMNIX.
+# Install once with: pre-commit install
+# Run against everything with: pre-commit run --all-files
+#
+# Note: mypy is intentionally NOT wired here — it needs the full project
+# environment (installed dependencies + stubs) to type-check correctly, so it
+# runs in CI (see .github/workflows/ci.yml) rather than as a pre-commit hook.
+
+repos:
+  # Ruff — lint and format. Configuration (line-length = 100, target-version,
+  # lint select/ignore rules) is sourced from pyproject.toml's [tool.ruff].
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+
+  # Standard hygiene hooks.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: check-added-large-files

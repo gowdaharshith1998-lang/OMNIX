@@ -409,7 +409,7 @@ def _child_verify(
         os.environ["OMNIX_FS_HYGIENE_DELEGATED"] = "1"
     # Mirror _run_verify_limited's subprocess_env_overrides handling so the
     # Hypothesis-import fallback path doesn't drop the override and
-    # reintroduce the forkserver-stale-env bug (codex adversarial finding).
+    # reintroduce the forkserver-stale-env bug (adversarial-review finding).
     sub_overrides = run_args.get("subprocess_env_overrides") or {}
     if isinstance(sub_overrides, dict):
         if "OMNIX_FS_HYGIENE_ENABLED" not in sub_overrides:

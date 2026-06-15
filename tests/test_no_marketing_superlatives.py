@@ -23,17 +23,14 @@ _FORBIDDEN = (
 
 
 def _paths() -> list[Path]:
-    p: list[Path] = [REPO / "README.md", REPO / "NOTES.md"]
-    for i in p[:]:
-        if not i.is_file():
-            p.remove(i)
+    p: list[Path] = [REPO / "README.md"]
     if (REPO / "docs").is_dir():
         p.extend((REPO / "docs").rglob("*.md"))
     p.extend((REPO / "src").rglob("*.md"))
     return sorted({x for x in p if x.is_file()})
 
 
-def test_readme_and_notes_avoid_unprovable_superlatives() -> None:
+def test_docs_avoid_unprovable_superlatives() -> None:
     bad: list[str] = []
     for f in _paths():
         t = f.read_text(encoding="utf-8", errors="replace")

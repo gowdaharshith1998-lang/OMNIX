@@ -1,20 +1,20 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "omnix"
 version = "0.6.1"
-description = "Code intelligence platform with AXIOM ML-DSA-65 provenance"
+description = "Graph-native legacy-code migration with cryptographically signed, post-quantum (ML-DSA-65) receipts"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "LicenseRef-OMNIX-Source-Available-Evaluation" }
-authors = [{ name = "Harshith Gowda" }]
+license = "LicenseRef-OMNIX-Source-Available-Evaluation"
+license-files = ["LICENSE"]
+authors = [{ name = "Harshith Gowda", email = "gowdaharshith1998@gmail.com" }]
 keywords = ["legacy-modernization", "code-migration", "program-graph", "post-quantum", "provenance"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: Other/Proprietary License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
@@ -50,7 +50,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "httpx>=0.27", "moto[s3]>=5.0", "ruff", "mypy", "pycryptodome>=3.20", "aiosqlite>=0.20"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-cov>=5.0", "httpx>=0.27", "moto[s3]>=5.0", "ruff", "mypy", "pycryptodome>=3.20", "aiosqlite>=0.20"]
 cloud = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -83,6 +83,13 @@ helm = []
 
 [project.scripts]
 omnix = "omnix.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/gowdaharshith1998-lang/OMNIX"
+Repository = "https://github.com/gowdaharshith1998-lang/OMNIX"
+Issues = "https://github.com/gowdaharshith1998-lang/OMNIX/issues"
+Changelog = "https://github.com/gowdaharshith1998-lang/OMNIX/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/gowdaharshith1998-lang/OMNIX/tree/main/docs"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -164,3 +171,10 @@ module = [
     "omnix.verify.runners.*",
 ]
 ignore_errors = true
+
+[tool.coverage.run]
+source = ["src/omnix"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true

@@ -1,6 +1,6 @@
 """Hypothesis-based property tests for D1 mapping invariants.
 
-The central invariant (Codex axiom): no legacy column may be silently dropped
+The central invariant: no legacy column may be silently dropped
 from the matcher's output. ``len(result) == len(legacy_ctx)`` for ALL inputs.
 """
 
