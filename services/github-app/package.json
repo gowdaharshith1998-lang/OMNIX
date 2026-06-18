@@ -15,7 +15,7 @@
   "dependencies": {
     "@octokit/auth-app": "^7.1.0",
     "@octokit/rest": "^21.0.0",
-    "@octokit/webhooks": "^13.3.0",
+    "@octokit/webhooks": "^14.2.0",
     "dotenv": "^16.4.5",
     "fastify": "^4.27.0",
     "pino": "^9.4.0",
